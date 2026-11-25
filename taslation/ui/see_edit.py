@@ -15,7 +15,8 @@
   the original (whose words the right pane's block shows), the boxes chosen and the one in the editor are outlined
   too. `tick` acts on what the reader did there (`act`): a click opens the region editor beside the box
   (`open_editor`, `editor_place`: alone, on the viewer's monitor, taking the keys; the foreground back to the viewer
-  once it closes), Shift+click chooses several (`SelectionMixin._toggle_chosen`), a drag moves the box (those chosen
+  once it closes; following its page taken again at another size of the viewer's window, and beside the box again
+  should it now lie over it, `editor_beside`), Shift+click chooses several (`SelectionMixin._toggle_chosen`), a drag moves the box (those chosen
   with it: `_move_regions`), a drag on a corner resizes it (`_move_region`), a click on its plate types its place in
   the reading order (`PlaceEntry`: the region kept on its own page of a spread, the order made again, the lines
   whose context changed translated again, as every tool's new order is; a drag from the plate moves the box); a drag on the empty ground draws a region to add, a click there drops a choice of several; while
@@ -458,9 +459,10 @@ class PlaceEntry:
         entry.bind("<FocusOut>", self._focus_out)
         self.hwnd = int(entry.winfo_id())  # (the entry's own window: what the developer tools post their keys to)
         top.update_idletasks()
-        width, height = top.winfo_reqwidth(), top.winfo_reqheight()
-        x = (at[0] + at[2]) // 2 - width // 2
-        y = (at[1] + at[3]) // 2 - height // 2
+        from .layout import work_area
+
+        middle = ((at[0] + at[2]) // 2, (at[1] + at[3]) // 2)
+        x, y = entry_spot(at, (top.winfo_reqwidth(), top.winfo_reqheight()), work_area(app, *middle))
         top.wm_geometry(f"+{int(x)}+{int(y)}")
         seethrough.asked(app)
         top.deiconify()
@@ -519,6 +521,16 @@ class PlaceEntry:
             self.top.destroy()
         except Exception:  # noqa: BLE001 - (the window going)
             pass
+
+
+def entry_spot(plate: tuple[int, int, int, int], size: tuple[int, int], area: tuple[int, int, int, int]
+               ) -> tuple[int, int]:
+    """The top left of a place entry of *size* (it has no frame): centred on the number plate's screen rectangle
+    *plate*, moved as needed to lie on *area* (the work area of the monitor the plate is on)."""
+    width, height = int(size[0]), int(size[1])
+    x = (plate[0] + plate[2]) // 2 - width // 2
+    y = (plate[1] + plate[3]) // 2 - height // 2
+    return max(area[0], min(int(x), area[2] - width)), max(area[1], min(int(y), area[3] - height))
 
 
 PLACE_FOCUS_S = 1.5  # a place entry that never got the keys in this long goes (the viewer kept them)
@@ -591,19 +603,48 @@ def editor_place(app: Any, region: Any) -> Callable[[int, int], tuple[int, int]]
     def place(width: int, height: int) -> tuple[int, int]:
         from .layout import frame_extents, work_area
 
-        side, title = frame_extents()
+        middle = ((left + right) // 2, (top + bottom) // 2)
+        side, title = frame_extents(middle)  # (its frame as the box's monitor draws it)
         outer_w, outer_h = width + 2 * side, height + title + side
-        area = work_area(app, (left + right) // 2, (top + bottom) // 2)
+        area = work_area(app, *middle)
         if right + gap + outer_w <= area[2]:
             x = right + gap
         elif left - gap - outer_w >= area[0]:
             x = left - gap - outer_w
         else:
-            x = max(area[0], min(area[2] - outer_w, right + gap))
+            x = right + gap
+        x = max(area[0], min(area[2] - outer_w, x))  # (a box partly off the screen: the editor on it all the same)
         y = max(area[1], min(area[3] - outer_h, top))
         return int(x), int(y)
 
     return place
+
+
+def editor_beside(app: Any, editor: Any, region: Any) -> bool:
+    """The open editor *editor* beside *region* again (`editor_place`) where it now lies over the region's box on the
+    screen - its page taken again at another size of the viewer's window (`TranslatorMixin._carry_editor`) -; left
+    where it is otherwise, as a dialog the reader works in is. True when it was moved."""
+    over = getattr(app, "_see_through", None)
+    origin = over.client_origin() if over is not None else None
+    place = editor_place(app, region)
+    if origin is None or place is None:
+        return False
+    box = tuple(int(v) for v in region.bbox)
+    screen_box = (origin[0] + box[0], origin[1] + box[1], origin[0] + box[2], origin[1] + box[3])
+    try:
+        editor.update_idletasks()
+        x, y = int(editor.winfo_rootx()), int(editor.winfo_rooty())
+        width, height = int(editor.winfo_width()), int(editor.winfo_height())
+    except Exception:  # noqa: BLE001 - (a dialog going)
+        return False
+    if not seethrough._meets((x, y, x + width, y + height), screen_box):
+        return False
+    to = place(width, height)
+    try:
+        editor.geometry(f"+{int(to[0])}+{int(to[1])}")
+    except Exception:  # noqa: BLE001 - (a dialog going)
+        return False
+    return True
 
 
 def set_bare(app: Any, region: Any, shown: bool) -> None:

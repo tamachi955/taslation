@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from taslation import viewerparts
+from taslation import capture, viewerparts
 from taslation.capture import WindowInfo
 from taslation.ui import constants, layout
 from taslation.ui import see_menu as sm
@@ -174,6 +174,7 @@ def test_no_chooser_for_a_viewer_named_with_window(hidden_root, keys):
 def test_the_chooser_goes_over_the_window_preselected_or_the_primary_monitor(hidden_root, keys, monkeypatch):
     _remember(READER)
     monkeypatch.setattr(layout, "monitor_at", lambda x, y: (0, 0, 1920, 1080) if 0 <= x < 1920 else None)
+    monkeypatch.setattr(capture, "window_exists", lambda hwnd: False)  # (made-up handles: no window's place read)
     app = FakeApp(hidden_root, [NOTEPAD, READER])
     dialog = sm.open_viewer(app)
     assert dialog._over_preselected() == (700, 500)
@@ -184,6 +185,24 @@ def test_the_chooser_goes_over_the_window_preselected_or_the_primary_monitor(hid
     app = FakeApp(hidden_root, [gone])  # (minimised: on no monitor)
     dialog = sm.open_viewer(app)
     assert dialog.box.current() == 0 and dialog._over_preselected() is None
+    dialog.destroy()
+
+
+def test_the_chooser_goes_where_the_window_is_now_not_where_it_was_listed(hidden_root, keys, monkeypatch):
+    """(the list keeps a window's place from when it was first listed while its windows and titles stay the same:
+    a viewer moved to another monitor since has the chooser over it there)"""
+    _remember(READER)
+    monitors = {0: (0, 0, 1920, 1080), 1: (1920, 0, 3840, 1080)}
+    monkeypatch.setattr(layout, "monitor_at", lambda x, y: monitors.get(x // 1920) if 0 <= x < 3840 else None)
+    place = {"rect": (2020, 50, 3220, 950), "monitor": monitors[1]}  # (moved to the second)
+    monkeypatch.setattr(capture, "window_exists", lambda hwnd: hwnd == READER.hwnd)
+    monkeypatch.setattr(capture, "window_rect", lambda hwnd: place["rect"])
+    monkeypatch.setattr(layout, "monitor_rect", lambda hwnd: place["monitor"])
+    app = FakeApp(hidden_root, [NOTEPAD, READER])
+    dialog = sm.open_viewer(app)
+    assert dialog._over_preselected() == (2620, 500)
+    place.update(rect=(1020, 50, 2820, 950), monitor=monitors[0])  # (straddling, as much on each: Windows' choice)
+    assert dialog._over_preselected() == (1470, 500)  # (on that monitor, as the other dialogs: not on the edge)
     dialog.destroy()
 
 

@@ -333,6 +333,100 @@ def test_a_preview_ended_after_the_page_was_lettered_anew_leaves_the_new_page(ca
     assert result.image is lettered
 
 
+# ------------------------------------------------------------------ the editor's page taken again (a resize)
+def test_a_region_is_found_again_on_its_page_taken_again_at_another_size(cached, sample_page):
+    """The same page read from the cache at another size of the viewer's window: each region is the one at its
+    place in the reading order; another page, a translation that differs or fingerprints far apart give none."""
+    pipeline, result = cached
+    w, h = sample_page.size
+    again = pipeline.process(sample_page.resize((round(w * 0.8), round(h * 0.8))), complete=True)
+    a, b = editor_regions(result), editor_regions(again)
+    assert len(a) == len(b) and again.original.size != result.original.size
+    for i, region in enumerate(a):
+        assert translator.carried_region(result, again, region, 36) is b[i]
+    assert translator.carried_region(result, again, b[0], 36) is None  # (not one of the editor's page)
+    assert translator.carried_region(result, result, a[0], 36) is None
+    far = SimpleNamespace(regions=again.regions, fingerprints=["f" * len(p) for p in result.fingerprints],
+                          units=again.units)
+    assert translator.carried_region(result, far, a[0], 36) is None
+    old = b[0].translated_text
+    b[0].translated_text = old + " (changed)"  # (another line there: not its region)
+    assert translator.carried_region(result, again, a[0], 36) is None
+    assert translator.carried_region(result, again, a[1], 36) is b[1]
+    b[0].translated_text = old
+    # the page read again with a region fewer: the others are found all the same, at their places on the page
+    fewer = SimpleNamespace(regions=[r for r in again.regions if r is not b[0]], fingerprints=again.fingerprints,
+                            units=again.units)
+    assert translator.carried_region(result, fewer, a[0], 36) is None
+    assert all(translator.carried_region(result, fewer, a[i], 36) is b[i] for i in range(1, len(a)))
+    # without page units: the regions one by one, as many on both
+    plain = SimpleNamespace(regions=again.regions, fingerprints=[])
+    assert translator.carried_region(result, plain, a[1], 36) is b[1]
+    assert translator.carried_region(result, SimpleNamespace(regions=again.regions[:-1], fingerprints=[]), a[1],
+                                     36) is None
+
+
+class Carrying:
+    """The window's side of `_carry_editor`: the page on show, an open editor of another page result."""
+
+    _carry_editor = app_mod.App._carry_editor
+    _end_preview = app_mod.App._end_preview
+
+    def __init__(self, pipeline, result, settings):
+        self.pipeline, self.last_result, self.settings = pipeline, result, settings
+        self._chosen_region = None
+        self.chosen = []
+
+    def _choose(self, region):
+        self.chosen.append(region)
+        self._chosen_region = region
+
+    def _redisplay(self):
+        pass
+
+
+class OpenEditor:
+    def __init__(self, region, changed=False):
+        self.region, self._changed_now, self.previews = region, changed, 0
+
+    def winfo_exists(self):
+        return True
+
+    def changed(self):
+        return self._changed_now
+
+    def _changed(self):
+        self.previews += 1
+
+
+def test_the_open_editor_follows_its_page_taken_again_and_goes_beside_its_region(cached, sample_page, settings,
+                                                                                 monkeypatch):
+    from taslation.ui import see_edit, seethrough
+
+    pipeline, result = cached
+    w, h = sample_page.size
+    again = pipeline.process(sample_page.resize((round(w * 0.8), round(h * 0.8))), complete=True)
+    region = editor_regions(result)[1]
+    beside = []
+    monkeypatch.setattr(seethrough, "hidden", lambda app: True)
+    monkeypatch.setattr(see_edit, "editor_beside", lambda app, editor, r: beside.append(r) or True)
+    window = Carrying(pipeline, again, settings)
+    editor = OpenEditor(region, changed=True)
+    old_preview = LivePreview(result, region)
+    window._editor, window._editor_held = editor, translator.EditorPage(result, region, old_preview)
+    assert window._carry_editor() is True
+    held, target = window._editor_held, editor_regions(again)[1]
+    assert held.result is again and held.region is target and editor.region is target
+    assert held.preview is not old_preview and held.preview.result is again and not old_preview.open
+    assert window.chosen == [target] and beside == [target] and editor.previews == 1  # (its edit shown there)
+    assert window._carry_editor() is False  # (the page on show is its own now)
+    window.last_result = SimpleNamespace(regions=[], fingerprints=[])  # another page: the editor keeps its own
+    assert window._carry_editor() is False and held.result is again
+    window.last_result = result
+    editor.region = editor_regions(result)[0]  # (an editor of another region by now: not this one's)
+    assert window._carry_editor() is False
+
+
 def test_every_new_line_of_the_editor_is_in_every_language():
     keys = [*review.NOT_READ.values(), review.READING, review.DISCARD, *review.STEP_WORDS.values(),
             *review.STEP_TIPS.values()]

@@ -10,7 +10,9 @@ windows, which `PrintWindow` could not do for a Chromium page even in front. Mea
 * a window that is resized may give no frame of its new size until it draws again: the package makes its frames anew
   at the new size and drops the one that showed it, and a browser drawing a still page gave none for 1.1-1.25 s; a new
   session's first frame is the window as it is, 48-61 ms after its start (a browser, measured), so a frame of another
-  size than the window's starts the session over (`restart`), once for every size;
+  size than the window's starts the session over (`restart`), once for every size - and once more for a size it had
+  before, once a frame has fitted another size meanwhile (`fitted`: a window restored from maximised to the size it was
+  given before);
 * the package takes a window by handle, so windows that share a title do not matter, and a title that changes page by
   page does not touch a session.
 
@@ -264,6 +266,16 @@ def restart(hwnd: int, size: tuple[int, int]) -> bool:
         _session = _Session(hwnd, session._api, session.seq)
         _restarted = (hwnd, size)
         return True
+
+
+def fitted(hwnd: int, size: tuple[int, int]) -> None:
+    """A frame of the window *hwnd* fitted its size *size* (width, height of its bounds): a size it was started over
+    for that is another one may be started over for again (`restart`) - the window had another size meanwhile, and
+    back at that size (restored from maximised, say) its session may give no frame of it until it draws again."""
+    global _restarted
+    with _lock:
+        if _restarted is not None and _restarted[0] == hwnd and _restarted[1] != tuple(size):
+            _restarted = None
 
 
 def count(hwnd: int) -> int | None:

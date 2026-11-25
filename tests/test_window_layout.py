@@ -260,7 +260,7 @@ def test_the_first_size_fits_the_work_area_and_sits_in_its_middle(monkeypatch):
                                    ((1920, 1080), (0, 0, 1920, 1032), "1180x920+362+26"),
                                    ((1024, 600), (0, 0, 1024, 560), "984x501+12+0")):
         monkeypatch.setattr(layout, "work_area", lambda _w, x=None, y=None, work=work: work)
-        monkeypatch.setattr(layout, "frame_extents", lambda: (8, 31))
+        monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
         widget = SimpleNamespace(winfo_screenwidth=lambda s=screen: s[0], winfo_screenheight=lambda s=screen: s[1])
         geometry = app_mod.initial_geometry(widget)
         assert geometry == expected, (screen, geometry)
@@ -312,7 +312,7 @@ class Dialog:
 def test_dialogs_open_over_their_parent_and_stay_on_its_monitor(monkeypatch):
     monkeypatch.setattr(layout, "work_area", lambda _w, x=None, y=None: (1920, 0, 3840, 1032) if x is None or x >= 1920
                         else (0, 0, 1920, 1032))
-    monkeypatch.setattr(layout, "frame_extents", lambda: (8, 31))
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
     parent = Dialog(root=(2000, 100, 1180, 900))
     d = Dialog()
     app_mod.place_window(d, parent)
@@ -353,7 +353,7 @@ def two_monitors(monkeypatch):
     monkeypatch.setattr(layout, "monitor_rect", lambda hwnd: state.viewer if hwnd == 500 else state.own)
     monkeypatch.setattr(layout, "work_area", lambda _w, x=None, y=None: (1920, 0, 3840, 1032) if x is not None and x >= 1920
                         else (0, 0, 1920, 1032))
-    monkeypatch.setattr(layout, "frame_extents", lambda: (8, 31))
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
     monkeypatch.setattr(layout, "foreground_window", lambda: 1)
     monkeypatch.setattr(layout, "foreground_owner", lambda front, viewer: state.front)
     monkeypatch.setattr(layout, "give_foreground", lambda hwnd: state.given.append(hwnd) or True)

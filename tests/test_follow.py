@@ -125,6 +125,25 @@ def test_the_callback_only_takes_notes():
     assert len(notes) == windows.MAX_NOTES and notes[-1] == ("front", windows.MAX_NOTES + 39)
 
 
+def test_each_move_of_the_viewer_wakes_the_lettering_at_once():
+    """(`on_moved`: the see-through window's `poke` - every step of a drag, not the one note for the run - so that
+    the lettering follows the viewer within a look, not 50 ms later; nothing else wakes it)"""
+    events = windows.WindowEvents()
+    events.viewer = 7
+    woken = []
+    events._note(None, windows.EVENT_OBJECT_LOCATIONCHANGE, 7, windows.OBJID_WINDOW, 0, 1, 1)  # (none set yet)
+    events.on_moved = lambda: woken.append(1)
+    for _step in range(5):
+        events._note(None, windows.EVENT_OBJECT_LOCATIONCHANGE, 7, windows.OBJID_WINDOW, 0, 1, 1)
+    events._note(None, windows.EVENT_OBJECT_LOCATIONCHANGE, 8, windows.OBJID_WINDOW, 0, 1, 1)  # another window
+    events._note(None, windows.EVENT_OBJECT_LOCATIONCHANGE, None, -9, 0, 1, 1)  # the pointer
+    events._note(None, windows.EVENT_OBJECT_NAMECHANGE, 7, 0, 0, 1, 1)  # a tab switch
+    events._note(None, windows.EVENT_SYSTEM_FOREGROUND, 7, 0, 0, 1, 1)
+    assert len(woken) == 5
+    events.on_moved = lambda: 1 / 0
+    events._note(None, windows.EVENT_OBJECT_LOCATIONCHANGE, 7, windows.OBJID_WINDOW, 0, 1, 1)  # (never raises)
+
+
 @windows_only
 def test_windows_notes_come_through_tks_own_event_loop(tk_root):
     events = capture.WindowEvents.start()

@@ -68,6 +68,24 @@ def test_a_move_to_another_monitor_scales_again_once(scaled_root, monkeypatch):
     assert watch.check() is False
 
 
+def test_hidden_off_every_monitor_the_scale_follows_the_viewer_s_monitor_not_the_window_s(scaled_root, monkeypatch):
+    """(see-through mode) The window's own monitor is the one nearest its place off every monitor: the scaling follows
+    the DPI its *source* says instead - the viewer's monitor's, `seethrough.dialog_dpi` - and a move of the window
+    itself changes nothing."""
+    monkeypatch.setattr(scaling, "window_dpi", lambda widget: 96)  # (the monitor nearest the hidden window: 100 %)
+    viewer = {"dpi": 192}
+    seen = []
+    watch = DpiWatch(scaled_root, lambda: 1.0, on_change=seen.append, source=lambda: viewer["dpi"])
+    assert watch.dpi == 192
+    viewer["dpi"] = 144  # (the viewer moved to a monitor at 150 %)
+    assert watch.check() is True and seen == [144]
+    assert float(scaled_root.tk.call("tk", "scaling")) == pytest.approx(144 / 72, rel=0.01)
+    assert watch.check() is False  # (the window's own Configure: the viewer's monitor as it was)
+    assert watch.rescale() == pytest.approx(144 / 72, rel=0.01)
+    viewer["dpi"] = None  # (nothing to go by): nothing changes
+    assert watch.check() is False
+
+
 def test_the_check_waits_for_the_moves_to_stop(scaled_root, monkeypatch):
     watch = DpiWatch(scaled_root, lambda: 1.0)
     planned = []
@@ -97,6 +115,7 @@ def test_the_setting_has_bounds():
 
 def test_the_window_applies_the_scale_before_it_measures_and_watches_the_monitor():
     source = (ROOT / "taslation" / "ui" / "app.py").read_text(encoding="utf-8")
-    assert source.index("apply_scale(self, settings.ui_scale)") < source.index("initial_geometry(self)")
-    assert "DpiWatch(self" in source
+    assert source.index("apply_scale(self, settings.ui_scale, seethrough.dialog_dpi(self))") < source.index(
+        "initial_geometry(self)")
+    assert "DpiWatch(self" in source and "source=(lambda: seethrough.dialog_dpi(self))" in source
     assert '"tk", "scaling", self.winfo_fpixels' not in source  # (the old one-off scaling, from the start's DPI)

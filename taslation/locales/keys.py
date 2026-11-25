@@ -27,7 +27,6 @@ KEYS: list[str] = [
     "Dropping the region...",
     "Area cleared: TASlation looks for the page in the viewer's window by itself again (the whole window when it finds none).",
     "Reading order cancelled.",
-    "Reading order saved for {n} region(s). The circular arrow beside Translate applies it.",
     "Page marked as skipped: nothing on it is translated.",
     "Page no longer skipped.",
     "Translate this page again? Its present translations are replaced.",

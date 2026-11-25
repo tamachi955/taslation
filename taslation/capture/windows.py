@@ -724,8 +724,8 @@ def _frame_bounds(hwnd: int) -> Rect:
 def _compositor_frame(hwnd: int, client_only: bool) -> Image.Image | None:
     """The window's latest frame from Windows.Graphics.Capture (`wgc`), cut to the client area. A frame of another size
     than the window's (it was resized, and the session may give no frame of the new size until the window draws
-    again) starts the session over, whose first frame is the window as it is (`wgc.restart`, once for every size).
-    None: no frame to be had."""
+    again) starts the session over, whose first frame is the window as it is (`wgc.restart`, once for every size, and
+    once more for a size it had before once a frame fitted another size: `wgc.fitted`). None: no frame to be had."""
     if user32.IsIconic(hwnd):
         return None
     frame = wgc.latest(hwnd)
@@ -736,8 +736,12 @@ def _compositor_frame(hwnd: int, client_only: bool) -> Image.Image | None:
     if box is None and wgc.restart(hwnd, (bounds[2] - bounds[0], bounds[3] - bounds[1])):
         frame = wgc.latest(hwnd)
         if frame is not None:
-            box = wgc.crop_box(frame.size, _frame_bounds(hwnd), _client_box(hwnd) if client_only else None)
-    return frame.image(box) if frame is not None and box is not None else None
+            bounds = _frame_bounds(hwnd)
+            box = wgc.crop_box(frame.size, bounds, _client_box(hwnd) if client_only else None)
+    if frame is None or box is None:
+        return None
+    wgc.fitted(hwnd, (bounds[2] - bounds[0], bounds[3] - bounds[1]))  # (back at a size started over for before: once more)
+    return frame.image(box)
 
 
 def _dib_to_array(mem_dc: int, bmp: int, width: int, height: int) -> np.ndarray:
@@ -1458,6 +1462,9 @@ class WindowEvents:
         self._hooks: list[int] = []
         self._viewer_hooks: list[int] = []
         self._proc = WINEVENTPROC(self._note) if IS_WINDOWS else None
+        # called at each of the watched window's moves and size changes, in the callback (no call into Tk: the
+        # see-through window's `poke`, which only wakes its own thread)
+        self.on_moved: Callable[[], None] | None = None
 
     @classmethod
     def start(cls) -> "WindowEvents | None":
@@ -1526,6 +1533,8 @@ class WindowEvents:
             elif (hwnd and int(hwnd) == self.viewer and id_object == OBJID_WINDOW and id_child == CHILDID_SELF
                   and event in VIEWER_NOTES):
                 self._add(VIEWER_NOTES[event], self.viewer)
+                if event == EVENT_OBJECT_LOCATIONCHANGE and self.on_moved is not None:
+                    self.on_moved()
         except Exception:  # noqa: BLE001 - a callback from Windows must never raise
             pass
 

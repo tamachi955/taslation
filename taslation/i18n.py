@@ -63,8 +63,6 @@ JA: dict[str, str] = {
     "Dropping the region...": "領域を削除中...",
     "Area cleared: TASlation looks for the page in the viewer's window by itself again (the whole window when it finds none).": "範囲を解除しました: TASlation がビューアのウィンドウ内のページを再び自動で探します（見つからなければウィンドウ全体を読みます）。",
     "Reading order cancelled.": "読み順の設定を取り消しました。",
-    "Reading order saved for {n} region(s). The circular arrow beside Translate applies it.":
-        "{n} 領域の読み順を保存しました。「翻訳」の横の丸い矢印で反映されます。",
     "Page marked as skipped: nothing on it is translated.": "このページを除外しました: 何も翻訳しません。",
     "Page no longer skipped.": "ページの除外を解除しました。",
     "Translate this page again? Its present translations are replaced.":

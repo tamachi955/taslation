@@ -9,7 +9,7 @@ part of a release.
                                 [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
                                 [--see-truth] [--see-indicators on|off] [--see-edit] [--editing]
-                                [--standin-size WxH]
+                                [--standin-size WxH] [--standin-monitor N] [--standin-maximised]
                                 [--standin-full-screen] [--no-viewer-s S] [--book-asked]
                                 [--start-behind cover|part|max|front|minimised] [--behind-s S] [--behind-before-s S]
                                 [--behind-end close|raise] [--chooser] [--standin-bars-held MS]
@@ -66,6 +66,16 @@ stand-in's own:
   f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page
   k  (by its name only: k5, k1, k2; k3 by its own name) pages flipped past at a pace, then read back
   h  (by its name only, with --start-behind) two turns once the stand-in, out of sight at the start, is back
+  m  (by its name only: m0-m4) the stand-in's window over this computer's monitors as they are: where it began, moved
+     to the other monitor, straddling two, maximised on the second (never on the primary), back where it began; at
+     each, once at rest, the window's dialogs and menus opened through their own objects and measured
+     (`standin_monitors.Tour`), then a turn
+  resize (by its name only: r1-r8) the stand-in's window resized as a drag of its edge or corner resizes it - many sizes
+     over 1.5 s with the watch's own button held (the real one never pressed), then let go: its right edge narrower
+     (with --editing, the region editor open on the first region) and wider, its bottom edge taller, its corner
+     smaller -, then without a button: snapped to its monitor's left half, maximised, restored, its corner resized in
+     steps; then a turn. *--standin-monitor N* starts the stand-in on monitor N, *--standin-maximised* maximised there
+     (never on the primary). The tables are in ``run.monitors`` (`standin_monitors.WindowRun.report`)
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
 the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2 and f3, the one at its end
@@ -267,11 +277,33 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "g": ("one page held long", ["n", "w90000"]),
     # (by its name only; with --start-behind) the first turns once the stand-in, out of sight at the start, is back
     "h": ("turns after a start behind other windows", ["n", "w6000", "n", "w6000"]),
+    # (by their names only, "m" asks for m0-m4) the stand-in's window over this computer's monitors
+    # (`standin_monitors`): each place taken while the window is at rest, then every dialog and menu of the window's
+    # opened there and measured (`standin_monitors.Tour`), then a turn
+    "m0": ("where it began", ["n", "w7000"]),
+    "m1": ("moved to the other monitor", ["n", "w7000"]),
+    "m2": ("straddling two monitors", ["n", "w7000"]),
+    "m3": ("maximised on the second monitor", ["n", "w7000"]),
+    "m4": ("back where it began", ["n", "w7000"]),
+    # (by their names only, "r" asks for r1-r8) the stand-in's window resized: as a drag of an edge or a corner
+    # resizes it, the mouse's button held (r1-r4, `standin_monitors.Drag`), and with no button (r5-r8); the window at
+    # rest before each, a turn after
+    "r1": ("its right edge dragged narrower", ["n", "w7000"]),
+    "r2": ("its right edge dragged wider", ["n", "w7000"]),
+    "r3": ("its bottom edge dragged taller", ["n", "w7000"]),
+    "r4": ("its corner dragged smaller", ["n", "w7000"]),
+    "r5": ("snapped to its monitor's left half", ["n", "w7000"]),
+    "r6": ("maximised", ["n", "w7000"]),
+    "r7": ("restored", ["n", "w7000"]),
+    "r8": ("resized in steps with no button", ["n", "w7000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
-NAMED_ONLY = ("q", "f3", "s", "g", "h")  # scenarios never in "all", only by their names
+M_STEPS = ("m0", "m1", "m2", "m3", "m4")  # what "m" asks for: the window's places over the monitors
+R_STEPS = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # what "resize" asks for: the window resized
+WINDOW_STEPS = (*M_STEPS, *R_STEPS)
+NAMED_ONLY = ("q", "f3", "s", "g", "h", *WINDOW_STEPS)  # scenarios never in "all", only by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
@@ -315,8 +347,9 @@ def wanted(text: str) -> list[str]:
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
-    if "k" in asked:
-        asked = (asked - {"k"}) | set(K_ASKED)
+    for group, members in (("k", K_ASKED), ("m", M_STEPS), ("resize", R_STEPS)):  # (not "r": the former own window's)
+        if group in asked:
+            asked = (asked - {group}) | set(members)
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
@@ -670,7 +703,7 @@ class Monitors:
             return True
 
         user32.EnumDisplayMonitors(0, 0, each, 0)
-        self.areas.sort(key=lambda a: not a[1])
+        self.areas.sort(key=lambda a: (not a[1], a[0][0], a[0][1]))  # (as `standin_monitors.Screens` numbers them)
 
     def places(self) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
         """(the stand-in's rect, TASlation's) as x, y, width, height: the stand-in on the primary monitor, TASlation
@@ -2789,6 +2822,8 @@ class Director:
         self.own_topped = False  # (`cover_step`: the window put at the top of the order)
         self.behind: Behind | None = None  # (--start-behind: `behind_step`)
         self.see: Any = None  # (the see-through watch: the run's end waits for a scene of its being acted, `step`)
+        self.mon: Any = None  # (`standin_monitors.WindowRun`: the m and r scenarios' window steps and tours)
+        self.client_size: tuple[int, int] | None = None  # (the stand-in's client area at its last draw: `pull`)
         self.behind_samples: list[dict[str, Any]] = []  # (the side panes' state where it changed: `behind_step`)
         self.behind_sampled = 0.0
         self.chooser_rows: list[dict[str, Any]] = []  # (--chooser: `chooser_step`)
@@ -2858,6 +2893,8 @@ class Director:
                 self.due_shots()
                 self.cover_step()
                 self.behind_step()
+                if self.mon is not None:
+                    self.mon.tick()
         except Exception as e:  # noqa: BLE001 - said by its type and where it rose (no message: no text), and the run ends
             self.stop(f"{type(e).__name__} in the driver{_where(e)}")
         if not self.over:
@@ -3096,6 +3133,11 @@ class Director:
         if self.over:
             return
         self.over = True
+        if self.mon is not None:  # (a region editor or a tour left open closed, the hand-overs put back)
+            try:
+                self.mon.close()
+            except Exception as e:  # noqa: BLE001 - said by its type
+                self.notes.error("window steps' close", type(e).__name__)
         if self.cover is not None and not (self.notes.tool_cover or {}).get("gone_t"):
             gone = self.cover.close()
             with self.notes.lock:
@@ -3120,6 +3162,11 @@ class Director:
                 with contextlib.suppress(KeyError, ValueError):
                     x0, y0, x1, y1 = (int(round(float(v))) for v in e["box"].split(","))
                     self.page_rect, self.band_px = (x0, y0, x1, y1), int(e["band"])
+                    if self.mon is not None:  # (the page's place at this frame size: `standin_monitors.region_fit`)
+                        from taslation.capture import windows as capture_windows
+
+                        _cx, _cy, cw, ch = capture_windows._client_box(self.browser.hwnd)
+                        self.mon.sampler.page_rects[(cw, ch, int(e["page"]), e.get("spread") == "1")] = self.page_rect
                 with contextlib.suppress(KeyError, ValueError), self.notes.lock:  # (`watch_frames`)
                     self.notes.drawn_last = {"t": e["recv"], "page": int(e["page"]), "spread": e["spread"] == "1",
                                              "state": e["state"], "capture_n": self.notes.capture_n}
@@ -3207,6 +3254,9 @@ class Director:
             return
         seg = self.segments[self.index]
         if self.phase == "prepare":
+            if seg.name in WINDOW_STEPS and self.mon is not None and waited <= self.args.timeout \
+                    and not self.mon.may_begin(rested and (self.index > 0 or self.first_page_done())):
+                return  # (a window step waits for the window at rest and the watch's pointer scene over)
             self.before(seg)
             self.phase, self.phase_at = "settle", now
             return
@@ -3223,6 +3273,8 @@ class Director:
                 go = ready_go and getattr(app, "selected", None) is not None
             elif seg.name in NARROW:
                 go = ready_go and rested and self.resized()
+            elif seg.name in WINDOW_STEPS and self.mon is not None:
+                go = ready_go and self.mon.ready(seg.name, rested)
             elif seg.name in K_PACES:  # (each pace on its own: the backlog of the one before done)
                 first = seg is next(x for x in self.segments if x.name in K_PACES)
                 go = (ready_go and rested and self.backlog_done() and (self.index > 0 or self.first_page_done())
@@ -3298,8 +3350,12 @@ class Director:
 
     def before(self, seg: Segment) -> None:
         """The stand-in made narrow for the first of f2 and f3 asked, and for scenario k with --k-narrow (its own
-        window's place: TASlation never moves nor resizes it)."""
-        if seg.name in NARROW and seg is next(x for x in self.segments if x.name in NARROW):
+        window's place: TASlation never moves nor resizes it); the step of an m or r scenario (`standin_monitors`)."""
+        if seg.name in WINDOW_STEPS and self.mon is not None:
+            self.resize_from = len(self.events)
+            self.notes.act(seg.name, SCENARIOS[seg.name][0])
+            self.mon.begin(seg.name)
+        elif seg.name in NARROW and seg is next(x for x in self.segments if x.name in NARROW):
             self.resize_from = len(self.events)  # (f3 after f2: the stand-in is narrow already, resized since)
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
@@ -4635,11 +4691,20 @@ def run(args: argparse.Namespace) -> int:
     enable_dpi_awareness()
     monitors = Monitors()
     standin_rect, app_rect = monitors.places()
+    on = int(getattr(args, "standin_monitor", 1) or 1)
+    if not 1 <= on <= max(1, len(monitors.areas)):
+        raise SystemExit(f"--standin-monitor is 1 to {max(1, len(monitors.areas))} on this computer")
+    (l_, t_, r_, b_), _p = monitors.areas[on - 1] if monitors.areas else ((0, 0, 1920, 1040), True)
+    w_, h_ = STANDIN_SIZE
     if args.standin_size:
         w_, h_ = (int(v) for v in args.standin_size.lower().split("x"))
-        (l_, t_, r_, b_), _p = monitors.areas[0] if monitors.areas else ((0, 0, 1920, 1040), True)
+    if on != 1 or args.standin_size:
         standin_rect = (l_, t_, min(w_, r_ - l_), min(h_, b_ - t_))
+    if getattr(args, "standin_maximised", False) and on == 1:
+        raise SystemExit("--standin-maximised: not on the primary monitor (a run never covers it with a maximised "
+                         "window); give --standin-monitor 2")
     report["standin_rect"] = list(standin_rect)
+    report["standin_monitor"] = on
     report["see_through"] = True  # (the program's one mode since 2.0.0; the key is kept for the reports' readers)
     report["standin_full_screen"] = bool(args.standin_full_screen)
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
@@ -4656,6 +4721,12 @@ def run(args: argparse.Namespace) -> int:
         since = len(browser.said())
         if not args.standin_full_screen:  # (the full screen is the browser's own place)
             place_own(hwnd, standin_rect, top=True)
+        if getattr(args, "standin_maximised", False):
+            import standin_monitors
+
+            screens = standin_monitors.Screens()
+            report["standin_maximised"] = standin_monitors.WindowSteps(
+                hwnd, screens, lambda: set(browser.tree), sv.lock_foreground).maximise()
         ready = placed_view(browser, ready, since)
         browser._front_look("placed")  # (the stand-in shown and placed: it has not taken the foreground meanwhile)
         report["browser_start"] = dict(browser.start_facts)
@@ -4817,12 +4888,29 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                         app_rect)
     director.behind = behind
     director.see = see
+    mon = None
+    if any(s.name in WINDOW_STEPS for s in segments):  # (the m and r scenarios: `standin_monitors`)
+        import standin_monitors as sm
+
+        screens = sm.Screens()
+        window_steps = sm.WindowSteps(hwnd, screens, lambda: {pid, *browser.tree}, sv.lock_foreground)
+        sampler = sm.Sampler(app, hwnd, screens, lambda: bool(director.mon is not None and director.mon.fast()),
+                             screen_of=lambda image: notes.shown(image).screen)
+        sampler.install()
+        tour = sm.Tour(app, hwnd, screens, window_steps, sv.lock_foreground)
+        mon = sm.WindowRun(app, hwnd, screens, window_steps, sampler, tour, tuple(report["standin_rect"]), see,
+                           editing=editing)
+        sampler.start()
+        director.mon = mon
     director.start()
     began = now_ms()
     try:
         app.mainloop()
     finally:
         ended = now_ms()
+        if mon is not None:
+            mon.sampler.stop.set()
+            mon.sampler.join(3.0)
         if director.failed and director.selection.stopped:
             try:
                 app.destroy()  # (another window was chosen: nothing more is done with it)
@@ -4847,6 +4935,12 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     see_pipeline["present_to_display_ms"] = see_lags(notes, see_pipeline.get("presents_t", []))
     see_pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
     run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
+    if mon is not None:
+        try:
+            run_["monitors"] = mon.report(notes, top, ended)
+        except Exception as e:  # noqa: BLE001 - said by its type and where, the rest of the report kept
+            traceback.print_exc()
+            run_["monitors"] = {"failed": f"{type(e).__name__}{_where(e)}"}
     behind_facts = director.behind_report()
     if behind_facts is not None:
         notes_now = list(see.over().notes) if see.over() is not None else []
@@ -5711,6 +5805,61 @@ def print_table(report: dict[str, Any], path: Path) -> None:
         print(f"--wait-done {waits['cap_s']} s: rests held {len(waits['holds'])} {waits['holds_by_why']}, held ms "
               f"{waits['held_ms']}; soft frames kept {len(waits['keeps'])} {waits['keeps_by_why']}, kept ms "
               f"{waits['kept_ms']}")
+    print_monitors(run_.get("monitors"))
+
+
+def print_monitors(mon: dict[str, Any] | None) -> None:
+    """The m and r scenarios' tables (`standin_monitors.WindowRun.report`), one block per window step."""
+    if not mon:
+        return
+    if mon.get("failed"):
+        print(f"monitors: report FAILED: {mon['failed']}")
+        return
+    print("monitors: " + "; ".join(f"{m['n']} {m['rect']} work {m['work']} dpi {m['dpi']}"
+                                   + (" primary" if m["primary"] else "") for m in mon["screens"])
+          + f"; buttons on {mon['taskbar'].get('buttons_on')}; start {mon['start']}; looks {mon['looks']}")
+    for p in mon["places"]:
+        if not p.get("looks"):
+            print(f"  {p.get('segment')}: no looks")
+            continue
+        panes = "; ".join(f"{side} shown {v['shown_looks']} hidden {v['hidden_looks']} inside {v['inside_viewer']} "
+                          f"on {v['monitors']} why {v['why_hidden']}" for side, v in p["panes"].items())
+        print(f"  {p['segment']}: monitor {p['monitor']} met {p['met']} zoomed {p['zoomed']} client {p['client']}; "
+              f"lettering offset px {p['lettering_offset_px']} stale place/scale {p['stale_place_looks']}/"
+              f"{p['stale_scale_looks']} (last {p.get('stale_ms_after_the_step')} ms after the step, longest "
+              f"{p.get('stale_longest_ms')} ms after the look that saw the client so, with patches "
+              f"{p.get('stale_with_patches_looks')}); {panes}; "
+              f"overlay hides {p['overlay_pane_hides']}; scales {p['scales']}; "
+              f"root {p['root']}; monitor dpi {p['monitor_dpi']}")
+        for t in p.get("tour") or []:
+            first = t.get("first") or {}
+            second = t.get("second") or {}
+            print(f"    {t['item']}: " + (f"skipped ({t['skipped']})" if t.get("skipped") else
+                                         f"monitor {first.get('monitor')} (viewer's {first.get('viewer_monitor')}) "
+                                         f"in its work area {first.get('in_viewer_work_area')} tk dpi "
+                                         f"{first.get('tk_dpi')} / monitor {first.get('monitor_dpi')}; again "
+                                         f"{second.get('monitor', '-')}; root nearest "
+                                         f"{first.get('root_monitor_nearest')}")
+                  + f"; front {t.get('front_before')} -> {t.get('front_after')}"
+                  + (f"; ERROR {t['error']} at {t.get('error_at')}" if t.get("error") else ""))
+        r = p.get("resize")
+        if r:
+            print(f"    resize {r['edge']} button {r['button']} sizes {r['sizes_given']} over {r['drag_ms']} ms -> "
+                  f"{r['end_size']}: stale place/scale {r['stale_place_looks']}/{r['stale_scale_looks']} (last "
+                  f"{r['stale_ms']} ms, longest {r.get('stale_longest_ms')} ms after the look that saw the client "
+                  f"so, with patches {r.get('stale_with_patches_looks')}); lettering hidden {r['lettering_hidden_ms_after_first_size']} ms, back "
+                  f"{r['lettering_back_at_new_size_ms_after_release']} ms, page done "
+                  f"{r['page_done_at_new_size_ms_after_release']} ms after the release")
+            print(f"      panes {r['panes']}")
+            print(f"      jobs pressed {r['jobs_started_while_pressed']} ({r['requests_while_pressed']} requests), on "
+                  f"sizes between {r['jobs_on_sizes_between']} ({r['requests_on_sizes_between']}); first job after "
+                  f"{r['first_job_after']}; frame sizes looked at during {r['frame_sizes_looked_at_during']}, new "
+                  f"size looked at {r['new_size_looked_at_ms_after_release']} ms, own area "
+                  f"{r['own_area_at_new_size_ms_after_release']} ms; marks {r['marks_looks']} (another size "
+                  f"{r['marks_of_another_size_looks']}); editor {r['editor']}; left pane's room at the end "
+                  f"{r.get('left_room_at_end')}; front {r['front_before']} -> {r['front_after']}")
+    print(f"  hover {mon['hover']}")
+    print(f"  region fit {mon['region_fit']}; hand-overs refused {mon['handed_over_refused']}")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:
@@ -5718,8 +5867,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
     ap.add_argument("--scenario", default="all",
-                    help="all, or some of c,a,b,d,e,x,f2,k,q (k is k5,k1,k2 and never in all, nor is q: for "
-                         "--standin-profile)")
+                    help="all, or some of c,a,b,d,e,x,f2,k,q,m,resize (k is k5,k1,k2 and never in all, nor is q: for "
+                         "--standin-profile; m is m0-m4, the stand-in over the monitors, and resize is r1-r8, its "
+                         "window resized: never in all either, `standin_monitors`)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
@@ -5846,6 +5996,12 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")
+    ap.add_argument("--standin-monitor", type=int, default=1, metavar="N",
+                    help="the monitor the stand-in starts on: 1 the primary (default), 2 the next (the monitors in "
+                         "the order `standin_monitors.Screens` gives them), at the top left of its work area")
+    ap.add_argument("--standin-maximised", action="store_true",
+                    help="the stand-in maximised on its monitor from the start (refused on the primary, which a "
+                         "run never covers with a maximised window), the foreground locked meanwhile")
     ap.add_argument("--standin-full-screen", action="store_true",
                     help="the stand-in in the browser's own full screen from its start; the reader's area is then the "
                          "whole frame")

@@ -597,7 +597,7 @@ def screen(monkeypatch, hidden_root):
     root, never shown, is taken for that window on the screen; the dialogs stay withdrawn, as the root is."""
     area = [LOW]
     monkeypatch.setattr(layout, "work_area", lambda widget, x=None, y=None: area[0])
-    monkeypatch.setattr(layout, "frame_extents", lambda: FRAME)
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: FRAME)
     for name, value in zip(("winfo_rootx", "winfo_rooty", "winfo_width", "winfo_height"), WINDOW):
         monkeypatch.setattr(hidden_root, name, lambda value=value: value)
     monkeypatch.setattr(hidden_root, "winfo_viewable", lambda: 1)

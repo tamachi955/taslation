@@ -218,6 +218,69 @@ class LivePreview:
         self.open = True
 
 
+class EditorPage:
+    """What the open region editor acts on: the page *result*, its *region* and the editor's `LivePreview` (None
+    without a pipeline) - carried to the page on show when that is the same page taken again
+    (`TranslatorMixin._carry_editor`)."""
+
+    def __init__(self, result: Any, region: Any, preview: LivePreview | None):
+        self.result, self.region, self.preview = result, region, preview
+
+
+CARRY_OVERLAP = 0.4  # (`carried_region`) a region's box on the page taken again overlaps its own this much at least
+
+
+def _overlap(a: tuple[int, ...], b: tuple[int, ...]) -> float:
+    """Intersection over union of the boxes *a* and *b*."""
+    w, h = min(a[2], b[2]) - max(a[0], b[0]), min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    both = w * h
+    return both / max(1, (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - both)
+
+
+def carried_region(old: Any, new: Any, region: Any, within: int) -> Any:
+    """*region* of the page result *old* in the page result *new* where *new* is the same page taken again (at
+    another size of the viewer's window, or completed from a settled frame; their page units' fingerprints as many and
+    each within *within* bits, none on either side: not compared): with page units on both sides, as many, the region
+    of the same page unit, kind and translation whose box overlaps most - at least CARRY_OVERLAP - where *region*'s
+    box lies on that unit as the new page has it (`PageUnit.normalize`, `denormalize`: the same place on the page at
+    any size; a page read again may find more or fewer regions); without them, the region at its place in the reading
+    order of two pages whose regions (`editor_regions`) are the same in number, kind and translation one by one. None
+    otherwise - another page, the region not found again, or *region* not one of *old*'s."""
+    if old is None or new is None or old is new:
+        return None
+    a, b = editor_regions(old), editor_regions(new)
+    at = next((i for i, r in enumerate(a) if r is region), None)
+    if at is None:
+        return None
+    prints_a, prints_b = list(getattr(old, "fingerprints", ()) or ()), list(getattr(new, "fingerprints", ()) or ())
+    if prints_a and prints_b:
+        from ..fingerprint import hamming
+
+        try:
+            if len(prints_a) != len(prints_b) or any(hamming(p, q) > within for p, q in zip(prints_a, prints_b)):
+                return None
+        except (TypeError, ValueError):  # (not fingerprints as the pipeline writes them)
+            return None
+    units_a, units_b = list(getattr(old, "units", ()) or ()), list(getattr(new, "units", ()) or ())
+    if units_a and units_b:
+        unit = int(getattr(region, "unit", 0) or 0)
+        if len(units_a) != len(units_b) or not 0 <= unit < len(units_a):
+            return None
+        there = units_b[unit].denormalize(units_a[unit].normalize(tuple(region.bbox)))
+        text = region.translated_text or ""
+        found = [(_overlap(there, tuple(r.bbox)), r) for r in b
+                 if int(getattr(r, "unit", 0) or 0) == unit and r.kind == region.kind and (r.translated_text or "") == text]
+        best = max(found, key=lambda f: f[0], default=(0.0, None))
+        return best[1] if best[0] >= CARRY_OVERLAP else None
+    if len(a) != len(b):
+        return None
+    if any(x.kind != y.kind or (x.translated_text or "") != (y.translated_text or "") for x, y in zip(a, b)):
+        return None
+    return b[at]
+
+
 class TranslatorMixin:
     """Translator mode. A part of `app.App` (no `__init__`: the state it uses is made by `App.__init__`; the other
     parts are reached through ``self``)."""
@@ -1130,7 +1193,8 @@ class TranslatorMixin:
         editor says under it. A translation reused from an identical line before it (`linememo`) is said to be one
         (`REUSED_NOTE`, under the header). In see-through mode it goes beside the region on the viewer
         (`see_edit.editor_place`), Previous and Next's ones too, and its Show original, held, shows the viewer's
-        original under the region (`see_edit.set_bare`); one the reader asked for takes the keys."""
+        original under the region (`see_edit.set_bare`); one the reader asked for takes the keys. The same page taken
+        again while it is open - the viewer's window resized, the page completed - takes it over (`_carry_editor`)."""
         result = result if result is not None else self.last_result
         if seethrough.hidden(self):
             seethrough.asked(self)
@@ -1150,28 +1214,34 @@ class TranslatorMixin:
             except Exception:  # noqa: BLE001 - the editor opens all the same
                 pass
         fonts_dir = self.settings.fonts_dir
+        # (the page and region the editor acts on, and its preview: carried to the page on show when that is the same
+        # page taken again, `_carry_editor`)
+        held = EditorPage(result, region, preview)
+        self._editor_held = held
         original: Callable[[bool], None] | None = None
         if seethrough.hidden(self):  # (see-through mode: beside the region on the viewer, its original shown when held)
             from . import see_edit
 
             at = see_edit.editor_place(self, region) or at
-            original = lambda shown, r=region: see_edit.set_bare(self, r, shown)  # noqa: E731
+            original = lambda shown: see_edit.set_bare(self, held.region, shown)  # noqa: E731
         self._editor = EditBubbleDialog(self, region, self._speaker_names(),
-                                        on_save=lambda data, r=region: (self._end_preview(preview, keep=holds(result, r)),
-                                                                        self._edit_region(r, data, result)),
-                                        on_drop=lambda r=region: self._drop_region(r, result),
-                                        on_ask=(lambda mode, answer, r=region: self._ask_model(r, mode, answer, result))
+                                        on_save=lambda data: (self._end_preview(held.preview,
+                                                                                keep=holds(held.result, held.region)),
+                                                              self._edit_region(held.region, data, held.result)),
+                                        on_drop=lambda: self._drop_region(held.region, held.result),
+                                        on_ask=(lambda mode, answer: self._ask_model(held.region, mode, answer,
+                                                                                     held.result))
                                         if can_ask else None,
                                         place=(number, max(number, len(shown))),
                                         on_preview=lambda text, style, large=OWN_PART: self._preview_region(
-                                            preview, text, style, large),
-                                        on_cancel=lambda: self._end_preview(preview),
+                                            held.preview, text, style, large),
+                                        on_cancel=lambda: self._end_preview(held.preview),
                                         families=lambda: font_families(fonts_dir), faces=faces,
                                         crop=editor_crop(getattr(result, "original", None), region.bbox),
-                                        on_read=(lambda done, r=region: self._read_source(r, result, done))
+                                        on_read=(lambda done: self._read_source(held.region, held.result, done))
                                         if pipeline is not None else None,
-                                        on_step=lambda delta, data, place, r=region: self._step_editor(
-                                            r, result, preview, delta, data, place),
+                                        on_step=lambda delta, data, place: self._step_editor(
+                                            held.region, held.result, held.preview, delta, data, place),
                                         at=at, note=self._editor_note(region),
                                         clip=self.format_clip() if hasattr(self, "format_clip") else None,
                                         font_memory=FontMemory(self.settings.state_dir),
@@ -1198,6 +1268,44 @@ class TranslatorMixin:
         if result is self.last_result:
             self._choose(target)
         self._open_editor(target, result, at)
+
+    def _carry_editor(self) -> bool:
+        """(a page result on show, `JobsMixin`) The open region editor taken over by the page on show where that is
+        its page taken again - the viewer's window resized, the page completed from a settled frame: its page units'
+        fingerprints within ``fingerprint_max_distance`` and the editor's region found again there, at its place on
+        the page (`carried_region`) -: its page and region become those on show (Save, Drop, Ask again, Previous and
+        Next, the preview and Show original act there; an edit under way is shown on the new page a moment later), the
+        region is selected, and in see-through mode the editor, where it now lies over its region, goes beside it
+        again (`see_edit.editor_beside`); elsewhere it stays where it is. False when nothing was carried (no editor, the
+        same page result, another page: the editor keeps its own)."""
+        editor, held, new = getattr(self, "_editor", None), getattr(self, "_editor_held", None), self.last_result
+        try:
+            alive = editor is not None and bool(editor.winfo_exists())
+        except tk.TclError:
+            alive = False
+        if not alive or held is None or new is None or held.result is new or getattr(editor, "region", None) is not \
+                held.region:
+            return False
+        within = int(getattr(self.settings, "fingerprint_max_distance", 36))
+        region = carried_region(held.result, new, held.region, within)
+        if region is None:
+            return False
+        self._end_preview(held.preview)
+        held.result, held.region = new, region
+        held.preview = LivePreview(new, region) if self.pipeline is not None else None
+        editor.region = region
+        if getattr(self, "_chosen_region", None) is None:
+            self._choose(region)
+        if seethrough.hidden(self):
+            from . import see_edit
+
+            see_edit.editor_beside(self, editor, region)
+        try:
+            if editor.changed():
+                editor._changed()  # (what it shows, lettered on the page on show a moment later)
+        except (tk.TclError, AttributeError):
+            pass
+        return True
 
     @staticmethod
     def _japanese(region: Any) -> str:

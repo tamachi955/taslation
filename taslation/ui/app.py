@@ -191,7 +191,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         give_icons(self)  # the taskbar takes the big one
         self.title(APP_TITLE)
         try:  # the monitor's DPI times the reader's UI scale, before anything is measured (`scaling`)
-            apply_scale(self, settings.ui_scale)
+            apply_scale(self, settings.ui_scale, seethrough.dialog_dpi(self))  # (hidden: the primary monitor's)
         except tk.TclError:
             pass
         # the window's colours, before any widget is made (the legal notice's too): Windows' own look as it always
@@ -305,7 +305,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         if self.state() == "withdrawn":
             self.deiconify()
         # moved to a monitor of another scale: the dialogs' text follows (`scaling`)
-        self._dpi_watch = DpiWatch(self, lambda: self.settings.ui_scale)
+        self._dpi_watch = DpiWatch(self, lambda: self.settings.ui_scale,  # (hidden: the viewer's monitor's)
+                                   source=(lambda: seethrough.dialog_dpi(self)) if seethrough.hidden(self) else None)
         watch_error_boxes(self)  # an error box gets Copy details (the version, the system, the last error)
         if book:
             self.book_var.set(book)

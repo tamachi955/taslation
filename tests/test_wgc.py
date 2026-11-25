@@ -328,6 +328,38 @@ def test_a_frame_that_never_fits_starts_the_session_over_once_then_printwindow(a
     assert windows._compositor_frame(1, True) is None and len(capture.made) == 3
 
 
+def test_a_size_restarted_for_before_is_started_over_again_once_a_frame_has_fitted_another():
+    """A window maximised and restored comes back to a size it was restarted for: once a frame has fitted meanwhile,
+    that size gets its one restart again; a frame of the same size keeps the guard."""
+    wgc._restarted = None
+    try:
+        with wgc._lock:
+            wgc._restarted = (1, (8, 6))
+        wgc.fitted(1, (8, 6))  # the same size fitted: still once
+        assert wgc._restarted == (1, (8, 6))
+        wgc.fitted(2, (12, 9))  # another window's frame: not this one's guard
+        assert wgc._restarted == (1, (8, 6))
+        wgc.fitted(1, (12, 9))  # this window at another size: the guard is spent
+        assert wgc._restarted is None
+    finally:
+        wgc._restarted = None
+
+
+def test_a_window_back_at_a_size_it_had_is_started_over_again(api, window):
+    """Restarted at 8x6, then fitted at 12x9, then back to 8x6 with frames that do not fit yet: started over again."""
+    sizes = [(12, 9)]
+    capture = api(stand_in(frames=sizes))
+    window.bounds = (0, 0, 8, 6)  # frames of 12x9 for an 8x6 window: started over once
+    windows._compositor_frame(1, True)
+    made = len(capture.made)
+    assert made == 2
+    window.bounds = (0, 0, 12, 9)  # the window at the frames' size: they fit
+    assert windows._compositor_frame(1, True).size == (12, 9) and len(capture.made) == made
+    window.bounds = (0, 0, 8, 6)  # back at the size restarted for before
+    windows._compositor_frame(1, True)
+    assert len(capture.made) == made + 1
+
+
 def test_a_minimised_window_is_left_to_the_old_route(api, monkeypatch):
     capture = api(stand_in())
     monkeypatch.setattr(windows, "user32", SimpleNamespace(IsIconic=lambda h: True))

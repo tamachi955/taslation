@@ -120,10 +120,10 @@ class NoticeDialog(tk.Toplevel):
         try:
             self.update_idletasks()
             if parent is not None and parent.winfo_viewable():  # (where `place_window` puts it)
-                _left, top, _right, bottom = dialog_area(self, parent)[0]
+                (_left, top, _right, bottom), centre = dialog_area(self, parent)
             else:
-                _left, top, _right, bottom = work_area(self)
-            border, caption = frame_extents()
+                (_left, top, _right, bottom), centre = work_area(self), None
+            border, caption = frame_extents(centre)
             lines = int(self.text.cget("height"))
             fitted = fitted_lines(lines, self.winfo_reqheight() + caption + border,
                                   int(self._font.metrics("linespace")), bottom - top)

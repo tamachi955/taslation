@@ -200,6 +200,9 @@ class Shown:
     def deiconify(self):
         self.calls.append(("deiconify",))
 
+    def geometry(self, spec=None):
+        self.calls.append(("geometry", spec))
+
     def winfo_ismapped(self):
         return True
 
@@ -229,6 +232,22 @@ def test_a_quiet_dialog_is_shown_without_deiconify_topmost_and_takes_the_keys_on
     for taken in win.bound["<FocusIn>"]:  # (clicked: Windows activates it)
         taken(None)
     assert win._see_quiet is False and focus.calls == [("focus_set",)]
+
+
+def test_a_quiet_dialog_shown_for_the_first_time_comes_where_it_was_placed():
+    """(Tk's ``wm state normal`` maps a window never shown at the primary monitor's top left whatever place it was
+    given while withdrawn - the GPU's box over a viewer on the second monitor came there: it is mapped unseen and
+    moved to `place_window`'s place before it is seen)"""
+    win = Shown()
+    win._placed_at = (2650, 408)
+    layout.show_quietly(win)
+    calls = win.calls
+    hidden, state, moved, seen = (calls.index(("attributes", "-alpha", 0.0)), calls.index(("state", "normal")),
+                                  calls.index(("geometry", "+2650+408")), calls.index(("attributes", "-alpha", 1.0)))
+    assert hidden < state < moved < seen and ("deiconify",) not in calls
+    plain = Shown()  # (not placed by `place_window`: as before)
+    layout.show_quietly(plain)
+    assert not any(c[0] in ("geometry",) or c[1:2] == ("-alpha",) for c in plain.calls)
 
 
 def test_show_by_itself_shows_quietly_or_as_ever(monkeypatch):

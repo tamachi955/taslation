@@ -353,7 +353,7 @@ def screen(monkeypatch):
     """The work area the dialog lands on: *area[0]* (left, top, right, bottom), a low one at first."""
     area = [LOW]
     monkeypatch.setattr(dlg, "work_area", lambda widget, x=None, y=None: area[0])
-    monkeypatch.setattr(dlg, "frame_extents", lambda: FRAME)
+    monkeypatch.setattr(dlg, "frame_extents", lambda *_a: FRAME)
     return area
 
 

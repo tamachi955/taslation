@@ -469,7 +469,29 @@ rows' languages.
   in the viewer's own frame of that moment) and for how the page's own patches lie (0 px off at 100 %); two of them,
   of a page lettered in full, go into SCRATCH/shots (the sample pages: delete them after). `--standin-size WxH` gives
   the stand-in's window another size (1904x1024 for a 1920 x 1080 screen) and `--standin-full-screen` starts it in
-  the browser's own full screen (the reader's area then the whole frame).
+  the browser's own full screen (the reader's area then the whole frame). `--standin-monitor N` starts the stand-in
+  at the top left of monitor N's work area (1 the primary, the default; the others left to right, then top to
+  bottom) and `--standin-maximised` maximised there (refused on the primary: a run never covers the person's main
+  screen). Two scenarios, never in all, take the stand-in round the monitors as they are - no display setting is
+  changed (`tools/standin_monitors.py`): m, the window where it starts (m0), moved to the other monitor (m1), with its
+  middle on the edge the two share (m2), maximised on the second (m3) and back where it started (m4), each place
+  with every dialog and menu opened through its own object and measured (the viewer chooser, the region editor,
+  Settings, the Menu and the language list, the GPU box, the legal notice, the book-name dialog, a plate's place
+  entry: the monitor each lies on against the viewer's, the scale it took), the foreground locked meanwhile and who
+  is in front read before and after each; and resize, the window resized as a drag of its edge gives it (the tool's
+  own button held from before its first size to after its last, 45 sizes over 1.5 s): narrower (r1; with
+  `--editing` the region editor open on the page's first region), wider (r2), taller (r3), by its corner to too little
+  room for the panes beside a spread (r4, then the Menu from a click on the taskbar button, `seethrough.front_tick`),
+  and without a button half the screen (r5), maximised (r6), restored (r7) and by its corner (r8). A sampler looks
+  at the stand-in and TASlation's windows every 50 ms (15 ms while the window changes); the report's
+  `run.monitors` gives per step the lettering's offset from the client area and its looks at a stale place or
+  scale (how long after the look that saw the client so, with patches on show or the editing ground alone), the
+  panes and why each was hidden (no ground yet, no room, off the screen, covered by a window above the viewer such
+  as the region editor), the scales, the hidden root's monitor; per resize the lettering hidden and back at the new
+  size, the jobs started while the button was held and on the sizes between, the capture area found again, the
+  marks, an open editor's place and its region carried to the page at the new size, and a timeline (numbers only);
+  the hover on the stand-in's monitor; and how far a region read at one size lies from the same region read at
+  another (`region_fit`).
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` pictures
   TASlation's own window, so it runs only a package before 2.0.0 (`--package` another checkout's; from 2.0.0 on the
   window is hidden and such a package, this checkout's too, is refused before anything starts): the real

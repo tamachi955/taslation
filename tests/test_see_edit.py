@@ -822,7 +822,7 @@ def test_on_a_spread_the_plate_says_the_bubble_stays_on_its_own_page():
 def test_the_editor_goes_beside_the_region_on_its_monitor(monkeypatch):
     from taslation.ui import layout
 
-    monkeypatch.setattr(layout, "frame_extents", lambda: (8, 31))
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
     area = [(0, 0, 1920, 1040)]
     monkeypatch.setattr(layout, "work_area", lambda widget, x=None, y=None: area[0])
     app = edit_app()
@@ -835,6 +835,46 @@ def test_the_editor_goes_beside_the_region_on_its_monitor(monkeypatch):
     assert place(300, 200) == (700 - 316, 1040 - 239)
     app._see_through.client_origin = lambda: None
     assert see_edit.editor_place(app, Region(A)) is None
+
+
+class Placed:
+    """An open editor on the screen: its client area at *at*, *size*; `geometry` moves it."""
+
+    def __init__(self, region, at, size=(300, 200)):
+        self.region, self.at, self.size, self.moves = region, at, size, []
+
+    def update_idletasks(self):
+        pass
+
+    def winfo_rootx(self):
+        return self.at[0]
+
+    def winfo_rooty(self):
+        return self.at[1]
+
+    def winfo_width(self):
+        return self.size[0]
+
+    def winfo_height(self):
+        return self.size[1]
+
+    def geometry(self, spec):
+        self.moves.append(spec)
+
+
+def test_an_editor_lying_over_its_region_now_goes_beside_it_again_and_one_beside_it_stays(monkeypatch):
+    from taslation.ui import layout
+
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
+    monkeypatch.setattr(layout, "work_area", lambda widget, x=None, y=None: (0, 0, 1920, 1040))
+    app = edit_app()
+    region = Region(A)  # (on the screen: 600, 400 to 700, 460)
+    over = Placed(region, (650, 380))
+    assert see_edit.editor_beside(app, over, region) is True and over.moves == ["+712+400"]
+    beside = Placed(region, (720, 380))
+    assert see_edit.editor_beside(app, beside, region) is False and beside.moves == []
+    app._see_through.client_origin = lambda: None
+    assert see_edit.editor_beside(app, Placed(region, (650, 380)), region) is False
 
 
 def test_show_original_held_leaves_the_region_s_patches_out_until_let_go():

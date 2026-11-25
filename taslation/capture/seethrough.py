@@ -886,6 +886,11 @@ class SeeThrough:
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(2.0)
 
+    def poke(self) -> None:
+        """(any thread) Look at the viewer again at once: the viewer's window moved or resized
+        (`capture.WindowEvents.on_moved`), so that its lettering follows it within a look, not LOOK_S later."""
+        self._poke()
+
     # ------------------------------------------------------------------ the window's thread
     def _poke(self) -> None:
         """The window thread looks again at once: its event set - and, while it waits for the mouse too (editing), a

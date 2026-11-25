@@ -258,8 +258,8 @@ class UpdateDialog(tk.Toplevel):
         taller than the work area of the monitor it is placed on (`layout.dialog_area`, as `place_window` finds it)."""
         if self.changes is None:
             return
-        area, _centre = layout.dialog_area(self, self.master)
-        border, caption = layout.frame_extents()
+        area, centre = layout.dialog_area(self, self.master)
+        border, caption = layout.frame_extents(centre)
         over = layout.asked_size(self)[1] - (area[3] - area[1] - caption - border)
         if over <= 0:
             return

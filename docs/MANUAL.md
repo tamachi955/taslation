@@ -135,6 +135,17 @@ TASlation never moves or resizes the viewer's window. The panes need some of the
 Keep some of the viewer in sight while you read. Some viewers stop drawing while other windows cover them wholly, and a browser stops while an opaque window covers it completely;
 the page cannot be read then (see "How the viewer is read").
 
+### More than one monitor, and the viewer's window resized
+
+With more than one monitor it is the same: put the viewer on any of them, move it from one to another or across two, and the lettering and the panes follow it.
+TASlation's dialogs open on the monitor that holds most of the viewer; the region editor and a number plate's entry open beside their bubble, on the monitor where the bubble is. A pane that would run off the screen, or that a window lies over, hides.
+TASlation's taskbar button is wherever Windows shows it (with one taskbar, on the main monitor's).
+
+While you drag an edge or a corner of the viewer's window, the lettering hides and nothing is taken from the viewer. Once you let go, it comes back at the new size: at once where the page was shown at that size before, else within a second or two.
+Snapping the window to half the screen, maximising it and restoring it work the same way.
+An open region editor stays where it is and goes on with its bubble at the new size; should it now lie over the bubble, it moves beside it.
+When the window becomes too narrow for the panes beside the page, they hide and the Menu comes from a click on TASlation's taskbar button; make it wider and they come back.
+
 ### Starting a book: the setup and the book's name
 
 Each page is translated when you open it (what "Auto" and "Translate" do), with only the few pages just before it as context, and the pages you turn past go on being read and translated in the background ("Pages you turn past" above).

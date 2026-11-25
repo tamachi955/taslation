@@ -509,16 +509,41 @@ class ViewerDialog(_Dialog):
         self.last_button.configure(text=_("Quit") if quits else _("Close"))
 
     def _over_preselected(self) -> tuple[int, int] | None:
-        """Where the dialog is centred: over the window preselected when it lies on a monitor (none: the primary
-        monitor's middle, `layout.dialog_area`)."""
-        from .layout import monitor_at
+        """Where the dialog is centred: over the window preselected when it lies on a monitor - over the part of it
+        on the monitor that holds most of it (`layout.monitor_rect`), as every dialog over the viewer is
+        (`seethrough.dialog_centre`): a window straddling two monitors has it on the one most of it is on, a window
+        partly off the screen where it shows -; none (a window on no monitor, minimised say): the primary monitor's
+        middle, `layout.dialog_area`. The window's place is read now: the list keeps the place a window had when it was
+        first listed (`ViewerMixin._rescan_windows` keeps a list whose windows and titles did not change), and the
+        viewer may have moved to another monitor since; a window gone meanwhile is taken at its listed place."""
+        from . import layout
 
         index = self.box.current()
         if not 0 <= index < len(self.windows):
             return None
-        left, top, right, bottom = self.windows[index].rect
-        centre = ((left + right) // 2, (top + bottom) // 2)
-        return centre if monitor_at(*centre) is not None else None
+        win = self.windows[index]
+        rect = win.rect
+        try:
+            from ..capture import window_exists, window_rect
+
+            if window_exists(int(win.hwnd)):
+                rect = window_rect(int(win.hwnd))
+                monitor = layout.monitor_rect(int(win.hwnd))  # (as every other dialog over it: `dialog_centre`)
+                if monitor is not None:
+                    return layout.centre_on(rect, monitor)
+        except Exception:  # noqa: BLE001 - (gone meanwhile: the place it was listed with)
+            pass
+        centre = layout.centre_on(rect, None)
+        if layout.monitor_at(*centre) is not None:
+            return centre
+        try:
+            monitor = layout.monitor_rect(int(win.hwnd))
+        except (OSError, ValueError, TypeError):
+            monitor = None
+        if monitor is None:
+            return None
+        centre = layout.centre_on(rect, monitor)
+        return centre if layout.monitor_at(*centre) is not None else None
 
     def _listed_open(self) -> bool:
         try:

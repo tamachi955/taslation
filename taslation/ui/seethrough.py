@@ -243,25 +243,40 @@ def root_geometry(geometry: str, screen: tuple[int, int, int, int] | None = None
 
 
 def dialog_centre(app: Any) -> tuple[int, int] | None:
-    """Where a dialog of the hidden window is centred (`layout.dialog_area`): the middle of the viewer's window, or,
-    with none, the middle of the primary monitor's work area; None while the window is on the screen (its dialogs go
-    over it, as ever)."""
+    """Where a dialog of the hidden window is centred (`layout.dialog_area`): the middle of the viewer's window - of
+    the part of it on its monitor (the one that holds most of it, `layout.monitor_rect`: a viewer over two monitors,
+    or partly off the screen, has its dialogs where it shows) -, or, with none, the middle of the primary monitor's
+    work area; None while the window is on the screen (its dialogs go over it, as ever). Never the hidden window's own
+    place, off every monitor."""
     if not hidden(app):
         return None
+    from . import layout
+
     win = getattr(app, "selected", None)
     if win is not None:
         try:
             from ..capture import window_exists, window_rect
 
             if window_exists(win.hwnd):
-                left, top, right, bottom = window_rect(win.hwnd)
-                return (left + right) // 2, (top + bottom) // 2
+                return layout.centre_on(window_rect(win.hwnd), layout.monitor_rect(win.hwnd))
         except Exception:  # noqa: BLE001 - (the viewer gone meanwhile: the primary monitor)
             pass
-    from .layout import work_area
-
-    left, top, right, bottom = work_area(app)
+    left, top, right, bottom = layout.work_area(app)
     return (left + right) // 2, (top + bottom) // 2
+
+
+def dialog_dpi(app: Any) -> int | None:
+    """The DPI TASlation's dialogs are drawn for while its own window is hidden (Tk's scaling, `scaling.DpiWatch`'s
+    *source*): that of the viewer's monitor once a viewer is followed (``_see_dpi``, `tick`: where they go,
+    `dialog_centre`), else of the primary monitor (where the start's go) - never that of the monitor nearest the
+    hidden window's place off every monitor; None while the window is on the screen (its own monitor's, as ever)."""
+    if not hidden(app):
+        return None
+    if getattr(app, "selected", None) is not None and getattr(app, "_see_through", None) is not None:
+        return int(getattr(app, "_see_dpi", 0) or 0) or None
+    from .layout import dpi_at
+
+    return dpi_at()
 
 
 def root_hwnd(app: Any) -> int:
@@ -857,6 +872,9 @@ def close(app: Any) -> None:
     over = getattr(app, "_see_through", None)
     if over is not None:
         app._see_through = None
+        events = getattr(getattr(app, "_following", None), "events", None)
+        if events is not None and getattr(events, "on_moved", None) == getattr(over, "poke", None):
+            events.on_moved = None
         over.close()
         wgc.set_update_ms(wgc.MIN_UPDATE_MS)
 
@@ -883,7 +901,14 @@ def tick(app: Any) -> None:
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
     over.follow(hwnd)
-    app._see_dpi = window.viewer_dpi(hwnd)
+    events = getattr(getattr(app, "_following", None), "events", None)
+    poke = getattr(over, "poke", None)
+    if events is not None and poke is not None and getattr(events, "on_moved", None) != poke:
+        events.on_moved = poke  # (the viewer moved or resized: the see-through window looks at once, not LOOK_S on)
+    before, app._see_dpi = getattr(app, "_see_dpi", None), window.viewer_dpi(hwnd)
+    watch = getattr(app, "_dpi_watch", None)
+    if app._see_dpi != before and watch is not None and hidden(app):  # (the dialogs drawn for the viewer's monitor)
+        watch.check()
     over.set_hover_delay(hover_delay(app))
     set_add_key = getattr(over, "set_add_key", None)
     if set_add_key is not None:  # (the Insert key: Add area while the viewer is in front, `see_edit`)
@@ -1191,6 +1216,22 @@ def _column(app: Any, side: str, block: list[pn.Row], changing: list[pn.Row], fo
     return picture
 
 
+def pane_on_screen(box: tuple[int, int, int, int] | None, origin: tuple[int, int] | None
+                   ) -> tuple[int, int, int, int] | None:
+    """A side pane's *box* (frame pixels) while the whole of it lies on the monitors - its four corners each on one,
+    the viewer's client area at *origin* on the screen -; None where part of it is off them (a viewer dragged partly
+    off the screen, past an outer edge or into a gap between monitors): it hides, as one with no room beside the page
+    does, and the Menu comes from the taskbar button (`left_room`). As it is where the viewer's place is not known,
+    and outside Windows."""
+    if box is None or origin is None or not window.IS_WINDOWS:
+        return box
+    from .layout import monitor_at
+
+    x, y = int(origin[0]), int(origin[1])
+    corners = ((box[0], box[1]), (box[2] - 1, box[1]), (box[0], box[3] - 1), (box[2] - 1, box[3] - 1))
+    return box if all(monitor_at(cx + x, cy + y) is not None for cx, cy in corners) else None
+
+
 def panes_tick(app: Any) -> None:
     """The clicks on the side panes acted on, the bubble the right one shows followed (`bubble_tick`), then both panes
     handed to the see-through window as they are to be: on the ground at the capture area's outer edges, beside the
@@ -1232,6 +1273,8 @@ def panes_tick(app: Any) -> None:
         right = _column(app, used, [], changing, foot, drop, room_right, height, language, dpi, scheme)
         box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
     app._see_right_used = used
+    origin = over.client_origin() if callable(getattr(over, "client_origin", None)) else None
+    box_left, box_right = pane_on_screen(box_left, origin), pane_on_screen(box_right, origin)
     for side, picture, box in (("left", left, box_left), ("right", right if used == "right" else None, box_right),
                                ("bubble", right if used == "bubble" else None, box_right)):
         memo = app._see_pane_memo.get(side)

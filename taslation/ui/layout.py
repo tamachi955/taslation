@@ -83,19 +83,66 @@ def give_icons(win: tk.Misc) -> None:
     win.bind("<Map>", on_map, add="+")
 
 
-def frame_extents() -> tuple[int, int]:
+def frame_extents(at: tuple[int, int] | None = None) -> tuple[int, int]:
     """A window's side border and its title bar with the top border, in pixels (what a window's place on the screen
-    adds to its inside)."""
+    adds to its inside) - on the monitor at the screen point *at* (a monitor at 150 % draws them half as large again:
+    the process is per-monitor DPI aware, `GetSystemMetricsForDpi` at that monitor's DPI, `dpi_at`), else as the
+    system's DPI has them."""
     if IS_WINDOWS:
         try:
             import ctypes
 
-            metric = ctypes.windll.user32.GetSystemMetrics
+            user32 = ctypes.windll.user32
+            dpi = dpi_at(*at) if at is not None else None
+            if dpi and hasattr(user32, "GetSystemMetricsForDpi"):
+                def metric(index: int) -> int:
+                    return int(user32.GetSystemMetricsForDpi(index, int(dpi)))
+            else:
+                metric = user32.GetSystemMetrics
             border = metric(32) + metric(92)  # SM_CXFRAME + SM_CXPADDEDBORDER
             return border, metric(4) + metric(33) + metric(92)  # SM_CYCAPTION + SM_CYFRAME + SM_CXPADDEDBORDER
-        except (AttributeError, OSError):
+        except (AttributeError, OSError, ValueError):
             pass
     return 8, 31
+
+
+def dpi_at(x: int | None = None, y: int | None = None) -> int | None:
+    """The DPI of the monitor at the screen point (x, y) - the nearest one where none holds it -, or of the primary
+    monitor (96 at 100 %, 144 at 150 %); None outside Windows or where it cannot be told."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = wintypes.HMONITOR
+        user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        point = wintypes.POINT(int(x) if x is not None else 0, int(y) if y is not None else 0)
+        monitor = user32.MonitorFromPoint(point, 2 if x is not None else 1)  # nearest; primary
+        shcore = ctypes.WinDLL("shcore")
+        shcore.GetDpiForMonitor.argtypes = [wintypes.HMONITOR, ctypes.c_int, ctypes.POINTER(wintypes.UINT),
+                                            ctypes.POINTER(wintypes.UINT)]
+        shcore.GetDpiForMonitor.restype = ctypes.c_long
+        dx, dy = wintypes.UINT(0), wintypes.UINT(0)
+        if monitor and shcore.GetDpiForMonitor(monitor, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0 and dx.value:
+            return int(dx.value)  # (MDT_EFFECTIVE_DPI)
+    except (AttributeError, OSError, ValueError):
+        pass
+    return None
+
+
+def centre_on(rect: tuple[int, int, int, int], monitor: tuple[int, int, int, int] | None) -> tuple[int, int]:
+    """The middle of the part of the window rectangle *rect* that lies on *monitor* (both left, top, right, bottom):
+    where a window over two monitors, or partly off the screen, shows on the one it is on; the middle of *rect* where
+    they do not meet or no monitor is known."""
+    left, top, right, bottom = (int(v) for v in rect)
+    if monitor is not None:
+        l2, t2, r2, b2 = (int(v) for v in monitor)
+        il, it, ir, ib = max(left, l2), max(top, t2), min(right, r2), min(bottom, b2)
+        if ir > il and ib > it:
+            left, top, right, bottom = il, it, ir, ib
+    return (left + right) // 2, (top + bottom) // 2
 
 
 def work_area(widget: tk.Misc, x: int | None = None, y: int | None = None) -> tuple[int, int, int, int]:
@@ -219,9 +266,10 @@ def _centre_instead(parent: tk.Misc) -> tuple[int, int] | None:
 
 
 def dialog_spot(size: tuple[int, int], centre: tuple[int, int], area: tuple[int, int, int, int]) -> tuple[int, int]:
-    """Where a dialog whose inside is *size* goes (Tk's "+X+Y" of its frame): its frame centred on *centre*, moved
-    as needed so that the whole of it, title bar first, lies on *area*."""
-    border, caption = frame_extents()
+    """Where a dialog whose inside is *size* goes (Tk's "+X+Y" of its frame): its frame (as the monitor at *centre*
+    draws it, `frame_extents`) centred on *centre*, moved as needed so that the whole of it, title bar first, lies on
+    *area*."""
+    border, caption = frame_extents(centre)
     outer_w, outer_h = int(size[0]) + 2 * border, int(size[1]) + caption + border
     left, top, right, bottom = area
     x = max(left, min(centre[0] - outer_w // 2, right - outer_w))
@@ -250,6 +298,7 @@ def place_window(win: tk.Toplevel, parent: tk.Misc | None = None, at: tuple[int,
         area, centre = dialog_area(win, parent, at)
         x, y = dialog_spot((width, height), centre, area)
         win.geometry(f"+{x}+{y}")
+        win._placed_at = (x, y)  # type: ignore[attr-defined] - (`show_quietly`: Tk's first map there forgets it)
         if not hidden:
             win.deiconify()
     except tk.TclError:
@@ -289,6 +338,7 @@ def place_again(win: tk.Toplevel, parent: tk.Misc | None = None, before: tuple[i
             x, y = dialog_spot(size, centre, area)
             win.geometry(f"{size[0]}x{size[1]}+{x}+{y}")
             win.update_idletasks()  # (moved now, not at the next idle moment)
+            win._placed_at = (x, y)  # type: ignore[attr-defined] - (a hidden one shown later: `show_quietly`)
             moved = True
     except tk.TclError:
         pass
@@ -359,8 +409,11 @@ def show_quietly(win: tk.Toplevel, focus: tk.Misc | None = None) -> None:
     Windows lets through while the pointer's last input went to TASlation - a box while editing), then topmost
     (`stay_on_top`, SWP_NOACTIVATE). It waits in sight until the person clicks it (Windows activates it then: it takes
     the keys, *focus* the first) and is marked meanwhile (``_see_quiet``: `seethrough.front_tick` brings no such
-    dialog to the front, a region editor's closing gives the foreground back past it)."""
+    dialog to the front, a region editor's closing gives the foreground back past it). A dialog never shown before
+    is mapped by ``wm state normal`` at the primary monitor's top left whatever place it was given while withdrawn:
+    it is mapped unseen (alpha 0) and moved to the place `place_window` gave it before it is seen."""
     win._see_quiet = True  # type: ignore[attr-defined]
+    spot = getattr(win, "_placed_at", None)
 
     def taken(_event: Any = None) -> None:
         if not getattr(win, "_see_quiet", False):
@@ -375,10 +428,21 @@ def show_quietly(win: tk.Toplevel, focus: tk.Misc | None = None) -> None:
 
     try:
         win.bind("<FocusIn>", taken, add="+")
+        if spot is not None:
+            win.attributes("-alpha", 0.0)
         win.wm_state("normal")
         win.update_idletasks()
+        if spot is not None:
+            win.geometry(f"+{int(spot[0])}+{int(spot[1])}")
+            win.update_idletasks()
     except tk.TclError:
         return
+    finally:
+        if spot is not None:
+            try:
+                win.attributes("-alpha", 1.0)
+            except tk.TclError:
+                pass
     stay_on_top(win)
 
 

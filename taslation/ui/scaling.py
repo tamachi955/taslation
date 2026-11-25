@@ -8,7 +8,9 @@ smaller. Tk 8.6 sets its scaling once, from the system's DPI, and never again; s
 looked at whenever the window has moved (`<Configure>`, once the moves stop: `CHECK_MS`), and on a change Tk's scaling
 is set again and every named font is told, which makes Tk measure it anew in the new scaling (a font sized in points
 follows; one sized in pixels, a negative size, keeps its pixels). What is laid out in pixels (a canvas, a fixed
-width) keeps its pixels.
+width) keeps its pixels. In see-through mode the window is off every monitor (Windows would give it the DPI of the
+monitor nearest that place): the scaling follows the monitor its dialogs go on instead, the viewer's
+(`seethrough.dialog_dpi`, looked at again whenever the viewer's DPI changes, `seethrough.tick`).
 """
 
 from __future__ import annotations
@@ -99,15 +101,27 @@ def apply_scale(root: tk.Misc, ui_scale: float = 1.0, dpi: float | None = None) 
 class DpiWatch:
     """Looks at the DPI of *root*'s monitor once the window has stopped moving (`<Configure>`, then `CHECK_MS`) and,
     on a change, scales Tk again with the UI scale *ui_scale* gives (`apply_scale`), then calls *on_change* (the DPI)
-    for what the window lays out itself. ``dpi``: the DPI the window was last scaled for."""
+    for what the window lays out itself. ``dpi``: the DPI the window was last scaled for. *source*, when given, says
+    the DPI to scale for instead of *root*'s monitor's (see-through mode: the window is off every monitor, its dialogs
+    go on the viewer's - `seethrough.dialog_dpi`; None from it: as it was)."""
 
-    def __init__(self, root: tk.Misc, ui_scale: Callable[[], float], on_change: Callable[[int], None] | None = None):
+    def __init__(self, root: tk.Misc, ui_scale: Callable[[], float], on_change: Callable[[int], None] | None = None,
+                 source: Callable[[], int | None] | None = None):
         self.root = root
         self.ui_scale = ui_scale
         self.on_change = on_change
-        self.dpi: int | None = window_dpi(root)
+        self.source = source
+        self.dpi: int | None = self._now()
         self._job: str | None = None
         root.bind("<Configure>", self._moved, add="+")
+
+    def _now(self) -> int | None:
+        if self.source is not None:
+            try:
+                return self.source()
+            except Exception:  # noqa: BLE001 - (nothing to go by now: as it was)
+                return None
+        return window_dpi(self.root)
 
     def _moved(self, event: tk.Event) -> None:
         if event.widget is not self.root:  # (a child laid out: no move of the window)
@@ -125,7 +139,7 @@ class DpiWatch:
     def check(self) -> bool:
         """The monitor's DPI looked at now; whether it changed (and Tk was scaled for it)."""
         self._job = None
-        dpi = window_dpi(self.root)
+        dpi = self._now()
         if dpi is None or dpi == self.dpi:
             return False
         self.dpi = dpi
@@ -136,5 +150,5 @@ class DpiWatch:
 
     def rescale(self) -> float:
         """The UI scale changed (Settings): Tk scaled again for the monitor the window is on now."""
-        self.dpi = window_dpi(self.root) or self.dpi
+        self.dpi = self._now() or self.dpi
         return apply_scale(self.root, self.ui_scale(), self.dpi)

@@ -475,10 +475,10 @@ class SettingsDialog(tk.Toplevel):
         try:
             self.update_idletasks()
             if master.winfo_viewable():  # (where `place_window` puts it: over the window, or where it says)
-                _left, top, _right, bottom = dialog_area(self, master)[0]
+                (_left, top, _right, bottom), centre = dialog_area(self, master)
             else:
-                _left, top, _right, bottom = work_area(self)
-            border, caption = frame_extents()
+                (_left, top, _right, bottom), centre = work_area(self), None
+            border, caption = frame_extents(centre)
             self._room = bottom - top - caption - border
             tallest = max(page.canvas.winfo_reqheight() for page in self.scrolled_pages())
             self._others = self.winfo_reqheight() - tallest - self.message_label.winfo_reqheight()

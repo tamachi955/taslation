@@ -12,7 +12,7 @@ from typing import Callable
 
 from ...i18n import _
 from ..banner import break_lines
-from ..layout import place_window, work_area
+from ..layout import dialog_area, place_window, work_area
 from ..wrap import wrap_line
 from .notice import NoticeDialog
 
@@ -87,7 +87,11 @@ class HelpWindow(tk.Toplevel):
         self.title(_("How to use TASlation"))
         self.transient(master)
         self.minsize(*HELP_MIN)
-        left, top, right, bottom = work_area(self)
+        try:  # (the work area it lands on, `place_window`'s: the viewer's monitor in see-through mode)
+            left, top, right, bottom = (dialog_area(self, master)[0] if master.winfo_viewable()
+                                        else work_area(self))
+        except tk.TclError:
+            left, top, right, bottom = work_area(self)
         self.geometry(f"{min(HELP_SIZE[0], right - left - 40)}x{min(HELP_SIZE[1], bottom - top - 100)}")
         self._font = tkfont.nametofont("TkDefaultFont")
         self._bold = tkfont.Font(self, font=self._font)

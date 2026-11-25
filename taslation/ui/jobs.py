@@ -1176,6 +1176,9 @@ class JobsMixin:
             self._grip_box = None
             if not any(r is self._chosen_region for r in self.last_result.regions):
                 self._chosen_region = None
+            carry_editor = getattr(self, "_carry_editor", None)  # (the editor's page taken again: it follows)
+            if carry_editor is not None:
+                carry_editor()
             self._redisplay()
             self._show_notes()
             result = self.last_result
