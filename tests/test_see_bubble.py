@@ -68,7 +68,7 @@ def page_app(tmp_path, regions, **more):
     original = Image.new("RGB", FRAME, (20, 20, 20))
     result = SimpleNamespace(original=original, image=original, regions=regions)
     app = SimpleNamespace(settings=Settings(state_dir=tmp_path / "state", config_path=tmp_path / "taslation.toml"),
-                          _see_through=FakeOver(), _see_pane_memo={}, _see_clicked=[], _see_language=None, _see_dpi=96,
+                          _see_through=FakeOver(), _see_pane_memo={}, _see_clicked=[], _see_dpi=96,
                           _see_ground=(FRAME, SPREAD, BAND, (20, 20, 20), (0, FRAME[0])), _see_bubble=None,
                           _see_reads={}, auto_var=Var(True), lang_var=Var("English"), status_var=Var("Ready."),
                           busy=False, last_result=result, _fill=None, pipeline=object(), said=[], copied=[])

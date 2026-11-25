@@ -29,8 +29,8 @@ page's regions.
   LEFT the controls - Translate (Stop while a page can be stopped) with, at the row's right end, a square button drawn
   as a circular arrow that has the page on show translated again (`_again`: the window's Translate again, its lines
   asked of the translator anew; dim until a page was lettered and while the window's Translate is), Auto, the target
-  language (an arrow each side; taken once no
-  arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
+  language (a click lists every target language at the pane's right side, `see_menu.languages_at_pane`; one clicked
+  there is taken at once, `take_language`), the lettering's switch, the indicators' switch (kept in the settings
   file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
   `see_edit`), Add area (a text area drawn on the page, Edit on or off: `see_edit.toggle_adding`; pressed while one
   is to be added; "(Insert)" while that key adds one), Set area..., Settings..., Menu (`see_menu`: what the hidden
@@ -116,7 +116,6 @@ CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`re
 
 
 QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
-LANGUAGE_SETTLE_MS = 1200  # the language chosen with the left pane's arrows is taken once none was clicked so long
 OFF_GAP = 400  # px between the hidden window's bottom right and the virtual screen's top left (its frame: some 40)
 HIDE_EVERY = 10  # ticks (0.5 s) between the looks of `keep_hidden`
 ASKED_S = 1.5  # a dialog that shows so soon after the reader asked for something (`asked`) takes the keys
@@ -583,7 +582,6 @@ def start(app: Any) -> bool:
     app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
-    app._see_language = None  # (language, after job) while the left pane's arrows are being clicked
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
     app._see_ticks = 0
     app._see_asked = -1e9  # when the reader last asked for something (`asked`)
@@ -719,25 +717,33 @@ def _stoppable(app: Any) -> bool:
         return False
 
 
-def _languages(app: Any) -> list[str]:
-    """The target languages the left pane's arrows go through: the "To:" box's list (English names), the language in
-    force first when it is not one of them."""
+def languages(app: Any) -> list[str]:
+    """The target languages the left pane's list offers (`see_menu.build_targets`): the "To:" box's list (English
+    names), the language in force first when it is not one of them."""
     from .constants import LANGUAGES
 
     names = list(LANGUAGES)
-    current = str(_get(getattr(app, "lang_var", None), "") or "")
+    current = target(app)
     if current and current not in names:
         names.insert(0, current)
     return names
 
 
-def _language_shown(app: Any) -> str:
-    """The target language as the left pane shows it: the one being chosen with its arrows, else the one in force."""
-    picking = getattr(app, "_see_language", None)
-    language = picking[0] if picking is not None else str(_get(getattr(app, "lang_var", None), "") or "")
+def target(app: Any) -> str:
+    """The target language in force (its English name; "" for none)."""
+    return str(_get(getattr(app, "lang_var", None), "") or "")
+
+
+def language_label(language: str) -> str:
+    """A target language as the left pane's row and its list name it: in the window's language."""
     from .constants import LANGUAGES
 
     return _(language) if language in LANGUAGES else language
+
+
+def _language_shown(app: Any) -> str:
+    """The target language as the left pane shows it: the one in force."""
+    return language_label(target(app))
 
 
 def again_enabled(app: Any) -> bool:
@@ -763,7 +769,7 @@ def left_rows(app: Any) -> list[pn.Row]:
             pn.Row("add_area", _(see_edit.ADD_AREA), on=see_edit.adding(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
-            pn.Row("language", _language_shown(app), "choice"),
+            pn.Row("language", _language_shown(app), "list"),
             pn.Row("lettering", _("Lettering"), "toggle", on=bool(over is None or over.on)),
             pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
             *edit,
@@ -917,37 +923,19 @@ def pane_click(app: Any, side: str, x: int, y: int) -> str:
     return name
 
 
-def _pick_language(app: Any, step: int) -> None:
-    """An arrow of the language row: the next or the one before in the list, shown at once, taken once no arrow was
-    clicked for LANGUAGE_SETTLE_MS (the translator may follow it with another model)."""
-    names = _languages(app)
-    picking = getattr(app, "_see_language", None)
-    current = picking[0] if picking is not None else str(_get(getattr(app, "lang_var", None), "") or "")
-    index = names.index(current) if current in names else 0
-    chosen = names[(index + step) % len(names)]
-    if picking is not None:
-        try:
-            app.after_cancel(picking[1])
-        except (tk.TclError, ValueError):
-            pass
-    try:
-        job = app.after(LANGUAGE_SETTLE_MS, lambda: _language_settled(app))
-    except Exception:  # noqa: BLE001 - no Tk loop (a test): taken at once
-        app._see_language = (chosen, None)
-        _language_settled(app)
-        return
-    app._see_language = (chosen, job)
+def _language_list(app: Any) -> None:
+    """The left pane's language row: every target language listed at the pane's right side (`see_menu`)."""
+    from . import see_menu
+
+    see_menu.languages_at_pane(app)
 
 
-def _language_settled(app: Any) -> None:
-    """The language chosen with the arrows taken, as the "To:" box takes one chosen there (`_target_picked`); a
+def take_language(app: Any, language: str) -> None:
+    """*language*, clicked in the list of target languages (the left pane's, the taskbar button's Menu), taken at
+    once as the "To:" box takes one chosen there (`_target_picked`: the page on show asked for again in it); a
     language whose model is not there is offered in a dialog of the window's, which takes the keys as it shows: the
-    reader asked for it (`asked`)."""
-    picking, app._see_language = getattr(app, "_see_language", None), None
-    if picking is None:
-        return
-    language = picking[0]
-    if language == str(_get(getattr(app, "lang_var", None), "") or ""):
+    reader asked for it (`asked`). The language in force: nothing happens."""
+    if not language or language == target(app):
         return
     plan = getattr(app, "_plan", None)
     try:
@@ -956,11 +944,9 @@ def _language_settled(app: Any) -> None:
         offered = True
     if offered:
         asked(app)
-    from .constants import LANGUAGES
-
     shown = getattr(app, "lang_shown", None)
     if shown is not None:
-        shown.set(_(language) if language in LANGUAGES else language)  # (the "To:" box: lang_var follows)
+        shown.set(language_label(language))  # (the "To:" box: lang_var follows)
     picked = getattr(app, "_target_picked", None)
     if picked is not None:
         picked()
@@ -1242,8 +1228,7 @@ PANE_ACTIONS: dict[str, Any] = {
     "again": _again,  # (the circular arrow: the page on show translated again, the cache's lines replaced)
     "stop": lambda app: app.stop_page(),
     "auto": _flip_auto,
-    "language_prev": lambda app: _pick_language(app, -1),
-    "language_next": lambda app: _pick_language(app, 1),
+    "language": _language_list,  # (every target language listed beside the pane: `see_menu.languages_at_pane`)
     "lettering": toggle,
     "indicators": _flip_indicators,
     "area": _dialog("set_area"),

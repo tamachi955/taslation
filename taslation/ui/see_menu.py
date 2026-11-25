@@ -3,8 +3,9 @@ hosts the dialogs), in places of their own.
 
 * The menu (`build`, `popup`): the left pane's Menu row opens it at the pane's right edge, level with the row
   (`popup_at_pane`), and a click on TASlation's taskbar button while the left pane has no room beside the page opens
-  it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Lettering,
-  Add area, Set area...) and Settings... and Quit added. While the setup banner has buttons
+  it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Translate
+  into - the target languages as a cascade -, Lettering, Add area, Set area...) and Settings... and Quit added. While
+  the setup banner has buttons
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
   in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
@@ -13,6 +14,14 @@ hosts the dialogs), in places of their own.
   page's tools and what acts on the regions chosen, then Review..., My corrections..., Lines to review..., Find
   and replace..., Series sheet..., Book settings...). Every entry but Quit counts as the reader asking
   (`seethrough.asked`): a dialog it opens takes the keys.
+* The target languages (`languages_at_pane`, `build_targets`): the left pane's language row lists every one at the
+  pane's right edge, level with the row, in a menu of the same kind - Windows' popup menu of this process's, so the
+  lettering and the panes stay under it (`capture.seethrough.own_menu`), a click on one takes it at once
+  (`seethrough.take_language`: the page on show asked for again in it) and ends the list, and a click anywhere else
+  (the row again too) or Esc ends it with no change -, each named as the row names it, the one in force ticked: all
+  of them in one column while the viewer is tall enough for it (`TARGET_ENTRY_PX` each), else in two, never a list
+  to scroll; near the foot of the work area the list goes up from the row's foot instead (`list_top`). The taskbar
+  button's menu has them as its cascade Translate into.
 * A menu needs its window in front for a click outside it to close it (Windows' rule for a menu of a window that is
   not in front): the hidden window is made the foreground first - the click that opened the menu was the reader's,
   on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the
@@ -51,6 +60,10 @@ WRAP_PX = 460  # the dialogs' lines are broken this wide (px at the window's sca
 BOOK_CHARS = 30  # the book dialog's Series field
 BANNER_LATER_MS = 500  # the banner's lines before Tk has shown the window: their dialog comes so much later
 CLOSE_CHARS = 32  # a banner line's Close in the Menu names so many of its first characters
+TRANSLATE_INTO = "Translate into"  # the taskbar button's menu: the target languages' cascade
+TARGET_ENTRY_PX = 20  # (px at 96 DPI) a target language's entry in the list, a little over what Windows draws (19 px
+# at 100 %, measured): one column while the viewer is as tall as all of them, else two
+MENU_EDGE_PX = 4  # (px at 96 DPI) a menu's frame above and below its entries (3 px measured)
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -58,6 +71,7 @@ IS_WINDOWS = sys.platform == "win32"
 def init(app: Any) -> None:
     """The state of this module's parts, at see-through mode's start."""
     app._see_menus = {}  # kind ("pane", "button") -> (its menu, the Language menu, the Help menu), kept and refilled
+    app._see_targets_menu = None  # the left pane's list of the target languages, kept and refilled
     app._see_menu_opened = []  # (when, kind) of each menu opened, for the tools
     app._see_chooser = None  # the viewer chooser while it is open
     app._see_book_dialog = None
@@ -91,9 +105,9 @@ def banner_actions(app: Any) -> list[tuple[str, Callable[[], None]]]:
 
 def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: bool = False) -> None:
     """*menu* filled anew with the entries (see the module's notes), its cascades *language* and *help_menu* too;
-    *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Lettering, Add area,
-    Set area...: the left pane is not on the screen) and Settings... and Quit at its end. The setup banner's buttons come first
-    while it has some (`banner_actions`)."""
+    *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Translate into - the
+    target languages, `build_targets` -, Lettering, Add area, Set area...: the left pane is not on the screen) and
+    Settings... and Quit at its end. The setup banner's buttons come first while it has some (`banner_actions`)."""
     from . import updates
     from .gpu_release import RELEASE_ENTRY, release_now
 
@@ -115,6 +129,11 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
         over = getattr(app, "_see_through", None)
         menu.add_command(label=_("Translate"), command=_asking(app, app.translate_now))
         menu.add_checkbutton(label=_("Auto"), variable=app.auto_var)
+        targets = getattr(menu, "_see_targets", None)  # (a cascade kept with the menu, filled anew)
+        if targets is None:
+            targets = menu._see_targets = tk.Menu(menu, tearoff=0)
+        build_targets(app, targets)
+        menu.add_cascade(label=_(TRANSLATE_INTO), menu=targets)
         menu._see_lettering = tk.BooleanVar(menu, value=bool(over is None or over.on))  # (kept: Tk's variable)
         menu.add_checkbutton(label=_("Lettering"), command=lambda: seethrough.toggle(app),
                              variable=menu._see_lettering)
@@ -169,6 +188,12 @@ def popup(app: Any, x: int, y: int, kind: str) -> None:
     notes). On Windows Tk's menu runs until it ends (Tk's timers go on meanwhile)."""
     menu, language, help_menu = menu_for(app, kind)
     build(app, menu, language, help_menu, full=kind == "button")
+    _track(app, menu, x, y, kind)
+
+
+def _track(app: Any, menu: Any, x: int, y: int, kind: str) -> None:
+    """*menu*, filled, at the screen point (*x*, *y*) until it ends (`popup`; the list of the target languages,
+    `languages_at_pane`), the hidden window in front meanwhile."""
     app._see_menu_up = True
     app.__dict__.setdefault("_see_menu_opened", []).append((time.monotonic(), kind))
     _front(seethrough.root_hwnd(app))
@@ -210,6 +235,84 @@ def popup_at_pane(app: Any) -> bool:
         return False
     top = next((hit[1] for name, hit in memo[1].hits if name == "menu"), 0)
     popup(app, box[2], box[1] + top, "pane")
+    return True
+
+
+# ------------------------------------------------------------------ the target languages
+def build_targets(app: Any, menu: tk.Menu, columns: int = 1) -> None:
+    """*menu* filled anew with every target language (`seethrough.languages`), each named as the left pane's row names
+    it (`seethrough.language_label`), the one in force ticked; a click on one takes it at once
+    (`seethrough.take_language`) - no dialog of its own, so not the reader asking: the foreground goes back to the
+    viewer as the menu ends. *columns*: 1, or 2 (the second begins halfway down the list)."""
+    menu.delete(0, "end")
+    names = seethrough.languages(app)
+    menu._see_target = tk.StringVar(menu, value=seethrough.target(app))  # (kept: Tk's variable)
+    half = -(-len(names) // 2) if columns > 1 else 0
+    for i, name in enumerate(names):
+        menu.add_radiobutton(label=seethrough.language_label(name), value=name, variable=menu._see_target,
+                             command=lambda n=name: seethrough.take_language(app, n),
+                             columnbreak=1 if half and i == half else 0)
+
+
+def target_columns(count: int, height: int, dpi: int) -> int:
+    """The columns of the list of *count* target languages beside a viewer *height* px tall (at *dpi*): one while all
+    of them fit that height (`TARGET_ENTRY_PX` each, the menu's frame besides), else two - never a list to scroll."""
+    from .. import seethrough as st
+
+    need = count * st.scaled(TARGET_ENTRY_PX, dpi) + 2 * st.scaled(MENU_EDGE_PX, dpi)
+    return 1 if need <= height else 2
+
+
+def list_top(top: int, bottom: int, height: int, area: tuple[int, int, int, int]) -> int:
+    """Where the top of a list *height* px tall goes beside a row whose top and foot are *top* and *bottom* (screen
+    px): level with the row's top, or - with no room for it below that in the work area *area* - going up from the
+    row's foot (flipped upwards), never above the work area's top."""
+    if top + height <= area[3]:
+        return top
+    return max(area[1], bottom - height)
+
+
+def targets_menu(app: Any) -> tk.Menu:
+    """The left pane's list of the target languages, made once and filled anew before each opening (a menu is never
+    destroyed while one of its commands may still be on its way)."""
+    menu = getattr(app, "_see_targets_menu", None)
+    try:
+        if menu is not None and menu.winfo_exists():
+            return menu
+    except tk.TclError:
+        pass
+    menu = app._see_targets_menu = tk.Menu(app, tearoff=0)
+    return menu
+
+
+def languages_at_pane(app: Any) -> bool:
+    """The left pane's language row: every target language listed at the pane's right edge, level with the row (see
+    the module's notes), in one column or two (`target_columns`, by the viewer's height), going up from the row's foot
+    near the foot of the work area (`list_top`). Whether it opened."""
+    from .. import seethrough as st
+    from .layout import work_area
+
+    over = getattr(app, "_see_through", None)
+    memo = getattr(app, "_see_pane_memo", {}).get("left")
+    box = over.pane_shown("left") if over is not None else None
+    row = next((hit for name, hit in memo[1].hits if name == "language"), None) if memo is not None else None
+    if box is None or row is None:
+        return False
+    dpi = int(getattr(app, "_see_dpi", st.BASE_DPI))
+    ground = getattr(app, "_see_ground", None)
+    height = int(ground[0][1]) if ground else 0  # (the viewer's frame: its client area's height)
+    count = len(seethrough.languages(app))
+    columns = target_columns(count, height, dpi)
+    menu = targets_menu(app)
+    build_targets(app, menu, columns)
+    rows = -(-count // columns)
+    tall = rows * st.scaled(TARGET_ENTRY_PX, dpi) + 2 * st.scaled(MENU_EDGE_PX, dpi)
+    try:  # (Tk's own figure for it, when taller: a larger menu font set on the machine)
+        tall = max(tall, int(menu.winfo_reqheight()) + 2 * st.scaled(MENU_EDGE_PX, dpi))
+    except (tk.TclError, AttributeError, TypeError, ValueError):
+        pass
+    x, top, bottom = box[2], box[1] + row[1], box[1] + row[3]
+    _track(app, menu, x, list_top(top, bottom, tall, work_area(app, x, top)), "targets")
     return True
 
 

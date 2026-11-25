@@ -26,7 +26,7 @@ BAND = (142, 832)  # the steady band: the capture area less its top 15 % and bot
 
 def controls():
     return [pn.Row("translate", "Translate", square="again"), pn.Row("auto", "Auto", "toggle", on=True),
-            pn.Row("language", "English", "choice"), pn.Row("lettering", "Lettering", "toggle", on=True),
+            pn.Row("language", "English", "list"), pn.Row("lettering", "Lettering", "toggle", on=True),
             pn.Row("indicators", "Indicators", "toggle", on=True), pn.Row("area", "Set area..."),
             pn.Row("settings", "Settings..."), pn.Row("menu", "Menu"), pn.Row("quit", "Quit")]
 
@@ -116,8 +116,8 @@ def test_a_panes_width_is_its_widest_control_its_words_wrapped_to_the_room_left(
     assert pn.width_for(words(), "en", 96, 10_000, fill=True) == 200
     assert pn.width_for(short, "en", 96, 150, fill=True) == 150
     assert pn.width_for(short, "en", 144, 10_000, fill=True) == 300  # (at 150 %)
-    # a long language name between the arrows is cut, not a reason to hide the pane
-    long_name = [pn.Row("language", "Portuguese (Brazil) and more words", "choice")]
+    # a long language name before the list's mark is cut, not a reason to hide the pane
+    long_name = [pn.Row("language", "Portuguese (Brazil) and more words", "list")]
     least = pn.width_for(long_name, "en", 96, pn.scaled(pn.MIN_W, 96))
     assert least == pn.scaled(pn.MIN_W, 96)
     assert pn.cut(pn.font("en", 13), "Portuguese (Brazil) and more words", 60).endswith("...")
@@ -139,7 +139,7 @@ def test_a_pane_is_plates_with_nothing_between_and_its_controls_are_hit_where_th
     picture = pn.render(rows, pn.width_for(rows, "en", 96), "en", 96, pn.LIGHT)
     alpha = picture.bgra[..., 3]
     tops = sorted({box[1] for _name, box in picture.hits})
-    assert len(tops) == len(rows)  # (one plate a row; the choice's two halves share one)
+    assert len(tops) == len(rows)  # (one plate a row)
     first = next(box for name, box in picture.hits if name == "translate")
     second = next(box for name, box in picture.hits if name == "auto")
     gap_row = (first[3] + second[1]) // 2
@@ -148,9 +148,16 @@ def test_a_pane_is_plates_with_nothing_between_and_its_controls_are_hit_where_th
     assert picture.hit(middle, (first[1] + first[3]) // 2) == "translate"
     assert picture.hit(middle, gap_row) == ""
     assert alpha[(first[1] + first[3]) // 2, middle] == pn.ALPHA
-    # the language: an arrow each side, the left half the one before, the right half the next
-    choice = [name for name, _box in picture.hits if name.startswith("language")]
-    assert choice == ["language_prev", "language_next"]
+    # the language: one plate a click opens the list on, its words from the left, an arrowhead at its right end
+    language = [(name, box) for name, box in picture.hits if name.startswith("language")]
+    assert [name for name, _box in language] == ["language"]
+    box = language[0][1]
+    assert box[0] == 0 and box[2] == picture.size[0]  # (the whole plate)
+    mid = (box[1] + box[3]) // 2
+    mark = pn.scaled(pn.LIST_MARK_PX, 96)
+    end = picture.size[0] - pn.PAD
+    # (the arrowhead's ink is drawn opaque on the plate, whose alpha is ALPHA: there at the plate's end)
+    assert (picture.bgra[mid, end - mark:end + 1, 3] == 255).any() and picture.bgra[mid, end + 2, 3] == pn.ALPHA
     # premultiplied: no colour brighter than its alpha
     assert (picture.bgra[..., :3].max(axis=2) <= alpha).all()
 
@@ -260,7 +267,7 @@ class Var:
 def fake_app(tmp_path, **more):
     settings = Settings(state_dir=tmp_path / "state", config_path=tmp_path / "taslation.toml")
     app = SimpleNamespace(settings=settings, _see_through=FakeOver(), _see_pane_memo={}, _see_clicked=[],
-                          _see_language=None, _see_dpi=96,
+                          _see_dpi=96,
                           _see_ground=(FRAME, SPREAD, BAND, (20, 20, 20), (0, FRAME[0])),
                           auto_var=Var(True), lang_var=Var("English"), status_var=Var("Ready."), said=[],
                           busy=False, last_result=object(), asked=[])
@@ -408,12 +415,22 @@ def test_the_indicators_switch_is_kept_in_the_settings_file_for_the_next_starts(
     assert Settings.load(tmp_path / "taslation.toml").see_through_indicators is True and app.said == []
 
 
-def test_the_language_arrows_show_at_once_and_the_choice_is_taken_once(tmp_path):
-    picked = []
-    app = fake_app(tmp_path, lang_shown=Var("English"), _target_picked=lambda: picked.append(app.lang_shown.get()))
-    app.after = lambda _ms, _fn: (_ for _ in ()).throw(RuntimeError("no Tk loop"))  # (a test: taken at once)
-    ui._pick_language(app, 1)
-    assert picked and app.lang_shown.get() != "English"
+def test_a_language_clicked_in_the_list_is_taken_at_once_and_the_one_in_force_changes_nothing(tmp_path):
+    picked, asked = [], []
+    app = fake_app(tmp_path, lang_shown=Var("English"), _target_picked=lambda: picked.append(app.lang_shown.get()),
+                   _plan=lambda language: None)
+    ui.take_language(app, "English")  # (the language in force: nothing happens)
+    assert picked == [] and app.lang_shown.get() == "English"
+    ui.take_language(app, "German")
+    assert picked == ["German"]  # (at once: no wait, no other click needed)
+    app._plan = lambda language: asked.append(language) or "offer"  # (its model not there: the offer's dialog)
+    ui.take_language(app, "Korean")
+    assert picked[-1] == "Korean" and asked == ["Korean"] and app._see_asked > 0  # (that dialog takes the keys)
+    # the row: the language in force, by its name in the window's language, a plate that opens the list
+    row = next(r for r in ui.left_rows(app) if r.name == "language")
+    assert row.kind == "list" and row.text == "English"
+    assert "language" in ui.PANE_ACTIONS and not any(k.startswith("language_") for k in ui.PANE_ACTIONS)
+    assert not hasattr(ui, "LANGUAGE_SETTLE_MS") and not hasattr(ui, "_pick_language")
 
 
 def test_the_left_pane_ends_with_menu_and_quit_and_offers_no_way_to_taslations_window(tmp_path):

@@ -11,7 +11,7 @@ ground, and their pictures (`ui.seethrough` fills them, `capture.seethrough` sho
   spread); the page box only says whether it may show: a pane that would come within GAP px of the page, or that the
   band is too short for, is not placed (it hides) rather than cover the page.
 * A pane's width (`width_for`): the left one as wide as its widest row asks (the text at FONT_PX, a toggle's box, the
-  arrows of a choice, a row's square button, PAD each side), between MIN_W and MAX_W; the right one INDICATORS_W
+  mark of a list, a row's square button, PAD each side), between MIN_W and MAX_W; the right one INDICATORS_W
   whatever its words say (a width that does not change with them); either no wider than its ground leaves (*room*).
   The words of a text row are wrapped to it, a control's never are, so the least a pane needs is its widest control,
   or MIN_W for words alone. In English at 100 % the controls take some 130-150 px (some 165 px in German), the words
@@ -45,13 +45,13 @@ ROW_PAD = 5  # px of plate above and below a row's text
 ROW_GAP = 4  # px of nothing between two rows (the viewer's ground: its clicks are the viewer's)
 FONT_PX = 13  # the rows' text
 TOGGLE_PX = 11  # a toggle's box
-ARROW_PX = 14  # the room of each arrow of a choice
+LIST_MARK_PX = 14  # the room of a list's arrowhead at its plate's right end
 MIN_W, MAX_W = 120, 240  # a pane's width, whatever its rows ask
 INDICATORS_W = 200  # the right pane's width (its ground less the gaps when that is less)
 RADIUS = 5  # the plates' corners
 ALPHA = 225  # the plates' opacity (of 255)
 TEXT_LINES = 4  # the right pane's status text is wrapped into at most so many lines
-CHOICE_LEAST = 72  # px of a choice's words at the least (a longer name is cut with an ellipsis to the pane's width)
+LIST_LEAST = 72  # px of a list's words at the least (a longer name is cut with an ellipsis to the pane's width)
 
 # the window's language -> the system's fonts for its script (Windows; the first found); others: Segoe UI
 FONTS = {"ja": ("YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"), "zh": ("msyh.ttc", "simsun.ttc"),
@@ -63,7 +63,8 @@ LATIN_FONTS = ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf")
 class Row:
     """A row of a pane: *name* what a click on it does ("" for none), *text* its words; *kind* "button" (drawn pressed
     when *on* - its plate in the accent colour: what it began is under way, Add area), "toggle" (a box ticked when
-    *on*), "choice" (an arrow each side: *name* + "_prev" / "_next") or "text" (words only); a row not
+    *on*), "list" (a button that opens a list - the target languages -, its plate ending in a small arrowhead that
+    says so: `LIST_MARK_PX`; a long text is cut with an ellipsis) or "text" (words only); a row not
     *enabled* is drawn dim and takes no click; a *warn* row's words are orange (the page that could not be
     translated). *square*: the name of a button at the row's right end, a square plate of the row's height with a
     glyph (`GLYPHS`) and no words ("" for none), dim and taking no click when not *square_enabled*. *lang*: the
@@ -160,11 +161,9 @@ def _text_w(face: Any, text: str) -> int:
 
 
 def _lead(row: Row, dpi: float) -> int:
-    """The room before a row's text: a toggle's box and its gap, an arrow."""
+    """The room before a row's text: a toggle's box and its gap."""
     if row.kind == "toggle":
         return scaled(TOGGLE_PX + 6, dpi)
-    if row.kind == "choice":
-        return scaled(ARROW_PX, dpi)
     return 0
 
 
@@ -174,7 +173,7 @@ def row_height(face: Any, dpi: float, lines: int = 1) -> int:
 
 
 def width_for(rows: list[Row], language: str, dpi: float, room: int | None = None, fill: bool = False) -> int | None:
-    """The width a pane of *rows* takes (at *dpi*): its widest row (its text, a toggle's box, a choice's arrows, a
+    """The width a pane of *rows* takes (at *dpi*): its widest row (its text, a toggle's box, a list's mark, a
     square button, PAD each side), between MIN_W and MAX_W - with *fill*, INDICATORS_W whatever its rows say (the
     indicators: a width that does not change with what they say) -, and no wider than *room* (the px its ground leaves
     it; None: any). A text row's
@@ -186,12 +185,12 @@ def width_for(rows: list[Row], language: str, dpi: float, room: int | None = Non
     square = row_height(face, dpi) + scaled(ROW_GAP, dpi)  # (a row's square button and the gap before it)
     for row in rows:
         text = _text_w(font(row.lang, scaled(FONT_PX, dpi)) if row.lang else face, row.text)
-        extra = _lead(row, dpi) + (scaled(ARROW_PX, dpi) if row.kind == "choice" else 0) + \
+        extra = _lead(row, dpi) + (scaled(LIST_MARK_PX, dpi) if row.kind == "list" else 0) + \
             (square if row.square else 0)
         width = text + extra + 2 * scaled(PAD, dpi)
         widest = max(widest, width)
-        if row.kind == "choice":  # (a long name between the arrows is cut: "Portuguese (Bra...")
-            need = max(need, min(width, extra + 2 * scaled(PAD, dpi) + scaled(CHOICE_LEAST, dpi)))
+        if row.kind == "list":  # (a long name before the mark is cut: "Portuguese (Bra...")
+            need = max(need, min(width, extra + 2 * scaled(PAD, dpi) + scaled(LIST_LEAST, dpi)))
         elif row.kind != "text":
             need = max(need, width)
     width = max(need, scaled(INDICATORS_W, dpi) if fill else min(scaled(MAX_W, dpi), widest))
@@ -341,22 +340,16 @@ def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colou
             else:
                 draw.rectangle(box, outline=(*ink, 255), width=max(1, scaled(1, dpi)))
             x += _lead(row, dpi)
-        if row.kind == "choice":
-            arrow = scaled(ARROW_PX, dpi)
+        if row.kind == "list":  # (its words from the left, cut before the mark; the arrowhead at the plate's end)
+            mark = scaled(LIST_MARK_PX, dpi)
             mid = y + h // 2
             half = max(2, scaled(4, dpi))
-            draw.polygon([(pad + half, mid - half), (pad + half, mid + half), (pad, mid)], fill=(*ink, 255))
-            right = width - pad
+            right = plate_w - pad
             draw.polygon([(right - half, mid - half), (right - half, mid + half), (right, mid)], fill=(*ink, 255))
-            lines = [cut(face, row.text, width - 2 * pad - 2 * arrow)]
-            text_w = _text_w(face, lines[0])
-            x = pad + arrow + max(0, (width - 2 * pad - 2 * arrow - text_w) // 2)
-            if row.enabled and row.name:
-                hits.append((row.name + "_prev", (0, y, width // 2, y + h)))
-                hits.append((row.name + "_next", (width // 2, y, width, y + h)))
+            lines = [cut(face, row.text, plate_w - 2 * pad - mark)]
         for i, line in enumerate(lines):
             draw.text((x, top + i * line_h), line, font=face, fill=(*ink, 255))
-        if row.kind in ("button", "toggle") and row.enabled and row.name:
+        if row.kind in ("button", "toggle", "list") and row.enabled and row.name:
             hits.append((row.name, (0, y, plate_w, y + h)))
         y += h + gap
     rgba = np.asarray(image, dtype=np.uint8)

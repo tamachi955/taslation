@@ -332,25 +332,32 @@ def test_the_buttons_menu_adds_the_left_panes_controls_settings_and_quit_and_qui
     toggled, adding = [], []
     monkeypatch.setattr(ui, "toggle", lambda a: toggled.append(a))
     monkeypatch.setattr(see_edit, "toggle_adding", lambda a: adding.append(a._see_asked))
+    taken = []
+    monkeypatch.setattr(ui, "take_language", lambda a, language: taken.append(language))
     app = menu_app(hidden_root)
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
     sm.build(app, menu, language, help_menu, full=True)
-    assert entries(menu)[:6] == ["Translate", "Auto", "Lettering", "Add area", "Set area...", "-"]
+    assert entries(menu)[:7] == ["Translate", "Auto", "Translate into", "Lettering", "Add area", "Set area...", "-"]
     assert entries(menu)[-4:] == ["Help", "-", "Settings...", "Quit"]
     menu.invoke(len(entries(menu)) - 1)
     assert app.done == [("_on_close", None)]
     menu.invoke(len(entries(menu)) - 2)
     assert app.done[-1][0] == "open_settings" and app.done[-1][1] is not None
     menu.invoke(0)
-    menu.invoke(4)
+    menu.invoke(5)
     assert [n for n, _t in app.done[-2:]] == ["translate_now", "set_area"]
     menu.invoke(1)
     assert app.auto_var.get() is False
-    menu.invoke(2)
+    menu.invoke(3)
     assert toggled == [app]
     app._see_asked = None
-    menu.invoke(3)  # (Add area, as the left pane's: the Insert key can be switched off; no dialog, no asking)
+    menu.invoke(4)  # (Add area, as the left pane's: the Insert key can be switched off; no dialog, no asking)
     assert adding == [None]
+    # Translate into: the target languages as the left pane's list has them, a click taking one at once
+    targets = menu.nametowidget(menu.entrycget(2, "menu"))
+    assert entries(targets) == [ui.language_label(n) for n in ui.languages(app)]
+    targets.invoke(3)
+    assert taken == [ui.languages(app)[3]] and app._see_asked is None  # (no dialog of its own: no asking)
     app._see_adding = True
     sm.build(app, menu, language, help_menu, full=True)
     assert menu._see_adding.get() is True  # (ticked while a text area is to be added)
@@ -401,6 +408,71 @@ def test_the_menu_row_opens_the_menu_at_the_panes_right_edge_level_with_the_row(
     assert popped[-1] == (128, 380, "pane")
     app._see_through = SimpleNamespace(pane_shown=lambda side: None)  # (the pane hidden meanwhile)
     assert sm.popup_at_pane(app) is False and len(popped) == 2
+
+
+def test_the_target_languages_list_has_them_all_by_the_rows_names_the_one_in_force_ticked(hidden_root, monkeypatch):
+    taken = []
+    monkeypatch.setattr(ui, "take_language", lambda a, language: taken.append(language))
+    app = menu_app(hidden_root, lang_var=tk.StringVar(hidden_root, value="German"))
+    menu = tk.Menu(hidden_root, tearoff=0)
+    sm.build_targets(app, menu)
+    names = ui.languages(app)
+    assert len(names) == 20 and entries(menu) == [ui.language_label(n) for n in names]
+    assert all(menu.type(i) == "radiobutton" for i in range(len(names)))
+    assert menu._see_target.get() == "German"  # (the one in force ticked)
+    assert not any(int(menu.entrycget(i, "columnbreak")) for i in range(len(names)))  # (one column)
+    menu.invoke(names.index("Korean"))
+    assert taken == ["Korean"]  # (at once, by the click itself)
+    sm.build_targets(app, menu, columns=2)  # (filled anew: the second column begins halfway down)
+    assert entries(menu) == [ui.language_label(n) for n in names]
+    assert [i for i in range(len(names)) if int(menu.entrycget(i, "columnbreak"))] == [10]
+    # the left pane's list: made once and kept (never destroyed while a command may be on its way)
+    first = sm.targets_menu(hidden_root)
+    assert sm.targets_menu(hidden_root) is first
+    first.destroy()
+    assert sm.targets_menu(hidden_root) is not first
+
+
+def test_the_list_takes_one_column_while_the_viewer_is_tall_enough_and_goes_up_near_the_work_areas_foot():
+    # 20 languages at 20 px each, the menu's frame 4 px above and below: 408 px at 100 %, 612 px at 150 %
+    assert sm.target_columns(20, 946, 96) == 1 and sm.target_columns(20, 408, 96) == 1
+    assert sm.target_columns(20, 407, 96) == 2 and sm.target_columns(20, 611, 144) == 2
+    assert sm.target_columns(20, 612, 144) == 1
+    area = (0, 0, 1920, 1040)
+    assert sm.list_top(300, 330, 408, area) == 300  # (room below: level with the row)
+    assert sm.list_top(700, 730, 408, area) == 730 - 408  # (no room below: up from the row's foot)
+    assert sm.list_top(100, 130, 1100, area) == 0  # (never above the work area's top)
+
+
+def test_the_language_row_lists_them_at_the_panes_edge_level_with_the_row(hidden_root, monkeypatch):
+    from taslation.ui import layout as lay
+
+    tracked = []
+    made = tk.Menu(hidden_root, tearoff=0)  # (the window's own, kept: `targets_menu`)
+    monkeypatch.setattr(sm, "targets_menu", lambda app: made)
+    monkeypatch.setattr(sm, "_track", lambda app, menu, x, y, kind: tracked.append((menu, x, y, kind)))
+    monkeypatch.setattr(lay, "work_area", lambda widget, x=None, y=None: (0, 0, 1920, 1040))
+    picture = SimpleNamespace(hits=(("auto", (0, 40, 120, 70)), ("language", (0, 74, 120, 104))))
+    app = menu_app(hidden_root, lang_var=tk.StringVar(hidden_root, value="English"), _see_dpi=96,
+                   _see_through=SimpleNamespace(pane_shown=lambda side: (8, 100, 128, 500)),
+                   _see_pane_memo={"left": (None, picture, (8, 100, 128, 500))},
+                   _see_ground=((1904, 946), (235, 0, 1669, 946), (142, 832), (20, 20, 20), (0, 1904)))
+    assert sm.languages_at_pane(app) is True
+    menu, x, y, kind = tracked[-1]
+    assert (x, y, kind) == (128, 174, "targets") and menu is made
+    assert len(entries(menu)) == 20 and not int(menu.entrycget(10, "columnbreak"))
+    ui.PANE_ACTIONS["language"](app)  # (the row's click)
+    assert tracked[-1][1:] == (128, 174, "targets")
+    # a viewer too short for one column: two; the row near the work area's foot: the list goes up from it
+    app._see_ground = ((1904, 400),) + app._see_ground[1:]
+    app._see_through = SimpleNamespace(pane_shown=lambda side: (8, 900, 128, 1300))
+    assert sm.languages_at_pane(app) is True
+    menu, x, y, _kind = tracked[-1]
+    assert int(menu.entrycget(10, "columnbreak")) == 1
+    tall = max(10 * 20 + 2 * 4, made.winfo_reqheight() + 2 * 4)  # (Tk's own figure when taller)
+    assert y == 900 + 104 - tall  # (its foot level with the row's foot)
+    app._see_through = SimpleNamespace(pane_shown=lambda side: None)  # (the pane hidden meanwhile)
+    assert sm.languages_at_pane(app) is False and len(tracked) == 3
 
 
 # ------------------------------------------------------------------ the taskbar button
