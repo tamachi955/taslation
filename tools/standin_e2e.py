@@ -4,7 +4,7 @@ part of a release.
 
     python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,x,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
-                                [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
+                                [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11435]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
                                 [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
@@ -29,9 +29,10 @@ What runs, all on this computer:
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
   English; the reader's capture area 0,85,0,0 as on the owner's browser reader, its top scaled with *--scale*),
   with the real OCR models
-  (TASLATION_MODELS_DIR) and the default translator through the Ollama on this computer (requests only: it is
-  never started, stopped or set up here; what the window loaded it lets go of at its close, and the end checks
-  /api/ps). *--canned* (or an Ollama that does not answer or lacks the model) answers from a small server of this
+  (TASLATION_MODELS_DIR) and the default translator through the Ollama at *--ollama-url* on this computer -
+  127.0.0.1:11435 by default, a second server of the developer's own; Ollama's usual port 11434, where the person's
+  own server is likely to be, is refused without *--usual-port* - (requests only: it is never started, stopped or
+  set up here; what the window loaded it lets go of at its close, and the end checks /api/ps). *--canned* (or an Ollama that does not answer or lacks the model) answers from a small server of this
   tool instead ("Line N.", after a load and an answer time like the real model's), which the report says. With
   *--start-ollama PORT* the window's own starter starts Ollama instead, on that loopback port where nothing may
   answer, with the environment it chooses for the window's settings (*--ollama-window-cache*): the port it starts on
@@ -209,6 +210,8 @@ BOOK = "Stand-in sample"
 BOOK_UNNAMED = "untitled"  # --book-asked: the name the window begins with, which names no book (the start asks)
 BOOK_ANSWER_S = 1.5  # --book-asked: the start dialog is answered so long after it is on the screen
 PLAMO = "taslation-plamo3-translate-2b"
+USUAL_PORT = 11434  # Ollama's usual port: the person's own server is likely there (refused without --usual-port)
+SPARE_URL = "http://127.0.0.1:11435"  # --ollama-url's default: a second server of the developer's own
 AREA = (0, 85, 0, 0)  # the owner's capture area on the browser reader: the browser's title bar and the band
 TICK_MS = 40  # the director looks this often (the Tk loop)
 OCR_EVERY_S = 0.1
@@ -5712,9 +5715,13 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
                     help="scenario x: how long the screens of little text stay soft")
     ap.add_argument("--canned", action="store_true", help="the canned translator, not the Ollama on this computer")
-    ap.add_argument("--ollama-url", default="http://127.0.0.1:11434",
-                    help="the Ollama the window asks, on this computer (default: the app's; a second server of the "
-                         "developer's own on another port, set up otherwise, is never started or stopped here)")
+    ap.add_argument("--ollama-url", default=SPARE_URL,
+                    help="the Ollama the window asks, on this computer (default: 127.0.0.1:11435, a second server of "
+                         "the developer's own, set up otherwise, never started or stopped here; Ollama's usual port "
+                         "11434 only with --usual-port)")
+    ap.add_argument("--usual-port", action="store_true",
+                    help="Ollama's usual port 11434 is meant (--ollama-url, --start-ollama): the server there is "
+                         "likely the person's own, so it is refused without this")
     ap.add_argument("--ocr-runs-on", default="auto", choices=("auto", "cpu", "gpu"),
                     help="the setting ocr_runs_on of the window (default: the app's, auto)")
     ap.add_argument("--ollama-num-gpu", default="",
@@ -5858,7 +5865,24 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     args = ap.parse_args(argv)
     if args.soft_first is None:
         args.soft_first = "off" if args.standin_profile else "on"
+    if not args.usual_port:
+        if args.start_ollama == USUAL_PORT:
+            ap.error(f"--start-ollama {USUAL_PORT} is Ollama's usual port (the person's own server is likely there): "
+                     "give a spare one, or add --usual-port if that is meant")
+        if url_port(args.ollama_url) == USUAL_PORT and not args.start_ollama:
+            ap.error(f"--ollama-url on port {USUAL_PORT} is Ollama's usual port (the person's own server is likely "
+                     "there): give another, or add --usual-port if that is meant")
     return args
+
+
+def url_port(url: str) -> int | None:
+    """The port of an http address (None when it has none, or is not one)."""
+    from urllib.parse import urlsplit
+
+    try:
+        return urlsplit(url).port
+    except ValueError:
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:

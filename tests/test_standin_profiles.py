@@ -221,6 +221,20 @@ def test_a_profile_draws_sharp_at_once_unless_asked():
     assert sv.parse_options(args.standin_option) == {"bars": "move", "jump": "plain"}
 
 
+def test_the_translators_server_is_never_ollamas_usual_port_unless_that_is_meant():
+    # the person's own server is likely on 11434: the default is a second server's port, 11434 only with --usual-port
+    plain = standin_e2e.parse([])
+    assert plain.ollama_url == "http://127.0.0.1:11435" and not plain.usual_port
+    for argv in (["--ollama-url", "http://127.0.0.1:11434"], ["--ollama-url", "http://localhost:11434/"],
+                 ["--start-ollama", "11434"]):
+        with pytest.raises(SystemExit):
+            standin_e2e.parse(argv)
+        assert standin_e2e.parse(argv + ["--usual-port"]).usual_port
+    assert standin_e2e.parse(["--start-ollama", "11436"]).start_ollama == 11436
+    assert standin_e2e.parse(["--ollama-url", "http://127.0.0.1:11439"]).ollama_url.endswith(":11439")
+    assert standin_e2e.url_port("http://127.0.0.1:11435") == 11435 and standin_e2e.url_port("nonsense") is None
+
+
 # ---------------------------------------------------------------------------------------------------- the self-check
 def test_the_self_check_s_log_lines_hold_numbers_and_words_only():
     said = [(0.0, {"ev": "draw", "t": "1000.0", "step": "-1", "page": "0", "box": "1,2,3,4"}),

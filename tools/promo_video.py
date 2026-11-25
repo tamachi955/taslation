@@ -28,8 +28,10 @@ and outside ``~/.taslation``: the scratch folder), so that a video can be made a
   the Reader role), in English, on a scratch state folder (TASLATION_STATE_DIR: the legal notice dismissed, the
   first start's popup seen, the reader's capture area 0,85,0,0 as on a browser reader), the offline guard on (only
   the translator's port on this computer can be reached), the real OCR models (TASLATION_MODELS_DIR) and the default
-  translator through the Ollama at *--ollama* (requests only: never started, stopped or set up here; what the window
-  loaded it lets go of at its close, and what is still loaded of it at the end that was not before is unloaded).
+  translator through the Ollama at *--ollama* (127.0.0.1:11435 by default, a second server of the developer's own;
+  Ollama's usual port 11434, where the person's own server is likely to be, only with *--usual-port*; requests only:
+  never started, stopped or set up here; what the window loaded it lets go of at its close, and what is still loaded
+  of it at the end that was not before is unloaded).
   *--package* runs another checkout's ``taslation`` package (the one under that folder) in the same way, so that two
   versions can be recorded alike; *--label* names the recording (default: TASlation and the package's version).
   The pictures are of TASlation's own window, so the package is one that shows it: one before 2.0.0. From 2.0.0 on
@@ -151,8 +153,8 @@ PROJECT = "github.com/tamachi955/taslation"
 FORMAT = 1  # the recording file's
 BOOK = "OpenMantra sample"
 PLAMO = "taslation-plamo3-translate-2b"
-DEFAULT_PORT = 11434
-DEFAULT_OLLAMA = f"http://127.0.0.1:{DEFAULT_PORT}"
+DEFAULT_PORT = 11434  # Ollama's usual port: the person's own server is likely there (--ollama only with --usual-port)
+DEFAULT_OLLAMA = "http://127.0.0.1:11435"  # --ollama's default: a second server of the developer's own
 LETTERED_KINDS = ("filling", "final", "translated")  # what the window's page shows when it shows lettering
 MAX_END_LINES = 4
 CUT_TOLERANCE_MS = 60.0  # a pause shown this much shorter than it was is one cut
@@ -1550,12 +1552,17 @@ def places(areas: Sequence[tuple[tuple[int, int, int, int], bool]], viewer: tupl
     return (left, top, vw, min(viewer[1], height)), own
 
 
-def loopback(url: str) -> str:
+def loopback(url: str, usual: bool = False) -> str:
+    """*url* as *--ollama* takes it: an http address on this computer with its port - Ollama's usual one
+    (`DEFAULT_PORT`) only when *usual* (*--usual-port*: the server there is likely the person's own)."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
     if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1") or not parsed.port:
         raise SystemExit(f"--ollama is an http address on this computer with its port (got {url!r})")
+    if parsed.port == DEFAULT_PORT and not usual:
+        raise SystemExit(f"--ollama on port {DEFAULT_PORT} is Ollama's usual port (the person's own server is likely "
+                         "there): give another, or add --usual-port if that is meant")
     return url.rstrip("/")
 
 
@@ -2128,7 +2135,7 @@ def record(args: argparse.Namespace) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     if args.first < (3 if args.layout == "spread" else 2):
         raise SystemExit("--first is a page after the one the start-up translates (2 or more; 3 with spreads)")
-    url = started_url(args.start_ollama) if args.start_ollama else loopback(args.ollama)
+    url = started_url(args.start_ollama) if args.start_ollama else loopback(args.ollama, args.usual_port)
     package = Path(args.package).resolve() if args.package else ROOT
     if not (package / "taslation" / "__init__.py").is_file():
         raise SystemExit(f"{package} holds no taslation package")
@@ -2477,7 +2484,11 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec = sub.add_parser("record", help="run the window once and keep what it showed")
     rec.add_argument("--out", type=Path, required=True, help="the recording file (a ZIP in a scratch folder)")
     rec.add_argument("--label", default="", help="the recording's name in a video (default: TASlation VERSION)")
-    rec.add_argument("--ollama", default=DEFAULT_OLLAMA, help="the translator's server on this computer")
+    rec.add_argument("--ollama", default=DEFAULT_OLLAMA,
+                     help="the translator's server on this computer (default: 127.0.0.1:11435; Ollama's usual port "
+                          "11434 only with --usual-port)")
+    rec.add_argument("--usual-port", action="store_true",
+                     help="--ollama on Ollama's usual port 11434 is meant (the server there is likely the person's own)")
     rec.add_argument("--start-ollama", type=int, default=None, metavar="PORT",
                      help="TASlation's own starter starts Ollama on this loopback port, where nothing may answer (not "
                           "the default port; instead of --ollama), with the environment it chooses; stopped at the end")

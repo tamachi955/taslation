@@ -168,7 +168,10 @@ rows' languages.
   fetches nothing and turns its pages by its own script: soft first, spreads, black frames, a spinner, a band whose
   cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
-  answerer in its place), and the tool writes numbers (the sharp frame to the first request, the first lettered
+  answerer in its place; the server at `--ollama-url`, 127.0.0.1:11435 by default - a second server of the
+  developer's own -, or one TASlation's own starter starts, `--start-ollama PORT`; Ollama's usual port 11434, where
+  the person's own server is likely to be, is refused by this tool and by `tools/promo_video.py` without
+  `--usual-port`), and the tool writes numbers (the sharp frame to the first request, the first lettered
   bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; the
   lines sent to the translator as they were read (`streamed_lines`: those sent early, those that stood and those
   taken back - a unit's first line among them - and why, the requests so thrown away, counted apart from those sent

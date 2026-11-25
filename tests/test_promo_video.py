@@ -369,6 +369,13 @@ def test_the_translator_is_on_this_computer():
     for bad in ("http://192.168.1.2:11434", "https://127.0.0.1:11434", "http://127.0.0.1", "http://example.com:80"):
         with pytest.raises(SystemExit):
             pv.loopback(bad)
+    # Ollama's usual port: the person's own server is likely there - only when that is meant (--usual-port)
+    with pytest.raises(SystemExit):
+        pv.loopback("http://127.0.0.1:11434")
+    assert pv.loopback("http://127.0.0.1:11434", usual=True) == "http://127.0.0.1:11434"
+    plain = pv.parse(["record", "--out", "x.zip"])
+    assert plain.ollama == "http://127.0.0.1:11435" and not plain.usual_port
+    assert pv.parse(["record", "--out", "x.zip", "--ollama", "http://127.0.0.1:11434", "--usual-port"]).usual_port
 
 
 def test_settings_another_checkout_lacks_are_left_out():
