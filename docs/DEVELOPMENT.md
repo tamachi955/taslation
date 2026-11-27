@@ -474,11 +474,14 @@ rows' languages.
   ran and while following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
-  them). The side panes (`taslation/panes.py`, at the capture area's two outer edges) are watched once a second
-  (`panes`): shown or hidden with a single page or a spread, the most px each shared with the page box (0 expected),
-  their gaps to it, their px to their edge of the area (8 at 100 %), their columns in the client (the same with a
-  single page and a spread) and their sizes, and which window `WindowFromPoint` gives on the right pane (the stand-in:
-  click-through), on a control of the left one (the pane) and between two of its rows (the stand-in); some 8 s in,
+  them). The side panes (`taslation/panes.py`, at the capture area's two outer edges or nearer the page, 300 px at
+  the most from the widest page seen at the frame's size) are watched once a second (`panes`): shown or hidden with
+  a single page or a spread, the most px each shared with the page box (0 expected), their gaps to it (`gaps_px`:
+  beside a single page after a spread as far as the spread left them), their px to their edge of the area (8 at
+  100 % where the page leaves that near enough), their columns in the client (the same with a single page and a
+  spread once a spread was seen; one move at the first spread after a single page) and their sizes, and which
+  window `WindowFromPoint` gives on the right pane (the stand-in: click-through), on a control of the left one (the
+  pane) and between two of its rows (the stand-in); some 8 s in,
   the lettering's switch on the left pane is clicked twice by a press and a release POSTED to the pane's own window
   (no input of the system's: the lettering off and on again), with the time until it changed and the window in front
   looked at every 5 ms meanwhile (the stand-in throughout). The see-through window's reading of the pointer is the

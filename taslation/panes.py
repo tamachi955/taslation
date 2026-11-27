@@ -5,11 +5,17 @@ ground, and their pictures (`ui.seethrough` fills them, `capture.seethrough` sho
   (`Row`s a click acts on), the RIGHT one the indicators (rows of text) under the bubble last under the pointer (three
   plates a click acts on, then its Japanese and its translation, each in its own script's font: `Row.lang`). Each is
   placed from the capture area's
-  columns and the steady band of the viewer's frame (`place`): the left one GAP px in from the area's left edge, the
-  right one GAP px in from its right edge, from the band's top GAP px down (the band: where a viewer's bars never
-  come, so a pane never lies over them). So a pane stays where it is whatever the page's width (a cover alone, a
-  spread); the page box only says whether it may show: a pane that would come within GAP px of the page, or that the
-  band is too short for, is not placed (it hides) rather than cover the page.
+  columns, a page box and the steady band of the viewer's frame (`place`), from the band's top GAP px down (the
+  band: where a viewer's bars never come, so a pane never lies over them): inside the area GAP px in from its edge,
+  its edge toward the page GAP px from that box at the least and MAX_FROM_PAGE px at the most (on an ultrawide
+  monitor the area's edge is far from a page in the middle). The box is not the page on show but the widest the
+  page has been in frames of that size (`reaches`: per side the farthest out a page's edge has come beside which
+  the pane fitted - the spread, once one was shown), so that a pane stands still while the reader turns from spreads
+  to a single page and back, however far that page is. Where it goes in that span: where it was in frames of that
+  size while that is still in it; else - a wider page than any before - the span's end nearest to that (it moves
+  once, only as far as it must); with no place before, as far from the page as the span lets it (the area's edge
+  where that is within MAX_FROM_PAGE of the page). A pane that does not fit beside the page on show (it would come
+  within GAP px of it), or that the band is too short for, is not placed (it hides) rather than cover the page.
 * A pane's width (`width_for`): the left one as wide as its widest row asks (the text at FONT_PX, a toggle's box, the
   mark of a list, a row's square button, PAD each side), between MIN_W and MAX_W; the right one INDICATORS_W
   whatever its words say (a width that does not change with them); either no wider than its ground leaves (*room*).
@@ -47,6 +53,7 @@ from .seethrough import scaled
 Box = tuple[int, int, int, int]
 
 GAP = 8  # px between a pane and the capture area's edge, and at least between a pane and the page
+MAX_FROM_PAGE = 300  # px at the most between a pane and the page (`place`)
 PAD = 8  # px of plate before and after a row's content
 ROW_PAD = 5  # px of plate above and below a row's text
 ROW_GAP = 4  # px of nothing between two rows (the viewer's ground: its clicks are the viewer's)
@@ -511,36 +518,87 @@ def badge(text: str, colour: tuple[int, int, int], dpi: float) -> np.ndarray:
 
 # ------------------------------------------------------------------ where they go
 def place(size: tuple[int, int], page: Box, band: tuple[int, int], left: tuple[int, int] | None,
-          right: tuple[int, int] | None, dpi: float,
-          columns: tuple[int, int] | None = None) -> tuple[Box | None, Box | None]:
-    """The boxes of the left and right panes (frame pixels) in a frame of *size* whose page is *page*, whose capture
+          right: tuple[int, int] | None, dpi: float, columns: tuple[int, int] | None = None,
+          before: tuple[int | None, int | None] | None = None) -> tuple[Box | None, Box | None]:
+    """The boxes of the left and right panes (frame pixels) in a frame of *size* whose page is *page* (the caller's:
+    the widest the page has been, `reaches`; whatever is on show lies within it), whose capture
     area spans the *columns* (x from, x to; None: the whole frame) and whose steady band (where a viewer's bars never
-    come) is the rows *band*, the panes being *left* and *right* (width, height; None: no such pane). The left one goes
-    GAP px in from the area's left edge, the right one GAP px in from its right edge - where they are whatever the
-    page's width -, each from the band's top GAP px down; one that would come within GAP px of the page, or that the
-    band is too short for (and two gaps), is None: a pane never covers the page."""
+    come) is the rows *band*, the panes being *left* and *right* (width, height; None: no such pane), each from the
+    band's top GAP px down. A pane's edge toward the page (the left one's right edge, the right one's left edge) lies
+    in a span: GAP px from the page at the least, MAX_FROM_PAGE px at the most, the pane inside the area GAP px in
+    from its edge. In that span it is where *before* says it was (those two edges in frames of this size and these
+    columns, `edges`; None: none), else at the span's end nearest to that - it moves only as far as it must -, and
+    with no place before at the span's end farthest from the page (the area's edge where that is near enough). One
+    whose span is empty (it would come within GAP px of the page) or that the band is too short for (and two gaps) is
+    None: a pane never covers the page."""
     width, height = size
     first, last = columns if columns is not None else (0, width)
     first, last = max(0, first), min(width, last)
-    gap = scaled(GAP, dpi)
+    gap, far = scaled(GAP, dpi), scaled(MAX_FROM_PAGE, dpi)
     top = max(0, band[0]) + gap
     bottom = min(height, band[1]) - gap
+    was_left, was_right = before if before is not None else (None, None)
 
     def tall_enough(pane: tuple[int, int] | None) -> bool:
         return pane is not None and pane[1] <= bottom - top
 
+    def within(was: int | None, near: int, away: int) -> int:
+        """The edge in the span from *near* (GAP px from the page) to *away* (as far from it as may be): where it
+        was, or the span's end nearest to that; with none, *away*."""
+        low, high = min(near, away), max(near, away)
+        return away if was is None else min(max(was, low), high)
+
     out_left = out_right = None
     if tall_enough(left):
         assert left is not None
-        box = (first + gap, top, first + gap + left[0], top + left[1])
-        if box[2] + gap <= page[0]:
-            out_left = box
+        near, away = page[0] - gap, max(first + gap + left[0], page[0] - far)
+        if away <= near:
+            edge = within(was_left, near, away)
+            out_left = (edge - left[0], top, edge, top + left[1])
     if tall_enough(right):
         assert right is not None
-        box = (last - gap - right[0], top, last - gap, top + right[1])
-        if box[0] - gap >= page[2]:
-            out_right = box
+        near, away = page[2] + gap, min(last - gap - right[0], page[2] + far)
+        if away >= near:
+            edge = within(was_right, near, away)
+            out_right = (edge, top, edge + right[0], top + right[1])
     return out_left, out_right
+
+
+def edges(boxes: tuple[Box | None, Box | None],
+          before: tuple[int | None, int | None] | None = None) -> tuple[int | None, int | None]:
+    """The panes' edges toward the page (the left one's right edge, the right one's left edge) as `place` takes them
+    back as *before*: of the *boxes* it gave, a hidden one's (None) as it was *before*, so that it comes back there."""
+    was = before if before is not None else (None, None)
+    return (boxes[0][2] if boxes[0] is not None else was[0], boxes[1][0] if boxes[1] is not None else was[1])
+
+
+def reaches(size: tuple[int, int], page: Box, seen: tuple[int | None, int | None], fits: tuple[Any, Any],
+            dpi: float, columns: tuple[int, int] | None = None) -> tuple[int | None, int | None]:
+    """The page's left and right edges the two panes are placed by (`place`'s page box, its other edges *page*'s):
+    per side the farthest out a page's edge has come in frames of this size, columns and DPI beside which that pane
+    fitted - *seen* (the left edge, the right one; None: none yet), or *page*'s own where it comes farther out and
+    the pane fits beside it there (*fits*: per side, whether the pane fits a room of so many px, `rooms`) - so the
+    spread once one was shown, the single page before. None where the pane does not fit beside *page* (it hides; its
+    edge seen stays as it was). A pane that no longer fits beside its edge seen (its rows grew) goes by *page*'s
+    edge where it fits there."""
+    gap = scaled(GAP, dpi)
+    first, last = columns if columns is not None else (0, size[0])
+    first, last = max(0, first), min(size[0], last)
+    rooms_at = (lambda edge: edge - first - 2 * gap, lambda edge: last - edge - 2 * gap)
+    out: list[int | None] = []
+    for side, (now, was) in enumerate(((page[0], seen[0]), (page[2], seen[1]))):
+        farther = was is None or (now < was if side == 0 else now > was)
+        if not farther and fits[side](rooms_at[side](was)):
+            out.append(was)
+        else:
+            out.append(now if fits[side](rooms_at[side](now)) else None)
+    return out[0], out[1]
+
+
+def seen_after(reached: tuple[int | None, int | None],
+               seen: tuple[int | None, int | None]) -> tuple[int | None, int | None]:
+    """The edges seen (`reaches`' *seen*) after a page placed by *reached*: a hidden pane's (None) as before."""
+    return (reached[0] if reached[0] is not None else seen[0], reached[1] if reached[1] is not None else seen[1])
 
 
 def overlap(a: Box | None, b: Box) -> int:

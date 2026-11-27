@@ -27,7 +27,10 @@ where no window lies over it - and the viewer the keys alone.
   alone (`Pipeline.carry_over`: the lines kept are not asked again). The page on a flat ground of any colour is the
   capture area (`seethrough.ground_box`: a white ground too).
 * The side panes (`taslation.panes`, shown by `capture.seethrough`): on the viewer's ground at the capture area's two
-  outer edges (`note_frame` keeps the page box at rest, the area's columns, the steady band and the ground's colour),
+  outer edges, or nearer the page where an edge is far from it (`pn.MAX_FROM_PAGE`, from the widest the page has
+  been in frames of that size: `pn.reaches`), each where it was while that still does (`_see_pane_places`), so that
+  they stand still from spreads to a single page, and a wider page than any before moves them once, only as far as
+  it must (`note_frame` keeps the page box at rest, the area's columns, the steady band and the ground's colour),
   LEFT the controls - Translate (Stop while a page can be stopped) with, at the row's right end, a square button drawn
   as a circular arrow that has the page on show translated again (`_again`: the window's Translate again, its lines
   asked of the translator anew; dim until a page was lettered and while the window's Translate is), Auto, the target
@@ -810,6 +813,8 @@ def start(app: Any) -> bool:
     app._see_newest = None  # the facts' memo of the newest frame noted, whatever it was (`note_frame`, `rest_tick`)
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
+    # ((frame size, columns, dpi), the page's edges seen the panes go by, the panes' edges toward it) (`panes_tick`)
+    app._see_pane_places = None
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
     app._see_ticks = 0
     app._see_asked = -1e9  # when the reader last asked for something (`asked`)
@@ -1261,8 +1266,11 @@ def pane_on_screen(box: tuple[int, int, int, int] | None, origin: tuple[int, int
 
 def panes_tick(app: Any) -> None:
     """The clicks on the side panes acted on, the bubble the right one shows followed (`bubble_tick`), then both panes
-    handed to the see-through window as they are to be: on the ground at the capture area's outer edges, beside the
-    page at the last rest, or hidden (no page on a flat ground yet, no room, the right one switched off). The right
+    handed to the see-through window as they are to be: on the ground at the capture area's outer edges or nearer the
+    page, beside the page at the last rest - placed by the widest the page has been in frames of this size
+    (`pn.reaches`) and where they were (`pn.place`'s *before*, both in `_see_pane_places`), so that they stand still
+    from spreads to a single page -, or hidden (no page on a flat ground yet, no room, the right one switched off).
+    The right
     one is a column as high as the band (`pn.column_height`): the bubble's block and the changing rows from its top
     down, its foot at the bottom, the foot's rows where they stay (`right_rows`); the bubble's block only where it
     fits with the foot, else the indicators alone; its plates' boxes go with it (the window lets it take a click there
@@ -1285,20 +1293,34 @@ def panes_tick(app: Any) -> None:
     dpi = getattr(app, "_see_dpi", st.BASE_DPI)
     language = ui_language()
     scheme = pn.colours(colour)
-    room_left, room_right = pn.rooms(size, page, dpi, columns)
-    left = _picture(app, "left", left_rows(app), room_left, language, dpi, scheme)
-    left_size = left.size if left else None
+    rows = left_rows(app)
     changing, foot = right_rows(app) if indicators_on(app) else ([], [])
+    # the page box the panes go by: the widest the page has been in frames alike (`pn.reaches`), so that they stand
+    # still from spreads to a single page; their places there kept too (`pn.place`'s *before*)
+    key = (tuple(size), tuple(columns) if columns else None, dpi)
+    kept = getattr(app, "_see_pane_places", None)
+    seen, before = (kept[1], kept[2]) if kept is not None and kept[0] == key else ((None, None), None)
+    indicators = [*changing, *foot]
+    fits = (lambda room: pn.width_for(rows, language, dpi, room) is not None,
+            lambda room: bool(indicators) and pn.width_for(indicators, language, dpi, room, fill=True) is not None)
+    reach = pn.reaches(size, page, seen, fits, dpi, columns)
+    wide = (page[0] if reach[0] is None else reach[0], page[1], page[2] if reach[1] is None else reach[1], page[3])
+    room_left, room_right = pn.rooms(size, wide, dpi, columns)
+    left = _picture(app, "left", rows, room_left, language, dpi, scheme)
+    left_size = left.size if left else None
     drop = _drop_order(app, changing)
     block = bubble_rows(app) if indicators_on(app) else []
     height = pn.column_height(size, band, dpi)
     used = "bubble"
     right = _column(app, used, block, changing, foot, drop, room_right, height, language, dpi, scheme) if block else None
-    box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
+    box_left, box_right = pn.place(size, wide, band, left_size, right.size if right else None, dpi, columns,
+                                   before=before)
     if right is None or box_right is None:  # (no bubble, or no room for its block: the indicators alone)
         used = "right"
         right = _column(app, used, [], changing, foot, drop, room_right, height, language, dpi, scheme)
-        box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
+        box_left, box_right = pn.place(size, wide, band, left_size, right.size if right else None, dpi, columns,
+                                       before=before)
+    app._see_pane_places = (key, pn.seen_after(reach, seen), pn.edges((box_left, box_right), before))
     app._see_right_used = used
     origin = over.client_origin() if callable(getattr(over, "client_origin", None)) else None
     box_left, box_right = pane_on_screen(box_left, origin), pane_on_screen(box_right, origin)

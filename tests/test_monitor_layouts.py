@@ -10,7 +10,10 @@ DPI, the frame Windows draws round a window at that DPI):
   themselves over its monitor's middle), its frame as that monitor draws it;
 * the viewer chooser over the window preselected;
 * the region editor beside the region's box and the place entry over its number plate, inside the monitor;
-* the side panes inside the viewer's window (on ultrawide monitors: how far each is from the page, `pane_gaps`);
+* the side panes inside the viewer's window, never on the page on show nor within GAP px of it, and through pages
+  turned in one window (`WALKS`: spreads and single pages) within MAX_FROM_PAGE px of the widest the page has been,
+  moved only when a wider page than any before came and then only as far as they must (`walk`, `_span`; on
+  ultrawide monitors how far each is from the page, and was the old way, and how often each moved: `pane_gaps`);
 * the DPI the lettering and the dialogs take: the viewer's monitor's (never that of the monitor nearest the hidden
   window's place);
 * a box moved and resized on the lettering's window with the pointer's messages as Windows sends them (client
@@ -72,6 +75,16 @@ LAYOUTS: dict[str, tuple[Mon, ...]] = {
                                      mon(1920, 0, 1920, 1080)),
     "4 in a row": (mon(0, 0, 1920, 1080, primary=P), mon(1920, 0, 1920, 1080), mon(3840, 0, 1920, 1080),
                    mon(5760, 0, 1920, 1080)),
+    "3, ultrawide 3440x1440 between two 16:9, other tops": (mon(-1920, 180, 1920, 1080),
+                                                            mon(0, 0, 3440, 1440, primary=P),
+                                                            mon(3440, 180, 1920, 1080)),
+    "3, 2560x1440 at 125 % above two 16:9": (mon(0, 0, 1920, 1080, primary=P), mon(1920, 0, 1920, 1080),
+                                             mon(640, -1440, 2560, 1440, 125)),
+    "4, ultrawide 5120x1440 above three, 125 % in the middle": (mon(0, 0, 1920, 1080, primary=P),
+                                                               mon(1920, 0, 2560, 1440, 125),
+                                                               mon(4480, 0, 1920, 1080), mon(0, -1440, 5120, 1440)),
+    "4 at 150 % in a row": (mon(0, 0, 3840, 2160, 150, primary=P), mon(3840, 0, 3840, 2160, 150),
+                            mon(7680, 0, 3840, 2160, 150), mon(11520, 0, 3840, 2160, 150)),
     "2x2 grid": (mon(0, 0, 1920, 1080, primary=P), mon(1920, 0, 1920, 1080), mon(0, -1080, 1920, 1080),
                  mon(1920, -1080, 1920, 1080)),
     "L shape with a gap": (mon(0, 0, 1920, 1080, primary=P), mon(1920, 0, 1920, 1080), mon(1920, 1080, 1920, 1080)),
@@ -360,10 +373,65 @@ def _page(size: tuple[int, int], aspect: float) -> Box:
     return (width - pw) // 2, (height - ph) // 2, (width + pw) // 2, (height + ph) // 2
 
 
-def pane_boxes(size: tuple[int, int], page: Box, dpi: int) -> tuple[Box | None, Box | None]:
-    left = (st.scaled(200, dpi), st.scaled(520, dpi))
-    right = (st.scaled(pn.INDICATORS_W, dpi), st.scaled(600, dpi))
-    return pn.place(size, page, (0, size[1]), left, right, dpi)
+def pane_sizes(dpi: int) -> tuple[tuple[int, int], tuple[int, int]]:
+    """The left pane's and the right one's (width, height) at *dpi*."""
+    return (st.scaled(200, dpi), st.scaled(520, dpi)), (st.scaled(pn.INDICATORS_W, dpi), st.scaled(600, dpi))
+
+
+def pane_boxes(size: tuple[int, int], page: Box, dpi: int,
+               before: tuple[int | None, int | None] | None = None) -> tuple[Box | None, Box | None]:
+    left, right = pane_sizes(dpi)
+    return pn.place(size, page, (0, size[1]), left, right, dpi, before=before)
+
+
+def from_page(boxes: tuple[Box | None, Box | None], page: Box) -> tuple[int | None, int | None]:
+    """The px from *page* to the left pane and from the page to the right one (None: hidden)."""
+    left, right = boxes
+    return page[0] - left[2] if left else None, right[0] - page[2] if right else None
+
+
+# the pages a viewer shows in one window, one after the other: spreads (1.42; 1.5 a wider one) and single pages
+WALKS = {"a spread first": (1.42, 0.71, 1.42, 0.71, 0.65, 0.71, 1.42),
+         "a single page first": (0.71, 0.65, 0.71, 1.42, 0.71, 1.42, 0.71),
+         "a wider spread later": (0.71, 1.42, 0.71, 1.5, 0.71, 1.42, 0.71)}
+
+
+@dataclass(frozen=True)
+class Step:
+    """A page of a walk: its aspect, its box, the box the panes went by (`pn.reaches`), the panes' boxes, how far
+    each moved from where it was (0 for the first page and for a pane hidden then or before)."""
+
+    aspect: float
+    page: Box
+    wide: Box
+    boxes: tuple[Box | None, Box | None]
+    moved: tuple[int, int]
+
+
+def walk(size: tuple[int, int], dpi: int, aspects: tuple[float, ...]) -> list[Step]:
+    """*aspects*' pages shown one after the other in one window as `ui.seethrough.panes_tick` places the panes: by
+    the widest the page has been beside which each pane fitted, each where it was while that still does."""
+    (lw, _lh), (rw, _rh) = pane_sizes(dpi)
+    fits = (lambda room: room >= lw, lambda room: room >= rw)
+    steps = []
+    seen: tuple[int | None, int | None] = (None, None)
+    before: tuple[int | None, int | None] | None = None
+    for aspect in aspects:
+        page = _page(size, aspect)
+        reach = pn.reaches(size, page, seen, fits, dpi)
+        wide = (page[0] if reach[0] is None else reach[0], page[1], page[2] if reach[1] is None else reach[1], page[3])
+        boxes = pane_boxes(size, wide, dpi, before)
+        edges, was = pn.edges(boxes), before or (None, None)
+        moved = (abs(edges[0] - was[0]) if edges[0] is not None and was[0] is not None else 0,
+                 abs(edges[1] - was[1]) if edges[1] is not None and was[1] is not None else 0)
+        steps.append(Step(aspect, page, wide, boxes, moved))
+        seen, before = pn.seen_after(reach, seen), pn.edges(boxes, before)
+    return steps
+
+
+def moves(steps: list[Step]) -> tuple[int, int]:
+    """How many times each pane moved through *steps*."""
+    return sum(1 for s in steps if s.moved[0]), sum(1 for s in steps if s.moved[1])
 
 
 @pytest.mark.parametrize("name, place", CASES)
@@ -371,20 +439,66 @@ def test_the_side_panes_stay_inside_the_viewer_s_window(name: str, place: Place,
     client = place.client
     size = (client[2] - client[0], client[3] - client[1])
     dpi = screen.of_rect(place.rect).dpi
-    for aspect in (1.42, 0.71):  # (a spread, one page)
-        page = _page(size, aspect)
-        for placed in pane_boxes(size, page, dpi):
-            box = ui.pane_on_screen(placed, (client[0], client[1]))
-            if placed is not None and "mostly past" not in place.label:
-                assert box == placed  # (on the screen whole: shown where `panes.place` put it)
-            if box is None:  # (no room beside the page, or partly off the screen: hidden, the Menu from the taskbar)
-                continue
-            assert _inside(box, (0, 0, *size)) and not _meet(box, page)
-            on_screen = (client[0] + box[0], client[1] + box[1], client[0] + box[2], client[1] + box[3])
-            corners = ((on_screen[0], on_screen[1]), (on_screen[2] - 1, on_screen[3] - 1))
-            assert all(screen.at(x, y, nearest=False) is not None for x, y in corners)
-            if "over monitors" not in place.label:  # (a window on one monitor: its panes on that one alone)
-                assert _inside(on_screen, screen.of_rect(place.rect).rect)
+    gap, far = st.scaled(pn.GAP, dpi), st.scaled(pn.MAX_FROM_PAGE, dpi)
+    for aspects in ((1.42,), (0.71,), *WALKS.values()):  # (a spread, one page, each alone; then the walks)
+        for step in walk(size, dpi, aspects):
+            for placed in step.boxes:
+                box = ui.pane_on_screen(placed, (client[0], client[1]))
+                if placed is not None and "mostly past" not in place.label:
+                    assert box == placed  # (on the screen whole: shown where `panes.place` put it)
+                if box is None:  # (no room beside the page, or partly off the screen: hidden, the Menu from there)
+                    continue
+                assert _inside(box, (0, 0, *size)) and not _meet(box, step.page)
+                on_screen = (client[0] + box[0], client[1] + box[1], client[0] + box[2], client[1] + box[3])
+                corners = ((on_screen[0], on_screen[1]), (on_screen[2] - 1, on_screen[3] - 1))
+                assert all(screen.at(x, y, nearest=False) is not None for x, y in corners)
+                if "over monitors" not in place.label:  # (a window on one monitor: its panes on that one alone)
+                    assert _inside(on_screen, screen.of_rect(place.rect).rect)
+            # never on the page on show nor within a gap of it; within the cap of the widest the page has been
+            for near, wide in zip(from_page(step.boxes, step.page), from_page(step.boxes, step.wide)):
+                assert near is None or (near >= gap and wide is not None and gap <= wide <= far), (aspects, step)
+
+
+def _span(size: tuple[int, int], page: Box, dpi: int) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+    """Where each pane's edge toward the page may be beside *page* (low, high; None: nowhere), worked out here on
+    its own: GAP px from the page at the least, MAX_FROM_PAGE px at the most, the pane GAP px inside the frame."""
+    gap, far = st.scaled(pn.GAP, dpi), st.scaled(pn.MAX_FROM_PAGE, dpi)
+    (lw, _lh), (rw, _rh) = pane_sizes(dpi)
+    left = (max(gap + lw, page[0] - far), page[0] - gap)
+    right = (page[2] + gap, min(size[0] - gap - rw, page[2] + far))
+    return (left if left[0] <= left[1] else None), (right if right[0] <= right[1] else None)
+
+
+@pytest.mark.parametrize("name, place", CASES)
+def test_through_spreads_and_single_pages_a_pane_moves_only_when_a_wider_page_comes_and_then_only_as_far_as_it_must(
+        name: str, place: Place, screen: Screen) -> None:
+    client = place.client
+    size = (client[2] - client[0], client[3] - client[1])
+    dpi = screen.of_rect(place.rect).dpi
+    for label, aspects in WALKS.items():
+        widest: list[int | None] = [None, None]  # (worked out here: per side the farthest out a page's edge came
+        before: list[int | None] = [None, None]  # beside which the pane fitted; the panes' edges toward the page)
+        for step in walk(size, dpi, aspects):
+            spans_now, spans_wide = _span(size, step.page, dpi), _span(size, step.wide, dpi)
+            for k in (0, 1):
+                edge_now = step.page[0] if k == 0 else step.page[2]
+                fits_now = spans_now[k] is not None
+                assert (step.boxes[k] is None) == (not fits_now), (label, step)  # (hidden exactly where no room)
+                grew = fits_now and (widest[k] is None or (edge_now < widest[k] if k == 0 else edge_now > widest[k]))
+                if grew:
+                    widest[k] = edge_now
+                assert (step.wide[0] if k == 0 else step.wide[2]) == (widest[k] if fits_now else edge_now), (label, k)
+                box, span = step.boxes[k], spans_wide[k]
+                if box is None or span is None:
+                    continue
+                edge = box[2] if k == 0 else box[0]
+                if before[k] is None:  # (no place before: as far from the widest page as the span lets it)
+                    assert edge == (span[0] if k == 0 else span[1])
+                elif not grew:
+                    assert edge == before[k]  # (no wider page: not moved, however far the page on show is)
+                else:  # (a wider page: moved once, to the span's end nearest to where it was, if it must)
+                    assert edge == min(max(before[k], span[0]), span[1])
+                before[k] = edge
 
 
 @pytest.mark.parametrize("name, place", CASES)
@@ -455,9 +569,19 @@ ULTRAWIDE = [(name, place) for name, monitors in LAYOUTS.items() if "ultrawide" 
                  Screen(monitors, {VIEWER: place.rect}).of_rect(place.rect))]
 
 
-def pane_gaps() -> list[tuple[str, str, str, int, int | None, int | None]]:
-    """(layout, viewer place, page, client width, px from the page to the left pane, to the right one; None: hidden)
-    on every ultrawide monitor maximised, for a spread and for one page."""
+def _old_place(size: tuple[int, int], page: Box, dpi: int) -> tuple[Box | None, Box | None]:
+    """(the old way, before 2.0.0's cap) each pane GAP px in from the frame's edge whatever the page's width."""
+    gap = st.scaled(pn.GAP, dpi)
+    (lw, lh), (rw, rh) = pane_sizes(dpi)
+    left = (gap, gap, gap + lw, gap + lh)
+    right = (size[0] - gap - rw, gap, size[0] - gap, gap + rh)
+    return (left if left[2] + gap <= page[0] else None), (right if right[0] - gap >= page[2] else None)
+
+
+def pane_gaps() -> list[tuple[str, str, str, int, int | None, int | None, int | None, int | None]]:
+    """(layout, viewer place, page, client width, px from the page to the left pane and to the right one, None:
+    hidden; the same the old way) on every ultrawide monitor maximised, for a spread and for one page, each the
+    first page shown."""
     rows = []
     for name, place in ULTRAWIDE:
         client = place.client
@@ -465,21 +589,60 @@ def pane_gaps() -> list[tuple[str, str, str, int, int | None, int | None]]:
         dpi = Screen(LAYOUTS[name], {VIEWER: place.rect}).of_rect(place.rect).dpi
         for label, aspect in (("spread", 1.42), ("one page", 0.71)):
             page = _page(size, aspect)
-            left, right = pane_boxes(size, page, dpi)
-            rows.append((name, place.label, label, size[0], page[0] - left[2] if left else None,
-                         right[0] - page[2] if right else None))
+            rows.append((name, place.label, label, size[0], *from_page(walk(size, dpi, (aspect,))[0].boxes, page),
+                         *from_page(_old_place(size, page, dpi), page)))
     return rows
 
 
-def test_on_ultrawide_monitors_the_panes_keep_to_the_outer_edges_far_from_the_page() -> None:
+def test_on_ultrawide_monitors_the_panes_come_within_the_cap_of_the_widest_page_where_the_edges_were_far() -> None:
     rows = pane_gaps()
     assert len(rows) == 2 * len(ULTRAWIDE) and ULTRAWIDE
-    for name, label, page, width, left, right in rows:
+    for name, label, page, width, left, right, _old_left, _old_right in rows:
         assert left is not None and right is not None, (name, label, page)
-        assert left > 0 and right > 0
-    print("\nlayout | viewer | page | client width | page to left pane px | page to right pane px")
+        assert pn.GAP <= left <= pn.MAX_FROM_PAGE and pn.GAP <= right <= pn.MAX_FROM_PAGE  # (all at 100 % here)
+    old = {(r[0], r[2]): r[6] for r in rows}
+    assert old[("ultrawide 5120x1440", "one page")] == 1858  # (the old way: the left pane 1858 px from a page)
+    assert max(max(r[6], r[7]) for r in rows) > pn.MAX_FROM_PAGE
+    print("\nlayout | viewer | first page | client width | page to left pane px | page to right pane px | the old"
+          " way: left | right")
     for row in rows:
         print(" | ".join(str(v) for v in row))
+    print("\nlayout | viewer | walk | moves (left, right) | at the end, px from the widest page | from the page"
+          " on show")
+    for name, place in ULTRAWIDE:
+        size = (place.client[2] - place.client[0], place.client[3] - place.client[1])
+        for label, aspects in WALKS.items():
+            steps = walk(size, 96, aspects)
+            for step in steps:  # (within the cap of the widest the page has been, whatever is on show)
+                assert all(px is not None and pn.GAP <= px <= pn.MAX_FROM_PAGE
+                           for px in from_page(step.boxes, step.wide)), (name, label, step)
+            grown = sum(1 for i in range(1, len(aspects)) if aspects[i] > max(aspects[:i]))
+            assert max(moves(steps)) <= grown  # (a move only where a wider page than any before came)
+            if label == "a spread first":
+                assert moves(steps) == (0, 0)
+            last = steps[-1]
+            print(name, "|", place.label, "|", label, "|", moves(steps), "|", from_page(last.boxes, last.wide), "|",
+                  from_page(last.boxes, last.page))
+
+
+def test_in_a_1920_window_the_panes_stand_still_once_a_spread_was_seen_and_move_once_at_most_before() -> None:
+    """The commonest window, a maximised 1920 x 1080 one: a spread first, the panes at the frame's edges (as near
+    the spread as the old way) and never moved through single pages and spreads, though one page is 385 px from
+    them; a single page first, the panes 300 px from it, then once out at the first spread, and still from there
+    on; a spread wider than the ground leaves the panes room for hides them, and they come back where they were."""
+    size = (1920, 1032)
+    assert from_page(_old_place(size, _page(size, 0.71), 96), _page(size, 0.71)) == (385, 386)
+    first = walk(size, 96, WALKS["a spread first"])
+    assert moves(first) == (0, 0) and from_page(first[0].boxes, first[0].page) == (19, 20)
+    assert {s.boxes for s in first} == {first[0].boxes}
+    assert from_page(first[1].boxes, first[1].page) == (385, 386)  # (beside one page: where the spread put them)
+    after = walk(size, 96, WALKS["a single page first"])
+    assert from_page(after[0].boxes, after[0].page) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
+    assert moves(after) == (1, 1) and [s.aspect for s in after if any(s.moved)] == [1.42]
+    assert {s.boxes for s in after[3:]} == {after[3].boxes}  # (from the first spread on: still)
+    wider = walk(size, 96, WALKS["a wider spread later"])
+    assert moves(wider) == (1, 1) and wider[3].boxes == (None, None)  # (1.5 wide: no room, hidden)
+    assert wider[4].boxes == wider[2].boxes  # (and back where they were)
 
 
 def _nearest_to_the_hidden_window(monitors: tuple[Mon, ...]) -> Mon:

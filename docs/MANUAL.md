@@ -77,7 +77,8 @@ gets "This page could not be translated." there while that page is on show (Tran
 
 ### The side panes
 
-TASlation's controls and indicators lie in two panes on the viewer's ground beside the page, at the left and right edges of the capture area.
+TASlation's controls and indicators lie in two panes on the viewer's ground beside the page, at the left and right edges of the capture area, or nearer the page where that edge is far from it: a pane is never more than 300 pixels (at 100 % scaling) from the widest page shown in that window, on an ultrawide monitor too.
+The panes stand still while you read: once a two-page spread has been shown, they stay where the spread put them on single pages too, however far a single page is from them. Only a page wider than any shown before in a window of that size (the first spread after a cover) moves them, once, and only as far as it must; a window of another size starts afresh.
 They take their colours from that ground (light on a dark ground, dark on a light one) and their size from the scaling of the viewer's monitor, and they move with the viewer's window.
 
 * **The left pane** holds the controls: "Translate" ("Stop" while a page is being translated), with the circular arrow at the right end of its row that translates the page on show again;

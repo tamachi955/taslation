@@ -1,4 +1,6 @@
-"""See-through mode's side panes: where they go at the capture area's outer edges (never over the page, nor near it),
+"""See-through mode's side panes: where they go at the capture area's outer edges or nearer a page far from them,
+300 px at the most from the widest the page has been (never over the page, nor within a gap of it; still from spreads
+to a single page, moved once, only as far as they must, by a wider page than any before),
 how wide they are, their pictures and the controls' hit boxes - the ask-again button's square among them -, and
 the shown words, which name no key and no place of the former window; on the Tk side what they say, what a click does, the
 indicators' switch kept in the settings file, the Menu row in place of a way back to TASlation's window, and no hot
@@ -44,17 +46,24 @@ def pane(rows, size, page, dpi=96):
 
 
 # ------------------------------------------------------------------ where they go
-def boxes_for(page, columns=None, dpi=96):
+def boxes_for(page, columns=None, dpi=96, before=None):
     rooms = pn.rooms(FRAME, page, dpi, columns)
     left_w = pn.width_for(controls(), "en", dpi, rooms[0])
     right_w = pn.width_for(words(), "en", dpi, rooms[1], fill=True)
     left = pn.render(controls(), left_w, "en", dpi, pn.DARK) if left_w else None
     right = pn.render(words(), right_w, "en", dpi, pn.DARK) if right_w else None
-    return pn.place(FRAME, page, BAND, left.size if left else None, right.size if right else None, dpi, columns)
+    return pn.place(FRAME, page, BAND, left.size if left else None, right.size if right else None, dpi, columns,
+                    before=before)
+
+
+def from_page(boxes, page):
+    """The px from *page* to the left pane and from it to the right one (None: hidden)."""
+    left, right = boxes
+    return page[0] - left[2] if left else None, right[0] - page[2] if right else None
 
 
 @pytest.mark.parametrize("columns", [None, (30, 1890)], ids=["whole frame", "an area set by hand"])
-def test_the_panes_lie_at_the_areas_outer_edges_where_they_are_on_a_cover_and_on_a_spread(columns):
+def test_the_panes_lie_at_the_areas_outer_edges_or_nearer_a_page_far_from_them(columns):
     first, last = columns or (0, FRAME[0])
     placed = {}
     for name, page in (("spread", SPREAD), ("cover", COVER)):
@@ -63,12 +72,68 @@ def test_the_panes_lie_at_the_areas_outer_edges_where_they_are_on_a_cover_and_on
         for box in (box_left, box_right):
             assert pn.overlap(box, page) == 0  # (not a pixel of the page)
             assert BAND[0] + pn.GAP == box[1] and box[3] <= BAND[1] - pn.GAP
-        assert box_left[0] == first + pn.GAP and box_right[2] == last - pn.GAP  # (GAP in from the area's edges)
-        assert box_left[2] + pn.GAP <= page[0] and box_right[0] - pn.GAP >= page[2]  # (and not near the page)
+        assert first + pn.GAP <= box_left[0] and box_right[2] <= last - pn.GAP  # (GAP in from the area's edges)
+        assert all(pn.GAP <= px <= pn.MAX_FROM_PAGE for px in from_page(placed[name], page))  # (near, not on it)
+    # beside the spread the area's edges are near enough to the page: there they are
+    assert placed["spread"][0][0] == first + pn.GAP and placed["spread"][1][2] == last - pn.GAP
+    # beside the cover alone they are some 400 px from it: with no place before, as far from it as may be
+    assert from_page(placed["cover"], COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
     # the indicators: one width whatever they say (INDICATORS_W, or the narrower ground beside the spread less the gaps)
     width = min(pn.INDICATORS_W, pn.rooms(FRAME, SPREAD, 96, columns)[1])
     assert {b[1][2] - b[1][0] for b in placed.values()} == {width}
-    assert placed["spread"] == placed["cover"]  # (a page's width moves neither)
+
+
+def test_place_keeps_a_pane_where_it_was_while_that_lies_in_its_span_and_else_moves_it_only_as_far_as_it_must():
+    # (`place` alone, by the page box it is given; the program gives it the widest the page has been: below)
+    spread = boxes_for(SPREAD)
+    cover = boxes_for(COVER, before=pn.edges(spread))  # (the area's edges are too far from the cover: in to the cap)
+    assert from_page(cover, COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
+    again = boxes_for(SPREAD, before=pn.edges(cover))  # (on the spread there: out only to GAP from it)
+    assert from_page(again, SPREAD) == (pn.GAP, pn.GAP)
+    moved = [abs(a[0] - b[0]) for a, b in zip(cover, again)]
+    assert moved == [COVER[0] - pn.MAX_FROM_PAGE - (SPREAD[0] - pn.GAP),
+                     SPREAD[2] + pn.GAP - (COVER[2] + pn.MAX_FROM_PAGE)]  # (the least the two pages leave)
+    assert boxes_for(COVER, before=pn.edges(again)) == cover  # (and back, as far again)
+    # a page box that changes but leaves the panes clear of it and near enough moves neither
+    nudged = (SPREAD[0] + 6, 0, SPREAD[2] - 6, FRAME[1])
+    assert boxes_for(nudged, before=pn.edges(again)) == again
+    wider_cover = (COVER[0] - 40, 0, COVER[2] + 40, FRAME[1])
+    assert boxes_for(wider_cover, before=pn.edges(cover)) == cover
+    # a place before that no longer fits the area (another pane's width): within it, GAP in from its edge
+    assert boxes_for(SPREAD, before=(0, FRAME[0]))[0][0] == pn.GAP
+    # a hidden pane keeps its place before, for when it comes back
+    assert pn.edges((None, again[1]), pn.edges(cover)) == (pn.edges(cover)[0], again[1][0])
+    assert pn.edges((None, None)) == (None, None)
+
+
+def test_the_panes_go_by_the_widest_the_page_has_been_beside_which_they_fitted():
+    def fit(room):
+        return room >= 150
+
+    fits = (fit, fit)
+    covered, spread = (COVER[0], COVER[2]), (SPREAD[0], SPREAD[2])
+    assert pn.reaches(FRAME, COVER, (None, None), fits, 96) == covered  # (nothing seen yet: the page on show)
+    assert pn.reaches(FRAME, SPREAD, covered, fits, 96) == spread  # (a spread after it: farther out)
+    assert pn.reaches(FRAME, COVER, spread, fits, 96) == spread  # (a single page after a spread: the spread's still)
+    narrower = (COVER[0] + 50, 0, COVER[2] - 50, FRAME[1])
+    assert pn.reaches(FRAME, narrower, spread, fits, 96) == spread
+    # a page wider than any the pane fits beside: hidden there, and what was seen stays for the next page
+    wide = (100, 0, FRAME[0] - 100, FRAME[1])  # (84 px of room each side)
+    reached = pn.reaches(FRAME, wide, spread, fits, 96)
+    assert reached == (None, None) and pn.seen_after(reached, spread) == spread
+    assert pn.seen_after((None, 1700), (None, None)) == (None, 1700)
+    # a narrow window: the spread leaves the pane no room, so it goes by the single page, shown beside it alone
+    roomy = (lambda room: room >= 300, fit)
+    assert pn.reaches(FRAME, SPREAD, covered, roomy, 96) == (None, SPREAD[2])
+    assert pn.reaches(FRAME, COVER, covered, roomy, 96) == covered
+    # rows grown too wide for the spread seen: by the page on show where they fit there (else hidden)
+    assert pn.reaches(FRAME, COVER, spread, roomy, 96) == (COVER[0], SPREAD[2])
+    assert pn.reaches(FRAME, COVER, spread, (lambda room: False, fit), 96) == (None, SPREAD[2])
+    # the room from the capture area's edge, less a gap each side
+    assert pn.reaches(FRAME, SPREAD, (None, None), (lambda room: room >= SPREAD[0] - 30 - 16, fit), 96,
+                      (30, 1890))[0] == SPREAD[0]
+    assert pn.reaches(FRAME, SPREAD, (None, None), (lambda room: room > SPREAD[0] - 30 - 16, fit), 96,
+                      (30, 1890))[0] is None
 
 
 def test_the_indicators_take_the_ground_less_the_gaps_where_it_is_narrower_than_their_width():
@@ -392,6 +457,39 @@ def test_panes_tick_hands_both_panes_beside_the_page_and_the_right_one_only_when
     app._see_ground = None  # (no page on a flat ground at the last rest)
     ui.panes_tick(app)
     assert app._see_through.handed[-1] == (None, None)
+
+
+def test_panes_tick_keeps_the_panes_still_from_spreads_to_a_single_page_and_starts_afresh_at_another_size(tmp_path):
+    app = fake_app(tmp_path)
+
+    def boxes(page, columns=(0, FRAME[0]), size=FRAME):
+        app._see_ground = (size, page, BAND, (20, 20, 20), columns)
+        ui.panes_tick(app)
+        left, right = app._see_through.handed[-1]
+        return left[1], right[1]
+
+    def from_it(placed, page):
+        return page[0] - placed[0][2], placed[1][0] - page[2]
+
+    narrow = (COVER[0] + 60, 0, COVER[2] - 60, FRAME[1])
+    on_spread = boxes(SPREAD)  # (a spread first: at the area's edges, near enough to it)
+    assert on_spread[0][0] == pn.GAP and on_spread[1][2] == FRAME[0] - pn.GAP
+    assert [boxes(page) for page in (COVER, SPREAD, narrow, COVER, SPREAD)] == [on_spread] * 5  # (never moved)
+    assert from_it(on_spread, COVER)[0] > pn.MAX_FROM_PAGE  # (far from the cover, as the spread's place is)
+    app._see_pane_places = None  # (a cover first: by the cover, MAX_FROM_PAGE from it ...)
+    on_cover = boxes(COVER)
+    assert from_it(on_cover, COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
+    assert boxes(narrow) == on_cover
+    out = boxes(SPREAD)  # (... then once out, as far as the spread asks: GAP from it)
+    assert from_it(out, SPREAD) == (pn.GAP, pn.GAP)
+    assert [boxes(page) for page in (COVER, SPREAD, narrow, COVER)] == [out] * 4  # (and still from there on)
+    assert app._see_pane_places == ((FRAME, (0, FRAME[0]), 96), (SPREAD[0], SPREAD[2]), (out[0][2], out[1][0]))
+    app._see_ground = None  # (hidden a while: the places kept)
+    ui.panes_tick(app)
+    assert boxes(COVER) == out
+    assert boxes(COVER, columns=(30, FRAME[0]))[0][2] == COVER[0] - pn.MAX_FROM_PAGE  # (another capture area: afresh)
+    wider = (FRAME[0] + 100, FRAME[1])
+    assert boxes(SPREAD, (0, wider[0]), wider)[0][0] == pn.GAP  # (another frame size: afresh)
 
 
 def test_a_click_on_a_control_acts_on_it_and_one_between_them_on_nothing(tmp_path):

@@ -26,7 +26,7 @@ taking every click and key itself.
   shows another page, whatever Tk is doing.
 * The side panes (`taslation.panes`; their pictures and their places from the Tk thread, `set_panes`) are two more
   layered windows of this thread's, topmost, never activated (WS_EX_NOACTIVATE), with no taskbar button: they lie on
-  the viewer's ground at the capture area's outer edges, hide at once at any change of the viewer's place or size
+  the viewer's ground beside the page (`panes.place`), hide at once at any change of the viewer's place or size
   (this thread's own hook on its moves, and every look: `_rect_tick`) and come back once it has been at rest for
   PANE_REST_S, hide while it is minimised, hidden or cloaked and where a window above the viewer meets them; the
   lettering's switch on the left one hides the lettering only (`set_on`). The LEFT one (the controls) takes the clicks on its
