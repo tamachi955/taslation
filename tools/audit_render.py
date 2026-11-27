@@ -91,6 +91,7 @@ RESID_PX = 6  # dark lettering pixels left in a region after its erase ...
 RESID_SHARE = 0.01  # ... and this share of its lettering's pixels
 GHOST_PX = 8  # pixels of a bubble's paper darker than the paper by GHOST_DROP after the erase ...
 GHOST_DROP = 40
+FILL_SHARE = 0.2  # (a mark touching the outline counts when it covers this share of the bubble: painted over)
 FLAT_STD = 20  # ... where the interior's paper away from the lettering deviates by no more than this (no tone)
 LINE_LOST_PX = 12  # line pixels round a region on paper made light by the erase
 ART_LOST_PX = 60  # the same for a region on the drawing (LaMa fills a hole there on purpose)
@@ -991,6 +992,28 @@ def _filled(mask: Any, win: Box) -> Any:
     return out
 
 
+def _off_rim(mask: Any, core: Any, win: Box) -> Any:
+    """The pieces of *mask* in *win* clear of *core*'s rim (one touching it is the outline or the drawing beyond,
+    redrawn thicker or reaching in), and those that cover `FILL_SHARE` of *core* or more (the bubble painted over)."""
+    import numpy as np
+    import cv2
+
+    x0, y0, x1, y1 = win
+    sub = mask[y0:y1, x0:x1].astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(sub, connectivity=8)
+    out = np.zeros(mask.shape, bool)
+    if n <= 1:
+        return out
+    c = core[y0:y1, x0:x1]
+    rim = c & ~(cv2.erode(c.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+    on_rim = np.zeros(n, bool)
+    on_rim[np.unique(labels[rim & (labels > 0)])] = True
+    keep = ~on_rim | (stats[:, 4] >= FILL_SHARE * max(1, int(c.sum())))
+    keep[0] = False
+    out[y0:y1, x0:x1] = keep[labels]
+    return out
+
+
 def _specks(mask: Any) -> int:
     import numpy as np
     import cv2
@@ -1138,22 +1161,28 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             # marks on a bubble's flat light paper after the erase, whatever made them (lettering half taken, a
             # grey ghost of it, a stroke LaMa drew): darker than the paper by GHOST_DROP, a quarter glyph inside the
             # outline (where LaMa may reshape its edge), off the lines the bubble lets through (hair, a tail) and
-            # every line the page keeps; LaMa's regions too
-            if inter is not None and light and not dark_ground:
+            # every line the page keeps (a thin one: a bubble LaMa filled dark is no line); LaMa's regions too, judged
+            # on the original (the paper a LaMa fill reports is what it painted, dark where it painted the bubble dark)
+            lama = row["inpainted"]
+            o_letters, o_lines = _pieces(dark, tbg, g, win) if dark_ground and lama else (letters, lines_)
+            o_inter = _interior(O, o_letters, tb, win) if dark_ground and lama else inter
+            if o_inter is not None and ((light and not dark_ground) or lama):
                 k = max(5, int(g / 2) | 1)
-                core = cv2.erode(_filled(inter, win).astype(np.uint8),
+                core = cv2.erode(_filled(o_inter, win).astype(np.uint8),
                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0
-                bare = core & ~(cv2.dilate((letters | lines_).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
+                bare = core & ~(cv2.dilate((o_letters | o_lines).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
                 flat = _ground(O, bare)
-                if flat is not None and flat[1] <= FLAT_STD:
-                    drawing = cv2.dilate(lines_.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+                if flat is not None and flat[0] >= 200 and flat[1] <= FLAT_STD:
+                    drawing = cv2.dilate(o_lines.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
                     # (the lettering's own pixels, or ones the erase made darker: not a thin line or a symbol of the
                     # bubble that was there before and is there still)
-                    made = cv2.dilate(letters.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+                    made = cv2.dilate(o_letters.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
                     made |= E < O - GHOST_DROP / 2
                     marked = E < flat[0] - GHOST_DROP
-                    ghost = (core & ~drawing & made & marked & ~_long_pieces(still, win, LINE_GLYPHS * g)
-                             & ~_long_pieces(marked, win, LINE_GLYPHS * g))
+                    kept = np.zeros(marked.shape, bool)
+                    for m_ in (E < LINE_FAINT, marked):
+                        kept |= _long_pieces(m_ & ~_solid(m_, g, win), win, LINE_GLYPHS * g)
+                    ghost = _off_rim(core & ~drawing & made & marked & ~kept, core, win)
                     m["ghost_px"] = int(ghost.sum())
                     m["ghost_specks"] = _specks(ghost)
                     if m["ghost_px"] >= GHOST_PX:
