@@ -127,6 +127,7 @@ def test_the_slant_of_a_short_word_is_measured(angle, vertical):
 def test_a_short_words_slant_comes_from_the_short_measure():
     tilt = lettering_tilt(turned(word("目元"), 10.0) < 140)
     assert tilt.short and abs(tilt.angle - 10.0) <= 1.5, tilt
+    assert tilt.doubtful  # (its reading must bear it out: `Pipeline._doubtful_slant`)
 
 
 @pytest.mark.parametrize("vertical", [True, False])
@@ -172,6 +173,29 @@ def test_a_long_line_of_the_drawing_is_no_lettering():
     gray = turned(lettering([6, 5, 7]), 12.0)
     cv2.line(gray, (0, 5), (gray.shape[1] - 1, gray.shape[0] // 2), 0, 3)  # a speed line across the box
     assert abs(lettering_tilt(gray < 140).angle - 12.0) <= 1.0
+
+
+def jittered_column(n: int, seed: int, size: int = 24) -> np.ndarray:
+    """An upright column of *n* glyph-like marks, each set a little off its middle at random (as by hand)."""
+    rng = random.Random(seed)
+    img = np.full((size * n + 40, size * 3 + 40), 255, np.uint8)
+    for j in range(n):
+        x, y = 20 + size + rng.randint(-size // 3, size // 3), 20 + j * size
+        img[y:y + size, x:x + size] = np.minimum(img[y:y + size, x:x + size], glyph(rng, size))
+    return img
+
+
+def test_a_slant_one_glyph_alone_gives_is_doubtful():
+    measured = doubtful = 0
+    for seed in range(1, 121):
+        tilt = lettering_tilt(jittered_column(5, seed) < 140)
+        if tilt.angle and not tilt.short:
+            measured += 1
+            doubtful += tilt.doubtful
+    assert measured >= 6 and doubtful >= measured - 2, (measured, doubtful)  # (one sure of its slant stays)
+    for angle in (-15.0, 12.0, 20.0):  # slanted lettering of many glyphs owes its slant to no one of them
+        tilt = lettering_tilt(turned(lettering([6, 5, 7]), angle) < 140)
+        assert tilt.angle and not tilt.doubtful, (angle, tilt)
 
 
 def test_the_turn_maps_points_there_and_back():
@@ -271,6 +295,39 @@ def test_a_slant_the_readers_read_better_as_cut_is_read_as_cut(settings):
     assert not chosen[2]
     pad = max(4, int(0.08 * min(region.width, region.height)))
     assert np.array_equal(np.asarray(chosen[0]), np.asarray(region.crop(page, box=region.text_box, pad=pad)))
+
+
+def word_page(angle: float, text: str = "目元") -> tuple[np.ndarray, TextRegion]:
+    """`slanted_page` with a short word at *angle* in its bubble."""
+    page = np.full((300, 300, 3), 255, np.uint8)
+    cv2.ellipse(page, (150, 150), (120, 130), 0, 0, 360, (0, 0, 0), 3)
+    gray = turned(word(text), angle)
+    th, tw = gray.shape
+    y0, x0 = 150 - th // 2, 150 - tw // 2
+    page[y0:y0 + th, x0:x0 + tw] = np.minimum(page[y0:y0 + th, x0:x0 + tw], gray[..., None])
+    inside = np.zeros((300, 300), np.uint8)
+    cv2.ellipse(inside, (150, 150), (115, 125), 0, 0, 360, 255, -1)
+    ys, xs = np.nonzero((page[..., 0] < 140) & (inside > 0))
+    region = TextRegion(x0=30, y0=20, x1=270, y1=280, mask=inside[20:280, 30:270].copy(),
+                        text_box=(int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+    return page, region
+
+
+@pytest.mark.parametrize("turned_surer", [True, False])
+def test_a_doubtful_slant_stands_only_where_the_reading_turned_upright_is_surer(settings, turned_surer):
+    page, region = word_page(10.0)
+    p = Pipeline(settings, ocr=CropOcr("目元", upright_surer=turned_surer), translator=None)
+    p._ocr_regions(page, [region], lambda _m: None)
+    assert region.tilt.short and region.tilt.doubtful
+    if turned_surer:
+        assert abs(region.angle - 10.0) <= 1.5
+    else:  # upright lettering a mark or a glyph off its column slants reads as surely as cut: upright after all
+        assert region.angle == 0.0 and region.tilt.angle == 0.0 and not region.char_quads
+    # a slant the long lines' search is sure of stands, however the readers read it
+    page, region = slanted_page(15.0)
+    p = Pipeline(settings, ocr=CropOcr(upright_surer=turned_surer), translator=None)
+    p._ocr_regions(page, [region], lambda _m: None)
+    assert not region.tilt.doubtful and abs(region.angle - 15.0) <= 2.5
 
 
 def test_upright_lettering_is_read_as_before_byte_for_byte(settings):

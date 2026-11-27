@@ -18,10 +18,17 @@ slant takes the straight path of before, byte for byte.
 A short word (two to four glyphs, a short column or row: too few pieces or too short lines for the search) is
 measured as a text detector measures a line (`short_tilt`): the minimum-area rectangle round its ink, checked
 against the axis of its ink's moments and the sharpest projection across it; only when all three agree is it slanted.
-On OpenMantra, whose lettering stands straight, that calls 3 of its 390 short regions read as text slanted (0.8 %;
-the long lines' search 4 of 1139), and of its two- to four-glyph words turned by 8 to 20 degrees it finds four in
-ten, nine in ten of those within 2 degrees (most four-glyph words, few two-glyph ones: a small kana or a mark set off
-the line pulls every measure, and the word then stays upright).
+On OpenMantra, whose lettering mostly stands straight, that calls 3 of its 390 short regions read as text slanted
+(0.8 %; the long lines' search 4 of 1139), and of its two- to four-glyph words turned by 8 to 20 degrees it finds
+four in ten, nine in ten of those within 2 degrees (most four-glyph words, few two-glyph ones: a small kana or a mark
+set off the line pulls every measure, and the word then stays upright).
+
+A short word's slant, and one the long lines' search is unsure of that one glyph-sized piece of the ink alone gives
+(`_steady`), is doubtful (`Tilt.doubtful`): upright lettering whose dash, small kana or one glyph sits off its column
+shows such a slant. The pipeline keeps a doubtful slant only where the reading turned upright is surer than as cut
+(`Pipeline._doubtful_slant`). OpenMantra's lettering does not all stand straight after all: of the 22 lines read as
+text the search slanted at its four sizes, 15 are slanted (signs, captions, hand-lettered sound marks); 13 keep a
+slant now, 11 of them slanted.
 
 ``angle`` is in degrees, counter-clockwise on the screen: the right end of a row is higher, the foot of a column
 further right, for a positive angle. `Upright` turns a crop by ``-angle`` and maps its points back to the page.
@@ -30,7 +37,7 @@ further right, for a positive angle. `Upright` turns a crop by ``-angle`` and ma
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
@@ -44,6 +51,8 @@ MIN_PIECES = 5  # pieces of a glyph's size (`WHOLE_GLYPH` of it at least) the le
 WHOLE_GLYPH = 0.6
 MIN_RUN = 3.0  # the lettering runs at least this many line widths along its lines
 MAX_POINTS = 12000  # ink pixels the search looks at, at most (an even sample of them)
+STEADY_SURE = 0.2  # a long lines' slant less sure than this (`Tilt.confidence`) is doubtful unless it is steady ...
+STEADY = 3.0  # degrees: ... found again within this with any one glyph-sized piece left out (`_steady`)
 # A short word (`short_tilt`): fewer pieces or shorter lines than the gates above let through
 SHORT_ELONGATION = 1.5  # its rectangle at least this many times as long as wide (a lone glyph or a square: no line)
 SHORT_AGREE = 2.0  # degrees: the moments' axis and the sharpest projection within this of the rectangle's
@@ -65,6 +74,7 @@ class Tilt:
     pieces: int = 0  # glyph-sized pieces measured
     run: float = 0.0  # how many glyphs long the lettering runs along its lines
     short: bool = False  # the angle is a short word's (`short_tilt`), not the long lines' search
+    doubtful: bool = False  # the slant stands only where the reading bears it out (`lettering_tilt`)
 
 
 def glyph_ink(ink: np.ndarray, glyph: float = 0.0) -> tuple[np.ndarray, int, float]:
@@ -123,7 +133,78 @@ def _search(points: np.ndarray, lo: float, hi: float, step: float) -> list[tuple
 
 def lettering_tilt(ink: np.ndarray, glyph: float = 0.0) -> Tilt:
     """The slant of the lettering whose ink is *ink* (bool, the region's text box; only its glyph-sized pieces count,
-    `glyph_ink`; *glyph*: their usual size, 0 = measured here).
+    `glyph_ink`; *glyph*: their usual size, 0 = measured here): `_measure`'s, *doubtful* where its slant is one the
+    lettering's reading must bear out (`Pipeline._doubtful_slant`): a short word's (`short_tilt`: its shape is all
+    that measure has), and one the long lines' search is less sure of than ``STEADY_SURE`` that one glyph-sized piece
+    of the ink alone gives (`_steady`) - upright lettering a dash, a small kana or one glyph set off its column
+    slants, a dark ground's pieces. A slant one piece alone gives is rare in real lettering of many glyphs, less so in
+    a block of a few: of the slant test's made-up lettering and words turned by 5 to 35 degrees whose slant the search
+    finds, none turned by 12 degrees or more is doubtful, a third of those turned by 5 degrees, a quarter of those by
+    6 and one in fifteen of those by 8 are."""
+    tilt, pieces_ink, glyph = _measure(ink, glyph)
+    if (tilt.angle and not tilt.short and tilt.confidence < STEADY_SURE
+            and not _steady(pieces_ink, glyph, tilt.angle)):
+        return replace(tilt, doubtful=True)
+    return tilt
+
+
+def _steady(pieces_ink: np.ndarray, glyph: float, angle: float) -> bool:
+    """Whether the slant *angle* the long lines' search found in the glyph-sized ink *pieces_ink* (`glyph_ink`, of
+    pieces of *glyph*'s size) is found again with each of its glyph-sized pieces left out in turn: within ``STEADY``
+    of it, past `DEAD_ZONE`, short of `MAX_TILT` and with `MIN_CONFIDENCE`. Real lettering is a slanted line of many
+    glyphs, each one in step with the rest: its slant stays without any one of them. Upright lettering the search
+    takes for slanted (a dash, a mark or a small kana set off the column, a dark ground's pieces) and a drawing's
+    strokes (a face, a pot) owe theirs to one piece: without it the slant goes, or turns elsewhere.
+
+    With one piece left out too few for the search, each such ink is measured again (`_measure`: a short word's
+    measure). Otherwise the search's sharpnesses are taken for every piece left out at once, over the first search's
+    angles and the second's round *angle* (the projections of all the ink less the piece's own, `_sharpness`), the
+    cost of about two searches for any number of pieces."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(pieces_ink.astype(np.uint8), connectivity=8)
+    sizes = np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT])
+    whole = np.flatnonzero(sizes[1:] >= WHOLE_GLYPH * glyph) + 1  # (a stroke or a dot is no glyph of its own)
+    if whole.size <= MIN_PIECES:
+        for k in whole:
+            left, _ink, _glyph = _measure(pieces_ink & (labels != k), glyph)
+            if not left.angle or abs(left.angle - angle) > STEADY:
+                return False
+        return True
+    ys, xs = np.nonzero(pieces_ink)
+    if xs.size > MAX_POINTS:
+        pick = np.linspace(0, xs.size - 1, MAX_POINTS).astype(np.int64)
+        xs, ys = xs[pick], ys[pick]
+    row = np.zeros(n, np.int64)
+    row[whole] = np.arange(1, whole.size + 1)
+    rows = row[labels[ys, xs]]  # (0: ink no piece of which is left out)
+    points = np.stack([xs - xs.mean(), ys - ys.mean()], axis=1).astype(np.float64)
+    count = int(round(2 * MAX_TILT / COARSE_STEP)) + 1
+    fine = int(round(2 * COARSE_STEP / FINE_STEP)) + 1
+    angles = np.concatenate([-MAX_TILT + COARSE_STEP * np.arange(count),
+                             angle - COARSE_STEP + FINE_STEP * np.arange(fine)])
+    score = np.ones((angles.size, whole.size))
+    for i, a in enumerate(np.radians(angles)):
+        c, s = math.cos(a), math.sin(a)
+        for along in (points[:, 0] * c - points[:, 1] * s, points[:, 0] * s + points[:, 1] * c):
+            bins = np.round(along - along.min()).astype(np.int64)
+            width = int(bins.max()) + 1
+            hist = np.bincount(rows * width + bins, minlength=(whole.size + 1) * width)
+            hist = hist.reshape(whole.size + 1, width).astype(np.float64)
+            total = hist.sum(axis=0)
+            part = hist[1:]
+            # the sum of the squared counts of all the ink less each piece's: (T - p)^2 = T^2 - 2 T p + p^2
+            score[i] *= total @ total - 2.0 * (part @ total) + np.einsum("ij,ij->i", part, part)
+    best = score.argmax(axis=0)
+    found = angles[best]
+    upright = score[int(round(MAX_TILT / COARSE_STEP))]
+    top = score[best, np.arange(whole.size)]
+    confidence = np.where(top > 0, 1.0 - upright / np.maximum(top, 1e-12), 0.0)
+    return bool(np.all((np.abs(found - angle) <= STEADY) & (np.abs(found) > DEAD_ZONE) & (np.abs(found) < MAX_TILT)
+                       & (confidence >= MIN_CONFIDENCE)))
+
+
+def _measure(ink: np.ndarray, glyph: float = 0.0) -> tuple[Tilt, np.ndarray, float]:
+    """The slant of the lettering whose ink is *ink* as the projections show it, with its glyph-sized ink and glyph
+    size (`glyph_ink`).
 
     For each angle the ink is turned upright and projected onto both axes (`_sharpness`): across the lines the ink
     piles up into the lines at the lettering's angle, and along them into the glyphs set in step; the angle is where
@@ -136,7 +217,7 @@ def lettering_tilt(ink: np.ndarray, glyph: float = 0.0) -> Tilt:
     pieces_ink, pieces, glyph = glyph_ink(ink, glyph)
     ys, xs = np.nonzero(pieces_ink)
     if pieces < MIN_PIECES or xs.size < 10 or glyph <= 0:
-        return short_tilt(pieces_ink, pieces) or Tilt(pieces=pieces)
+        return short_tilt(pieces_ink, pieces) or Tilt(pieces=pieces), pieces_ink, glyph
     if xs.size > MAX_POINTS:
         pick = np.linspace(0, xs.size - 1, MAX_POINTS).astype(np.int64)
         xs, ys = xs[pick], ys[pick]
@@ -166,10 +247,11 @@ def lettering_tilt(ink: np.ndarray, glyph: float = 0.0) -> Tilt:
     if run < MIN_RUN:  # a short word: its lines too short for the search, the short word's own measure instead
         short = short_tilt(pieces_ink, pieces)
         if short is not None:
-            return short
+            return short, pieces_ink, glyph
     if abs(angle) <= DEAD_ZONE or confidence < MIN_CONFIDENCE or run < MIN_RUN or abs(angle) >= MAX_TILT:
         angle = 0.0
-    return Tilt(round(angle, 2), round(confidence, 3), vertical, round(measured, 2), pieces, round(run, 2))
+    return (Tilt(round(angle, 2), round(confidence, 3), vertical, round(measured, 2), pieces, round(run, 2)),
+            pieces_ink, glyph)
 
 
 def _line_angle(dx: float, dy: float) -> tuple[float, bool]:
@@ -242,7 +324,8 @@ def short_tilt(pieces_ink: np.ndarray, pieces: int) -> Tilt | None:
     if len(lines) != 1:  # one line only: of two lines set off from each other, the block's edge is no line's
         return None
     run = float(np.percentile(along, 98) - np.percentile(along, 2)) / max(1.0, float(lines[0]))
-    return Tilt(round(angle, 2), round(gain, 3), vertical, round(angle, 2), pieces, round(run, 2), short=True)
+    return Tilt(round(angle, 2), round(gain, 3), vertical, round(angle, 2), pieces, round(run, 2), short=True,
+                doubtful=True)
 
 
 def region_ink(rgb: np.ndarray, mask: np.ndarray, box: tuple[int, int, int, int], origin: tuple[int, int],
