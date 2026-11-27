@@ -31,7 +31,7 @@ class DetectorConfig:
     dark_threshold: int = 140  # text strokes are at most this bright
     min_area_ratio: float = 0.0006  # of the image area
     max_area_ratio: float = 0.20
-    min_size: int = 24  # px, both sides
+    min_size: int = 24  # px, both sides (at the page's scale: `BubbleDetector.detect`)
     max_aspect: float = 6.0
     min_fill: float = 0.35  # filled bubble area / bounding box area
     min_dark_ratio: float = 0.01  # text (holes) share of the bubble interior
@@ -69,7 +69,8 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
 def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: np.ndarray, inner: np.ndarray,
                       glyph: float, dark_threshold: int, margin: int = 8, max_glyph: float = 2.0,
                       white_threshold: int = 225, debug: dict | None = None,
-                      limit: tuple[int, int, int, int] | None = None) -> tuple[tuple[int, int, int, int], np.ndarray, tuple[int, int, int, int], int] | None:
+                      limit: tuple[int, int, int, int] | None = None, scale: float = 1.0,
+                      ) -> tuple[tuple[int, int, int, int], np.ndarray, tuple[int, int, int, int], int] | None:
     """Find the lettering a bubble's white area does not enclose: glyphs that touch the outline.
 
     The bubble is a white area and its text is the holes in it. A glyph that
@@ -103,8 +104,13 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
     (new box, new erase mask for it, box of the recovered pieces, piece count),
     or None when there is nothing to add. *debug*, when given, receives the
     window's origin, its dark-piece labels, the ids judged outline, inside,
-    candidate and taken, and the reason for returning None.
+    candidate and taken, and the reason for returning None. The measures in
+    pixels (the edge band, the distances, a piece's least ink and thickness,
+    the closing) are taken at the page's *scale* (`render.pagescale`); the
+    one-pixel rings are not.
     """
+    from ..render import pagescale  # (here: the render package imports this module)
+
     dbg = debug if debug is not None else {}
     x, y, bw, bh = box
     H, W = gray.shape[:2]
@@ -116,7 +122,7 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
     filled_w = np.zeros(dark.shape, bool)
     filled_w[oy : oy + bh, ox : ox + bw] = filled > 0
     fw8 = filled_w.astype(np.uint8)
-    near = cv2.dilate(fw8, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+    near = cv2.dilate(fw8, pagescale.disc(7, scale)) > 0
     ring = (cv2.dilate(fw8, np.ones((3, 3), np.uint8)) > 0) & ~filled_w
     edge_band = (near & ~filled_w & (g < white_threshold)) | ring  # the bubble's edge: what kept its white area apart
     barrier = (dark > 0) | edge_band
@@ -168,14 +174,15 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
         return float(src[py : py + ph, px : px + pw][piece].min())
 
     n_t, _l_t, st_t, _ = cv2.connectedComponentsWithStats(((dark > 0) & inner_w).astype(np.uint8), connectivity=8)
-    seed_area = max(6.0, 0.2 * float(np.median(st_t[1:, cv2.CC_STAT_AREA]))) if n_t > 1 else 6.0
+    least_ink, thick, against = pagescale.area(6.0, scale), pagescale.px(3, scale), 4.0 * scale
+    seed_area = max(least_ink, 0.2 * float(np.median(st_t[1:, cv2.CC_STAT_AREA]))) if n_t > 1 else least_ink
 
     def glyph_like(j: int) -> bool:  # a glyph or a good part of one: not a tone dot, not a hairline's dash
-        return int(st_d[j][4]) >= seed_area and min(int(st_d[j][2]), int(st_d[j][3])) >= 3
+        return int(st_d[j][4]) >= seed_area and min(int(st_d[j][2]), int(st_d[j][3])) >= thick
 
     to_white = cv2.distanceTransform((~filled_w).astype(np.uint8), cv2.DIST_L2, 3)
-    accepted = [j for j in candidates if glyph_like(j) and nearest(to_white, j) <= 4.0]
-    step = max(4.0, 0.5 * glyph)
+    accepted = [j for j in candidates if glyph_like(j) and nearest(to_white, j) <= against]
+    step = max(against, 0.5 * glyph)
     for _ in range(3):
         rest = [j for j in candidates if j not in accepted and glyph_like(j) and nearest(to_white, j) <= 2.0 * glyph]
         if not accepted or not rest:
@@ -187,7 +194,7 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
         accepted.extend(taken)
     if accepted:
         to_taken = cv2.distanceTransform((~np.isin(lab_d, accepted)).astype(np.uint8), cv2.DIST_L2, 3)
-        beside = max(4.0, 0.35 * glyph)
+        beside = max(against, 0.35 * glyph)
         accepted += [j for j in candidates if j not in accepted and nearest(to_taken, j) <= beside]
     dbg.update(candidates=set(candidates), accepted=set(accepted), too_big={
         int(j) for j in dbg["inside"] if max(int(st_d[j][2]), int(st_d[j][3])) > max_glyph * glyph})
@@ -195,10 +202,9 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
         dbg["result"] = "nothing next to the white area"
         return None
     acc = np.isin(lab_d, accepted)
-    add = (cv2.dilate(acc.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0) & inside
+    add = (cv2.dilate(acc.astype(np.uint8), pagescale.disc(5, scale)) > 0) & inside
     mask = inner_w | add
-    closed = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE,
-                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+    closed = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, pagescale.disc(7, scale)) > 0
     mask = mask | (closed & inside)  # no slivers between the old mask and the recovered glyphs
     ys, xs = np.nonzero(mask)
     nx0, ny0 = min(int(xs.min()), ox), min(int(ys.min()), oy)
@@ -213,12 +219,16 @@ class BubbleDetector:
     def __init__(self, config: DetectorConfig | None = None):
         self.cfg = config or DetectorConfig()
 
-    def detect(self, rgb: np.ndarray, inverted: bool = False) -> list[TextRegion]:
+    def detect(self, rgb: np.ndarray, inverted: bool = False, scale: float = 1.0) -> list[TextRegion]:
         """Find bubbles in an RGB uint8 image. Returned regions are not yet ordered.
 
         With ``inverted=True`` the image is negated first, which finds dark
         bubbles with light lettering (regions come back with kind "dark-bubble").
+        *scale* is the page's (`render.pagescale.page_scale`): the measures in
+        pixels set on the sample set's pages are taken at it (1: as set).
         """
+        from ..render import pagescale  # (here: the render package imports this module)
+
         cfg = self.cfg
         if rgb.ndim == 3:
             gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
@@ -229,7 +239,8 @@ class BubbleDetector:
         kind = "dark-bubble" if inverted else "bubble"
         h, w = gray.shape
         img_area = float(h * w)
-        min_area = max(cfg.min_size * cfg.min_size, cfg.min_area_ratio * img_area)
+        min_size = pagescale.px(cfg.min_size, scale)
+        min_area = max(min_size * min_size, cfg.min_area_ratio * img_area)
         max_area = cfg.max_area_ratio * img_area
 
         white = (gray >= cfg.white_threshold).astype(np.uint8) * 255
@@ -237,14 +248,14 @@ class BubbleDetector:
         white = cv2.erode(white, np.ones((3, 3), np.uint8))
         n, labels, stats, _ = cv2.connectedComponentsWithStats(white, connectivity=4, ltype=cv2.CV_32S)
 
-        kernel_size = 2 * cfg.outline_erosion + 1
-        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        erode_kernel = pagescale.disc(2 * cfg.outline_erosion + 1, scale)
+        least_ink = pagescale.area(cfg.min_text_pixels, scale)
         regions: list[TextRegion] = []
         for i in range(1, n):
             x, y, bw, bh, area = (int(v) for v in stats[i])
             if area < min_area or area > max_area:
                 continue
-            if bw < cfg.min_size or bh < cfg.min_size:
+            if bw < min_size or bh < min_size:
                 continue
             aspect = bw / bh
             if aspect > cfg.max_aspect or aspect < 1.0 / cfg.max_aspect:
@@ -262,7 +273,7 @@ class BubbleDetector:
             inner = cv2.erode(filled, erode_kernel)
             gray_crop = gray[y : y + bh, x : x + bw]
             dark = ((gray_crop < cfg.dark_threshold) & (inner > 0)).astype(np.uint8)
-            if int(dark.sum()) < cfg.min_text_pixels:
+            if int(dark.sum()) < least_ink:
                 continue
             # bubbles that touch or overlap: one region each (white bubbles only: the black areas of a page join up
             # into shapes of every kind, and a dark bubble's lettering split that way loses its columns)
@@ -270,31 +281,34 @@ class BubbleDetector:
                      if cfg.split_lobes and not inverted else None)
             whole = None
             if parts:
-                found = [self._region(gray, (x + px, y + py, pw_, ph_), p_filled, p_inner, p_dark, kind)
+                found = [self._region(gray, (x + px, y + py, pw_, ph_), p_filled, p_inner, p_dark, kind, scale)
                          for px, py, pw_, ph_, p_filled, p_inner, p_dark in parts]
                 if any(r is None for r in found):
                     # a bubble's lettering would not pass on its own (a line of dots, two glyphs): read the area
                     # whole, as before, rather than lose that line; when the whole does not pass either, the parts
                     # that do are kept
-                    whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind)
+                    whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale)
                 regions.extend([whole] if whole is not None else [r for r in found if r is not None])
             else:
-                whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind)
+                whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale)
                 if whole is not None:
                     regions.append(whole)
         if inverted and cfg.recover_edge_text and cfg.take_columns_beyond:
-            take_columns_beyond(gray, regions, cfg.dark_threshold)
+            take_columns_beyond(gray, regions, cfg.dark_threshold, scale)
         return regions
 
     def _region(self, gray: np.ndarray, box: tuple[int, int, int, int], filled: np.ndarray, inner: np.ndarray,
-                dark: np.ndarray, kind: str) -> TextRegion | None:
+                dark: np.ndarray, kind: str, scale: float = 1.0) -> TextRegion | None:
         """The text region of one white area (*box* x, y, w, h in *gray*; its filled shape, erase mask and dark
-        pixels inside, in that box), or None when what is inside it is a drawing rather than lettering."""
+        pixels inside, in that box), or None when what is inside it is a drawing rather than lettering. Measures in
+        px at the page's *scale*."""
+        from ..render import pagescale  # (here: the render package imports this module)
+
         cfg = self.cfg
         x, y, bw, bh = box
         h = gray.shape[0]
         dark_count = int(dark.sum())
-        if dark_count < cfg.min_text_pixels:
+        if dark_count < pagescale.area(cfg.min_text_pixels, scale):
             return None
         # Text is many small pieces; artwork tends to be one big connected stroke.
         n_d, _, st_d, _ = cv2.connectedComponentsWithStats(dark, connectivity=8, ltype=cv2.CV_32S)
@@ -313,11 +327,12 @@ class BubbleDetector:
         # Fragments of thin art lines (very thin and long) are not glyphs.
         pw = st_d[1:, cv2.CC_STAT_WIDTH].astype(np.float64)
         ph = st_d[1:, cv2.CC_STAT_HEIGHT].astype(np.float64)
-        line_like = (np.minimum(pw, ph) <= cfg.line_max_thickness) & (np.maximum(pw, ph) >= 4 * np.minimum(pw, ph))
+        thin = pagescale.px(cfg.line_max_thickness, scale)
+        line_like = (np.minimum(pw, ph) <= thin) & (np.maximum(pw, ph) >= 4 * np.minimum(pw, ph))
         if pieces[line_like].sum() > 0.7 * pieces.sum():
             return None
         # Eyes, dots and blush marks are solid blobs; glyphs are strokes that fill little of their box.
-        compact = (np.minimum(pw, ph) >= 4) & (np.maximum(pw, ph) < 3 * np.minimum(pw, ph))
+        compact = (np.minimum(pw, ph) >= pagescale.px(4, scale)) & (np.maximum(pw, ph) < 3 * np.minimum(pw, ph))
         solidity = pieces / np.maximum(pw * ph, 1.0)
         blobs = compact & (solidity >= cfg.blob_min_solidity)
         if len(pieces) <= cfg.blob_max_pieces and pieces[blobs].sum() > 0.5 * pieces.sum():
@@ -330,11 +345,11 @@ class BubbleDetector:
         text_box = (x + tx0, y + ty0, x + tx1, y + ty1)
         core_box, extra = None, 0
         n_pieces = int(n_d - 1)
-        glyph = max(8.0, float(np.percentile(np.maximum(pw, ph), 90)))
+        glyph = max(8.0 * scale, float(np.percentile(np.maximum(pw, ph), 90)))
         if cfg.recover_edge_text:
             found = recover_edge_text(gray, (x, y, bw, bh), filled, inner, glyph, cfg.dark_threshold,
-                                      cfg.edge_margin, cfg.edge_max_glyph, cfg.white_threshold,
-                                      limit=focus_window(text_box, (x, y, x + bw, y + bh)))
+                                      pagescale.px(cfg.edge_margin, scale), cfg.edge_max_glyph, cfg.white_threshold,
+                                      limit=focus_window(text_box, (x, y, x + bw, y + bh)), scale=scale)
             if found is not None:
                 (x, y, bw, bh), inner, rb, extra = found
                 core_box = text_box
@@ -707,10 +722,12 @@ def split_lobes(filled: np.ndarray, inner: np.ndarray, dark: np.ndarray, neck: f
     return out if len(out) >= 2 else None
 
 
-def take_columns_beyond(gray: np.ndarray, regions: list[TextRegion], dark_threshold: int) -> int:
+def take_columns_beyond(gray: np.ndarray, regions: list[TextRegion], dark_threshold: int,
+                        scale: float = 1.0) -> int:
     """Dark bubbles whose lettering goes on past the interior on the bubble's own black (a badly closed blob): the
     text box, the region and the erase mask grow over such a column, which is read with the bubble and judged
-    without it; a column inside another bubble is never taken. Returns how many regions grew."""
+    without it; a column inside another bubble is never taken. Returns how many regions grew. Measures in px at the
+    page's *scale*."""
     h, w = gray.shape[:2]
     union = np.zeros((h, w), bool)
     for r in regions:
@@ -722,7 +739,7 @@ def take_columns_beyond(gray: np.ndarray, regions: list[TextRegion], dark_thresh
         own = np.zeros((h, w), bool)
         own[r.y0:r.y1, r.x0:r.x1] = r.mask > 0
         beyond, more, pieces = lettering_beyond(gray, (r.x0, r.y0, r.width, r.height), r.mask, r.text_box, r.glyph,
-                                                dark_threshold, exclude=union & ~own)
+                                                dark_threshold, exclude=union & ~own, scale=scale)
         if not more:
             continue
         r.before_beyond = ((r.x0, r.y0, r.x1, r.y1), r.text_box, r.mask, more)
@@ -813,7 +830,7 @@ def focus_oversized(regions: list[TextRegion], max_text_share: float = 0.30,
 
 
 def drop_nested(regions: list[TextRegion], gray: np.ndarray, dark_threshold: int = 140,
-                tolerance: int = 4) -> list[TextRegion]:
+                tolerance: int = 4, scale: float = 1.0) -> list[TextRegion]:
     """Of two regions where one lies inside the other together with its text, keep one (*gray*: the page as the
     regions were found on it, inverted for dark bubbles).
 
@@ -822,8 +839,12 @@ def drop_nested(regions: list[TextRegion], gray: np.ndarray, dark_threshold: int
     glyph-sized ink lies inside the inner region's outline (its convex hull), the outer region is that white area
     and gives way: its mask would take in the bubble's outline. Glyphs inside the outline that the inner region
     missed (one touching a broken outline) are added to it. Otherwise the inner region is part of the outer one's
-    text and gives way. Either way the text is lettered once.
+    text and gives way. Either way the text is lettered once. The *tolerance* and the sizes told apart are in px at
+    the page's *scale* (`render.pagescale`).
     """
+    from ..render import pagescale  # (here: the render package imports this module)
+
+    tolerance = pagescale.px(tolerance, scale)
     drop: set[int] = set()
     for i, a in enumerate(regions):
         for j, b in enumerate(regions):
@@ -835,16 +856,20 @@ def drop_nested(regions: list[TextRegion], gray: np.ndarray, dark_threshold: int
             shared = max(0, min(at[2], bt[2]) - max(at[0], bt[0])) * max(0, min(at[3], bt[3]) - max(at[1], bt[1]))
             if shared < 0.9 * max(1, (bt[2] - bt[0]) * (bt[3] - bt[1])):
                 continue  # b's text is not part of a's
-            if _take_in_from(b, a, gray, dark_threshold):
+            if _take_in_from(b, a, gray, dark_threshold, scale):
                 drop.add(i)
             else:
                 drop.add(j)
     return [r for k, r in enumerate(regions) if k not in drop]
 
 
-def _take_in_from(inner: TextRegion, outer: TextRegion, gray: np.ndarray, dark_threshold: int) -> bool:
+def _take_in_from(inner: TextRegion, outer: TextRegion, gray: np.ndarray, dark_threshold: int,
+                  scale: float = 1.0) -> bool:
     """If nearly all (at least 3/4) of *outer*'s glyph-sized ink lies inside *inner*'s outline, add to *inner* the
     glyphs inside its outline that it missed and return True; otherwise leave *inner* alone and return False."""
+    from ..render import pagescale  # (here: the render package imports this module)
+
+    outline, glyph_least = pagescale.px(56, scale), pagescale.px(5, scale)
     contours, _ = cv2.findContours((inner.mask > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return False
@@ -866,12 +891,12 @@ def _take_in_from(inner: TextRegion, outer: TextRegion, gray: np.ndarray, dark_t
     for k in range(1, n):
         x, y, w, h, area = (int(v) for v in stats[k])
         longest, shortest = max(w, h), min(w, h)
-        if longest > 56 or area < 2:
+        if longest > outline or area < 2:
             continue  # an outline, or a stray pixel
         in_hull = cv2.pointPolygonTest(hull, (outer.x0 + x + w / 2.0, outer.y0 + y + h / 2.0), False) >= 0
         if in_hull and in_mask[k] < 0.5 * area:
             missed.append(k)  # inside the outline, outside inner's mask: lettering inner missed
-        if longest < 5 or shortest < 2 or area < 6 or longest > 4 * shortest:
+        if longest < glyph_least or shortest < 2 or area < 6 or longest > 4 * shortest:
             continue  # not glyph-sized
         if in_hull:
             inside += area
@@ -881,8 +906,7 @@ def _take_in_from(inner: TextRegion, outer: TextRegion, gray: np.ndarray, dark_t
         return False
     tx0, ty0, tx1, ty1 = inner.text_box
     if missed:
-        add = cv2.dilate(np.isin(labels, missed).astype(np.uint8) * 255,
-                         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        add = cv2.dilate(np.isin(labels, missed).astype(np.uint8) * 255, pagescale.disc(5, scale))
         ys, xs = np.nonzero(add)
         ys, xs = ys - oy, xs - ox  # into inner's frame
         keep = (ys >= 0) & (ys < inner.height) & (xs >= 0) & (xs < inner.width)

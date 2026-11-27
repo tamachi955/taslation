@@ -47,7 +47,7 @@ class StandInDetector:
         self.cfg = DetectorConfig()
         self.boxes, self.origin = list(boxes), origin
 
-    def detect(self, image, inverted=False):
+    def detect(self, image, inverted=False, scale=1.0):
         if inverted:
             return []
         ox, oy = self.origin

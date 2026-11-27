@@ -393,20 +393,25 @@ class Shaper:
             return True
         return False
 
-    def rebuilt(self, rgb: np.ndarray, region: TextRegion, classical: Sequence[TextRegion]) -> TextRegion:
-        """A copy of *region* with the classical shape; its ``adopted`` is the classical region that gave it."""
+    def rebuilt(self, rgb: np.ndarray, region: TextRegion, classical: Sequence[TextRegion],
+                scale: float = 1.0) -> TextRegion:
+        """A copy of *region* with the classical shape; its ``adopted`` is the classical region that gave it. *scale*:
+        the page's, at which the classical detectors take their measures in px (`render.pagescale.page_scale`)."""
+        from ..render import pagescale  # (here: the render package imports the detectors)
+
         r = copy.copy(region)
         if self._adopt(r, classical):
             return r
         h, w = rgb.shape[:2]
-        x0, y0, x1, y1 = max(0, r.x0 - CROP_PAD), max(0, r.y0 - CROP_PAD), min(w, r.x1 + CROP_PAD), min(h, r.y1 + CROP_PAD)
+        pad = pagescale.px(CROP_PAD, scale)
+        x0, y0, x1, y1 = max(0, r.x0 - pad), max(0, r.y0 - pad), min(w, r.x1 + pad), min(h, r.y1 + pad)
         sub = rgb[y0:y1, x0:x1]
         gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
         tb = (r.text_box[0] - x0, r.text_box[1] - y0, r.text_box[2] - x0, r.text_box[3] - y0)
         try:
-            found = self.bubbles.detect(sub, inverted=r.dark)
+            found = self.bubbles.detect(sub, inverted=r.dark, scale=scale)
             if r.kind not in ("bubble", "dark-bubble"):
-                found = self.blocks.detect(sub, inverted=r.dark, taken=[]) + found
+                found = self.blocks.detect(sub, inverted=r.dark, taken=[], scale=scale) + found
         except Exception:  # noqa: BLE001 - a crop the classical detectors cannot take: the white area or the plain box
             found = []
         best, score = None, 0.0
@@ -422,7 +427,7 @@ class Shaper:
             canvas[best.y0:best.y1, best.x0:best.x1] = mask
             r.tier = 1
         else:
-            area = self._white_area(255 - gray if r.dark else gray, tb)
+            area = self._white_area(255 - gray if r.dark else gray, tb, scale)
             if area is None:
                 r.tier = 3  # the plain box stays its mask
                 return r
@@ -430,9 +435,12 @@ class Shaper:
         r.mask = np.ascontiguousarray(canvas[r.y0 - y0:r.y1 - y0, r.x0 - x0:r.x1 - x0])
         return r
 
-    def _white_area(self, gray: np.ndarray, tb: tuple[int, int, int, int]) -> np.ndarray | None:
-        """Tier 2: the white area most of the text box lies on, its holes filled and drawn in a little; None when
-        there is none as large as the text box."""
+    def _white_area(self, gray: np.ndarray, tb: tuple[int, int, int, int], scale: float = 1.0) -> np.ndarray | None:
+        """Tier 2: the white area most of the text box lies on, its holes filled and drawn in a little (as a bubble's
+        interior is, `DetectorConfig.outline_erosion` at the page's *scale*); None when there is none as large as
+        the text box."""
+        from ..render import pagescale  # (here: the render package imports the detectors)
+
         white = cv2.erode(((gray >= self.white) * 255).astype(np.uint8), np.ones((3, 3), np.uint8))
         _n, labels, _stats, _ = cv2.connectedComponentsWithStats(white, connectivity=4)
         x0, y0, x1, y1 = (max(0, v) for v in tb)
@@ -441,7 +449,7 @@ class Shaper:
         if not len(ids):
             return None
         filled = fill_holes(((labels == int(ids[counts.argmax()])) * 255).astype(np.uint8))
-        inner = cv2.erode(filled, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+        inner = cv2.erode(filled, pagescale.disc(2 * self.bubbles.cfg.outline_erosion + 1, scale))
         return inner if cv2.countNonZero(inner) >= 0.8 * max(1, _area(tb)) else None
 
 

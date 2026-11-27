@@ -29,10 +29,10 @@ def test_a_cancel_between_the_detectors_reads_nothing(sample_page, settings):
     p = _pipeline(settings)
     real, ran = p.detector.detect, []
 
-    def detect(rgb, inverted=False):
+    def detect(rgb, inverted=False, scale=1.0):
         ran.append(inverted)
         cancel.set()  # the page changed while the first detector looked at it
-        return real(rgb, inverted=inverted)
+        return real(rgb, inverted=inverted, scale=scale)
 
     p.detector.detect = detect
     events: list[str] = []

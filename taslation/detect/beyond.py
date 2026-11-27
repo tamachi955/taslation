@@ -5,6 +5,9 @@ around a dark bubble, or outlined glyphs set over the hair that reaches into a w
 such lettering for the detector (the text box grows to take an aligned column in), for the OCR (a light bubble's
 crop shows the outlined glyphs as black on white instead of a black drawing) and for the erase (the glyphs' white
 rings are painted the drawing's colour).
+
+The measures in pixels were set on the sample set's pages; each function takes them at the page's *scale*
+(`render.pagescale`: 1 for a page as high as those, less for a smaller one).
 """
 
 from __future__ import annotations
@@ -14,21 +17,28 @@ import numpy as np
 
 Box = tuple[int, int, int, int]
 
-BIG = 90  # a component longer than this is a drawing or the outline, never a glyph
-_OPEN = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))  # a ring is thinner than this; the page and a bubble are not
-_NEAR = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-_STROKE = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))  # a stroke up to twelve pixels thick, ring to ring
-_AGAINST = np.ones((7, 7), np.uint8)
+BIG = 90  # px: a component longer than this is a drawing or the outline, never a glyph
+OPEN = 13  # px: a ring is thinner than this; the page and a bubble are not
+NEAR = 9  # px: the band of ground round a piece beyond the interior
+STROKE = 13  # px: a stroke up to twelve pixels thick, ring to ring
+AGAINST = 7  # px: a ring this near the drawing's dark lies against it
 
 
-def thin_light(gray: np.ndarray, white_threshold: int = 225) -> np.ndarray:
+def _pagescale():  # type: ignore[no-untyped-def]
+    from ..render import pagescale  # (here: the render package imports this module)
+
+    return pagescale
+
+
+def thin_light(gray: np.ndarray, white_threshold: int = 225, scale: float = 1.0) -> np.ndarray:
     """Light pixels in thin structures (the rings of outlined glyphs, hair highlights): what an opening removes."""
     light = (gray > white_threshold).astype(np.uint8)
-    return (light > 0) & (cv2.morphologyEx(light, cv2.MORPH_OPEN, _OPEN) == 0)
+    return (light > 0) & (cv2.morphologyEx(light, cv2.MORPH_OPEN, _pagescale().disc(OPEN, scale)) == 0)
 
 
-def big_dark(gray: np.ndarray, dark_threshold: int = 140, big: int = BIG) -> np.ndarray:
-    """Dark pixels of components longer than *big*: the drawing, the outline, the hair."""
+def big_dark(gray: np.ndarray, dark_threshold: int = 140, big: int = BIG, scale: float = 1.0) -> np.ndarray:
+    """Dark pixels of components longer than *big* px at *scale*: the drawing, the outline, the hair."""
+    big = _pagescale().px(big, scale)
     n, labels, stats, _ = cv2.connectedComponentsWithStats((gray < dark_threshold).astype(np.uint8), connectivity=8)
     ids = [i for i in range(1, n) if max(int(stats[i][2]), int(stats[i][3])) > big]
     return np.isin(labels, ids) if ids else np.zeros(gray.shape, bool)
@@ -44,30 +54,31 @@ def _window(shape: tuple[int, ...], box: Box, pad: int = 2) -> np.ndarray:
 
 
 def outlined_strokes(gray: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
-                     white_threshold: int = 225) -> np.ndarray:
-    """Outside *mask* within *box*: the dark strokes of outlined glyphs on a dark drawing (dark pixels within four
-    pixels of a thin light ring), which the OCR should see as ink."""
+                     white_threshold: int = 225, scale: float = 1.0) -> np.ndarray:
+    """Outside *mask* within *box*: the dark strokes of outlined glyphs on a dark drawing (dark pixels within
+    ``STROKE`` of a thin light ring), which the OCR should see as ink."""
     win = _window(gray.shape, box) & (mask == 0)
-    rings = thin_light(gray, white_threshold) & win
-    near = cv2.dilate(rings.astype(np.uint8), _STROKE) > 0
+    rings = thin_light(gray, white_threshold, scale) & win
+    near = cv2.dilate(rings.astype(np.uint8), _pagescale().disc(STROKE, scale)) > 0
     return near & (gray < dark_threshold) & win
 
 
 def rings_on_dark(gray: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
-                  white_threshold: int = 225) -> np.ndarray:
+                  white_threshold: int = 225, scale: float = 1.0) -> np.ndarray:
     """Outside *mask* within *box*: the thin light rings that lie against the drawing's dark (an outlined glyph over
     hair, over black), which the erase paints with the drawing's colour. A ring against small dark alone (a glyph
     whose strokes do not touch the drawing) is left: so are hairlines and tone dots in the window."""
     win = _window(gray.shape, box) & (mask == 0)
-    rings = thin_light(gray, white_threshold) & win
+    rings = thin_light(gray, white_threshold, scale) & win
     if not rings.any():
         return rings
-    against = cv2.dilate(big_dark(gray, dark_threshold).astype(np.uint8), _AGAINST) > 0
-    return rings & against
+    side = _pagescale().side(AGAINST, scale)
+    against = cv2.dilate(big_dark(gray, dark_threshold, scale=scale).astype(np.uint8), np.ones((side, side), np.uint8))
+    return rings & (against > 0)
 
 
 def ocr_view(rgb: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
-             white_threshold: int = 225) -> np.ndarray | None:
+             white_threshold: int = 225, scale: float = 1.0) -> np.ndarray | None:
     """A copy of a light bubble's pixels for the OCR: outside the mask within *box* everything is white except the
     outlined glyphs' strokes, black. None when nothing dark lies outside the mask within the box (the crop is fine
     as it is)."""
@@ -77,14 +88,14 @@ def ocr_view(rgb: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 
         return None
     out = rgb.copy()
     out[win] = 255
-    out[outlined_strokes(gray, mask, box, dark_threshold, white_threshold)] = 0
+    out[outlined_strokes(gray, mask, box, dark_threshold, white_threshold, scale)] = 0
     return out
 
 
 def lettering_beyond(gray: np.ndarray, box: Box, inside: np.ndarray, text_box: Box, glyph: float,
                      dark_threshold: int = 140, max_reach: float = 1.5, rounds: int = 2,
                      same_ground: int = 40, exclude: np.ndarray | None = None, flat: float = 25.0,
-                     debug: dict | None = None) -> tuple[Box, int, list[Box]]:
+                     debug: dict | None = None, scale: float = 1.0) -> tuple[Box, int, list[Box]]:
     """The text box grown to take in a column (or row) of lettering that goes on past the bubble's interior on the
     bubble's own ground (a black bubble whose black continues under the lettering, unclosed): one column per
     round, nearest first, of at least three lettering-sized, glyph-shaped dark pieces stacked within a glyph's pitch, aligned with
@@ -108,6 +119,7 @@ def lettering_beyond(gray: np.ndarray, box: Box, inside: np.ndarray, text_box: B
     mask_box = (x + int(xs.min()), y + int(ys.min()), x + int(xs.max()) + 1, y + int(ys.max()) + 1)
     tx0, ty0, tx1, ty1 = text_box
     taken: list[Box] = []
+    near = _pagescale().disc(NEAR, scale)
     for _ in range(rounds):
         wx0, wy0, wx1, wy1 = max(0, tx0 - span), max(0, ty0 - span), min(W, tx1 + span), min(H, ty1 + span)
         g = gray[wy0:wy1, wx0:wx1]
@@ -146,7 +158,7 @@ def lettering_beyond(gray: np.ndarray, box: Box, inside: np.ndarray, text_box: B
             if edge_gap > 1.2 * glyph:
                 continue  # the text stops well inside the interior: what lies beyond is not its continuation
             piece = (labels == i).astype(np.uint8)
-            band = (cv2.dilate(piece, _NEAR) > 0) & ~any_ink & ~inner  # the ground alone, no glyph, no stroke
+            band = (cv2.dilate(piece, near) > 0) & ~any_ink & ~inner  # the ground alone, no glyph, no stroke
             if band.sum() < 8 or abs(float(np.median(g[band])) - interior_level) > same_ground:
                 continue  # not the bubble's own ground: the page, a tone, a drawing
             if float(g[band].astype(np.float32).std()) > flat:

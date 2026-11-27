@@ -95,6 +95,17 @@ def test_min_short_bubble_still_decides_for_other_short_readings(settings):
     assert _judge(settings, "ねえ", 0.8, "text") == "ocr-noise"
 
 
+def test_min_short_bubble_is_taken_at_the_page_s_scale(settings):
+    """A region 54 px high is small on a page as high as the sample set's (under 60 px), not on one shown 1000 px
+    high (scale 0.855: under 51 px), where it is the size a 63 px region is at full size."""
+    region = _region(size=50)
+    pipeline = Pipeline(settings, ocr=None, translator=None)
+    assert pipeline._judge(region, "ねえ", 0.8, 2, False) == "ocr-noise"
+    region.scale = 1000 / 1170
+    assert pipeline._judge(region, "ねえ", 0.8, 2, False) == "untranslated"
+    assert pipeline._judge(_region(size=40), "ねえ", 0.8, 2, False) == "ocr-noise"  # (no scale: taken as 1)
+
+
 class _StubOcr:
     def __init__(self, text: str, confidence: float):
         self.text, self.confidence = text, confidence

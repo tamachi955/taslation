@@ -1,4 +1,4 @@
-"""The erase's measures in pixels, held to the size of the page they are taken on.
+"""The erase's and the detectors' measures in pixels, held to the size of the page they are taken on.
 
 The erase's measures in pixels - the ring round a region's lettering its ground is judged on, how far its lettering
 is followed past its box, the white ring of outlined lettering, the band of ground round a hole, the closings that
@@ -8,6 +8,11 @@ round the lettering: a ring of 14 px round a white bubble's lettering reached it
 went to the inpainting (on the sample set's 214 pages, 134 regions erased by the model at full size, 181 at 1000 px
 of height). So each region carries the scale of the page it lies on (`TextRegion.scale`, from its page unit's height
 where the pipeline places it on a unit: `page_scale`), and a measure is taken at that scale (`px`, `disc`, `area`).
+The classical detectors' measures are taken the same way, the page's scale passed to them before any region exists
+(`Pipeline.page_scale`): a bubble's least size (`min_bubble_size`) and ink, the kernels, distances and least sizes of
+`detect.bubbles` (lettering against the outline, a region inside another), `detect.textblocks` (a piece's least and
+most size, the fringe round the lettering) and `detect.beyond`, the pad round a layout model's box the classical
+detectors look in, and the small region whose one or two characters are taken for a speck (`min_short_bubble`).
 
 A page as high as the sample set's or higher keeps the measures as they were set: they are never grown, so nothing
 changes at the size they were set at, nor on made-up pages at print size, whose lettering has the sample set's size in

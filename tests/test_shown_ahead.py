@@ -77,9 +77,9 @@ def test_a_cancel_ends_it_with_nothing_kept(sample_page, settings, monkeypatch):
     cancel = threading.Event()
     real = p.detector.detect
 
-    def detect(rgb, inverted=False):
+    def detect(rgb, inverted=False, scale=1.0):
         cancel.set()  # the viewer turned the page meanwhile
-        return real(rgb, inverted=inverted)
+        return real(rgb, inverted=inverted, scale=scale)
 
     p.detector.detect = detect
     assert not p.keep_shown(sample_page.copy(), cancel=cancel)

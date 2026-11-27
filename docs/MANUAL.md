@@ -1118,7 +1118,7 @@ with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change
   and the pixels of broken outlines from 13,398 to 166). `erase_mode = "classic"` brings back the earlier way of erasing.
   Letters drawn into the outline itself, parts without a clear outline (ink splatter and the like), and one or two characters in a small bubble may be left unerased.
 * Regions the OCR model can only guess at (faces, highlights, illegible sound effects) are dropped by the confidence filter (`ocr_min_confidence`). One or two characters in a small region (`min_short_bubble`,
-  under 60 px) are taken for dots in the drawing and the like, but a short line with a confidence of 0.95 or more that starts with hiragana or kanji,
+  under 60 px on a page 1170 px high or more, proportionally less on a smaller one) are taken for dots in the drawing and the like, but a short line with a confidence of 0.95 or more that starts with hiragana or kanji,
   in a bubble with an outline, is translated. Katakana in a small region (mostly parts of drawn sound effects) and lone symbols (exclamation marks,
   ellipses) are left as drawn.
 * Capture only the page part (for a viewer read in a browser,

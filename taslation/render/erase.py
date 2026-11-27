@@ -491,7 +491,7 @@ def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
     taken = np.zeros(interior.shape, bool)
     for piece in pieces:
         taken |= piece
-    dark = big_dark(gray, dark_threshold)  # the drawing's dark: the hair, the outline
+    dark = big_dark(gray, dark_threshold, scale=scale)  # the drawing's dark: the hair, the outline
     big = dark.copy()  # with the large light areas: never painted over
     n, labels, stats, _ = cv2.connectedComponentsWithStats((gray > white_threshold).astype(np.uint8), connectivity=8)
     big_light = pagescale.px(BIG_LIGHT, scale)
@@ -522,10 +522,10 @@ def erase_rings(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
     that dark's colour (the dark within `AROUND` at the page's *scale*), so the glyphs merge into the drawing. Returns
     how many rings were painted. *accept*, when given, has the last word on each ring (a boolean mask of the crop)."""
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-    rings = rings_on_dark(gray, mask, box, dark_threshold, white_threshold)
+    rings = rings_on_dark(gray, mask, box, dark_threshold, white_threshold, scale)
     if not rings.any():
         return 0
-    dark = big_dark(gray, dark_threshold)
+    dark = big_dark(gray, dark_threshold, scale=scale)
     n, labels, _stats, _ = cv2.connectedComponentsWithStats(rings.astype(np.uint8), connectivity=8)
     painted = 0
     for i in range(1, n):

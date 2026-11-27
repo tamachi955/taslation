@@ -67,6 +67,20 @@ def test_one_character_bubble_is_kept():
     assert regions[0].x0 < 400 < regions[0].x1
 
 
+def test_a_bubble_s_least_size_is_taken_at_the_page_s_scale():
+    """A white area 18 px across (after the one-pixel erosion) is under `min_size` (24 px) on a page as high as the
+    sample set's; on a page shown half as high (scale 0.5: 12 px) it is a bubble, as one 36 px across is at full
+    size."""
+    img = np.full((400, 400, 3), 200, np.uint8)  # a grey panel: the bubble is a white area of its own
+    img[188:208, 188:208] = 255
+    for x, y in ((192, 192), (198, 192), (195, 198)):  # three L-shaped strokes: lettering, not a blob nor a line
+        img[y:y + 5, x:x + 2] = 0
+        img[y + 3:y + 5, x:x + 5] = 0
+    assert BubbleDetector().detect(img) == []
+    (found,) = BubbleDetector().detect(img, scale=0.5)
+    assert found.x0 < 197 < found.x1 and found.y0 < 197 < found.y1
+
+
 def test_blank_and_noise_images_give_nothing():
     det = BubbleDetector()
     assert det.detect(np.full((400, 300, 3), 255, np.uint8)) == []

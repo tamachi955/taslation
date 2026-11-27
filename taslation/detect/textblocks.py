@@ -101,7 +101,8 @@ def letter_lines(boxes: list[tuple[int, int, int, int]], font: float) -> tuple[l
 def block_mask(gray: np.ndarray, labels: np.ndarray, stats: np.ndarray, members: list[int],
                member_boxes: list[tuple[int, int, int, int]], text_box: tuple[int, int, int, int],
                region: tuple[int, int, int, int], glyph: float, white_threshold: int = 225, max_glyph: int = 56,
-               others: frozenset[int] | set[int] = frozenset()) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+               others: frozenset[int] | set[int] = frozenset(),
+               scale: float = 1.0) -> tuple[np.ndarray, tuple[int, int, int, int]]:
     """Erase mask of a text block (uint8, 255 = erase and letter here, local to *region*) and the box of its lettering.
 
     The lettering is the block's own pieces (*members*, labels of *labels*), every dark piece lying inside the text
@@ -114,8 +115,11 @@ def block_mask(gray: np.ndarray, labels: np.ndarray, stats: np.ndarray, members:
     lettering, its anti-aliasing and the light background connected to it. Artwork stays out of it, even a thin
     line on the light background or one crossing the text box, and a hole in the mask is filled only when it holds
     no artwork, so the erase never takes part of the drawing around the text and the translation is not set over
-    it.
+    it. *max_glyph* and the fringe round the lettering are in px at the page's *scale* (`render.pagescale`).
     """
+    from ..render import pagescale  # (here: the render package imports the detectors)
+
+    max_glyph = pagescale.px(max_glyph, scale)
     rx0, ry0, rx1, ry1 = region
     bx0, by0, bx1, by1 = text_box
     lab = labels[ry0:ry1, rx0:rx1]
@@ -208,7 +212,7 @@ def block_mask(gray: np.ndarray, labels: np.ndarray, stats: np.ndarray, members:
                       max(b[3] for b in letters))
     text_px = np.isin(lab, list(text))
     art = (lab > 0) & ~text_px
-    fringe = cv2.dilate(text_px.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+    fringe = cv2.dilate(text_px.astype(np.uint8), pagescale.disc(5, scale)) > 0
     mask = ((gray[ry0:ry1, rx0:rx1] >= white_threshold) | fringe) & ~art
     # keep the parts connected to the lettering (not light patches elsewhere, nor the light inside a drawing)
     _n, parts = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
@@ -410,14 +414,20 @@ class TextBlockDetector:
     def __init__(self, config: TextBlockConfig | None = None):
         self.cfg = config or TextBlockConfig()
 
-    def detect(self, rgb: np.ndarray, inverted: bool = False, taken: Sequence[TextRegion] = ()) -> list[TextRegion]:
+    def detect(self, rgb: np.ndarray, inverted: bool = False, taken: Sequence[TextRegion] = (),
+               scale: float = 1.0) -> list[TextRegion]:
         """Find text blocks; ``inverted=True`` finds light lettering on dark areas (kind "text-dark").
 
         Pieces inside the mask of a region in *taken* (the bubbles found before) are that bubble's lettering and are
         left out, so a block never takes in a bubble's text along with the drawing next to it: the text would be
-        read and translated twice.
+        read and translated twice. *scale* is the page's (`render.pagescale.page_scale`): a piece's least and most
+        size and the ring of ground looked at round it, set on the sample set's pages, are taken at it.
         """
+        from ..render import pagescale  # (here: the render package imports the detectors)
+
         cfg = self.cfg
+        min_glyph, max_glyph, least_pad = (pagescale.px(cfg.min_glyph, scale), pagescale.px(cfg.max_glyph, scale),
+                                           pagescale.px(3, scale))
         gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
         if inverted:
             gray = 255 - gray
@@ -451,13 +461,13 @@ class TextBlockDetector:
         for i in range(1, n):
             x, y, bw, bh, area = (int(v) for v in stats[i])
             longest, shortest = max(bw, bh), min(bw, bh)
-            if longest < cfg.min_glyph or longest > cfg.max_glyph or shortest < 2 or area < 6:
+            if longest < min_glyph or longest > max_glyph or shortest < 2 or area < 6:
                 continue
             if longest / max(shortest, 1) > cfg.max_piece_elongation:
                 continue
             if taken and in_taken(x + bw // 2, y + bh // 2):
                 continue  # a bubble's lettering
-            pad = max(3, longest // 2)
+            pad = max(least_pad, longest // 2)
             ring_light = light_share(x - pad, y - pad, x + bw + pad, y + bh + pad)
             if ring_light < cfg.min_light_ring:
                 continue
@@ -543,7 +553,8 @@ class TextBlockDetector:
             own = [ids[i] for i in members]
             others = all_pieces.difference(own)
             mask, letter_box = block_mask(gray, labels, stats, own, [boxes[i] for i in members], text_box,
-                                          (rx0, ry0, rx1, ry1), glyph, cfg.white_threshold, cfg.max_glyph, others)
+                                          (rx0, ry0, rx1, ry1), glyph, cfg.white_threshold, cfg.max_glyph, others,
+                                          scale)
             for _round in range(3):
                 lx0, ly0, lx1, ly1 = letter_box
                 if lx0 >= rx0 and ly0 >= ry0 and lx1 <= rx1 and ly1 <= ry1:
@@ -554,7 +565,8 @@ class TextBlockDetector:
                 rx0, ry0 = max(0, min(rx0, lx0 - 2)), max(0, min(ry0, ly0 - 2))
                 rx1, ry1 = min(w, max(rx1, lx1 + 2)), min(h, max(ry1, ly1 + 2))
                 mask, letter_box = block_mask(gray, labels, stats, own, [boxes[i] for i in members], text_box,
-                                              (rx0, ry0, rx1, ry1), glyph, cfg.white_threshold, cfg.max_glyph, others)
+                                              (rx0, ry0, rx1, ry1), glyph, cfg.white_threshold, cfg.max_glyph, others,
+                                              scale)
             regions.append(TextRegion(x0=rx0, y0=ry0, x1=rx1, y1=ry1, mask=mask, text_box=text_box, kind=kind,
                                       pieces=len(members), letter_box=letter_box))
         return regions

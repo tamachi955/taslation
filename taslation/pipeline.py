@@ -2905,15 +2905,16 @@ class Pipeline:
         if found is None:
             return classical
         model = model_regions(rgb, found, boxes)
+        scale = self.page_scale(rgb)
         for r in model:
-            r.after = self.shaper.rebuilt(rgb, r, classical)
+            r.after = self.shaper.rebuilt(rgb, r, classical, scale)
         claimed = Counter(id(r.after.adopted) for r in model if r.after.adopted is not None)
         for r in model:  # a classical region two model regions claim joined two bubbles: neither takes its shape
             if r.after.adopted is not None and claimed[id(r.after.adopted)] > 1:
-                r.after = self.shaper.rebuilt(rgb, r, ())
+                r.after = self.shaper.rebuilt(rgb, r, (), scale)
         for r in model:  # a bubble with no shape of its own on paper closed round it: that paper is its room
             if r.after.tier == 3 and r.after.kind in ("bubble", "dark-bubble"):
-                room = artwork.closed_room(rgb, r.after, self.page_scale(rgb))
+                room = artwork.closed_room(rgb, r.after, scale)
                 if room is not None:
                     r.after.mask = room
         return [*model, *classical]
@@ -2925,21 +2926,23 @@ class Pipeline:
         sub = rgb[y0:y1, x0:x1]
         gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
         dark = self.detector.cfg.dark_threshold
-        regions = drop_nested(focus_oversized(self.detector.detect(sub)), gray, dark)
+        scale = self.page_scale(rgb)  # (the detectors' measures in px at the page's scale)
+        regions = drop_nested(focus_oversized(self.detector.detect(sub, scale=scale)), gray, dark, scale=scale)
         if self.settings.detect_dark_bubbles:
             check_cancel(cancel)
-            regions = merge_regions(regions, drop_nested(focus_oversized(self.detector.detect(sub, inverted=True)),
-                                                         255 - gray, dark))
+            regions = merge_regions(regions, drop_nested(focus_oversized(
+                self.detector.detect(sub, inverted=True, scale=scale)), 255 - gray, dark, scale=scale))
         if self.text_detector is not None:
             # text blocks are looked for outside the lettering of the regions found so far: bubbles (closed by an
             # outline), and the text a white or dark area too large for a bubble was cut down to (`focus_oversized`),
             # whose glyphs a block would read and letter a second time
             check_cancel(cancel)
             bubbles = list(regions)
-            regions = merge_regions(regions, self.text_detector.detect(sub, taken=bubbles))
+            regions = merge_regions(regions, self.text_detector.detect(sub, taken=bubbles, scale=scale))
             if self.settings.detect_dark_bubbles:
                 check_cancel(cancel)
-                regions = merge_regions(regions, self.text_detector.detect(sub, inverted=True, taken=bubbles))
+                regions = merge_regions(regions, self.text_detector.detect(sub, inverted=True, taken=bubbles,
+                                                                           scale=scale))
         if x0 or y0:
             for r in regions:
                 r.x0 += x0
@@ -4231,9 +4234,9 @@ class Pipeline:
         """A region for *lines* (of *ink*): loose lettering ("text", "text-dark" light on dark) whose text box is the
         lines' box, erased and lettered within `PROSE_PAD` glyphs round it as a classical text block is
         (`detect.textblocks.block_mask`: its own pieces of ink, the marks set next to them, the ground they lie on).
-        It is in *a*'s unit. It counts no dark pieces (``pieces`` 0): the rule that tells a drawing read as a few
-        characters by its many pieces (`_judge`) is the detectors'; here the lines found in the ink tell lettering, and
-        at 13 px a kanji is three to five pieces of ink, which the rule would take for a drawing."""
+        It is in *a*'s unit, at its page's scale. It counts no dark pieces (``pieces`` 0): the rule that tells a drawing
+        read as a few characters by its many pieces (`_judge`) is the detectors'; here the lines found in the ink tell
+        lettering, and at 13 px a kanji is three to five pieces of ink, which the rule would take for a drawing."""
         members = [p for line in lines for p in line.parts]
         st = ink.stats
         boxes = [(int(st[p, 0]), int(st[p, 1]), int(st[p, 0] + st[p, 2]), int(st[p, 1] + st[p, 3])) for p in members]
@@ -4243,10 +4246,10 @@ class Pipeline:
         pad = int(self.PROSE_PAD * glyph) + 2
         room = (max(0, tb[0] - pad), max(0, tb[1] - pad), min(ww, tb[2] + pad), min(hh, tb[3] + pad))
         mask, letter_box = block_mask(ink.gray, ink.labels, st, members, boxes, tb, room, glyph,
-                                      self.settings.white_threshold, TextBlockConfig().max_glyph)
+                                      self.settings.white_threshold, TextBlockConfig().max_glyph, scale=pagescale.of(a))
         x0, y0, x1, y1 = ink.on_page(room)
         return TextRegion(x0=x0, y0=y0, x1=x1, y1=y1, mask=mask, text_box=ink.on_page(tb),
-                          kind="text-dark" if dark else "text", unit=a.unit,
+                          kind="text-dark" if dark else "text", unit=a.unit, scale=a.scale,
                           letter_box=ink.on_page(letter_box), joined=True)
 
     def _usual(self, rgb: np.ndarray, regions: list[TextRegion], cancel: threading.Event | None = None) -> float:
@@ -4400,7 +4403,8 @@ class Pipeline:
             mask = cv2.resize(mask, (r.width, r.height), interpolation=cv2.INTER_NEAREST)
         tb = r.text_box
         local = (tb[0] - r.x0, tb[1] - r.y0, tb[2] - r.x0, tb[3] - r.y0)
-        return ocr_view(rgb[r.y0:r.y1, r.x0:r.x1], mask, local, s.dark_threshold, s.white_threshold)
+        return ocr_view(rgb[r.y0:r.y1, r.x0:r.x1], mask, local, s.dark_threshold, s.white_threshold,
+                        pagescale.of(r))
 
     def _measure_slants(self, rgb: np.ndarray, regions: Sequence[TextRegion]) -> None:
         """The slant of the lettering of each of *regions* not measured yet (`lettering_tilt` of the ink in its text
@@ -4593,7 +4597,8 @@ class Pipeline:
     def _judge(self, r: TextRegion, text: str, confidence: float, pieces: int, unanimous: bool = False) -> str:
         """What a reading of region *r* is: dialogue to translate ("untranslated") or why it is not.
 
-        One or two characters from a region of many dark pieces, or from one smaller than `min_short_bubble`, are
+        One or two characters from a region of many dark pieces, or from one smaller than `min_short_bubble` (px at
+        the page's scale, `pagescale.of`: as set on a page as high as the sample set's, less on a smaller one), are
         noise (a face, a highlight, a fleck of the drawing) unless they read as a short line in a region with an
         outline of its own (`_short_line`, *unanimous*: all the readers read *text*): a small bubble with an
         exclamation or a one-word reply is cut down to its lettering and ends up as small as a highlight."""
@@ -4615,7 +4620,8 @@ class Pipeline:
             return "ocr-noise"  # many dark pieces but hardly any text: a face or artwork, not lettering
         if japanese_share(text) < 0.6 and not words_carry(text, confidence):
             return "ocr-noise"  # mostly symbols: the model was shown something that is not text
-        if len(text) <= 2 and max(r.width, r.height) < s.min_short_bubble and not short_line:
+        if (len(text) <= 2 and max(r.width, r.height) < pagescale.px(s.min_short_bubble, pagescale.of(r))
+                and not short_line):
             return "ocr-noise"  # a tiny blob read as one or two characters: a highlight, not a bubble
         if looks_like_print(text, r.text_box) or (loose(r) and looks_like_credit(text, r.text_box)):
             return "print"  # viewer widgets, imprint pages, prices, credits: not dialogue

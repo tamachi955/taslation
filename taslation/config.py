@@ -216,7 +216,7 @@ class Settings:
     dark_threshold: int = 140
     min_bubble_area_ratio: float = 0.0006
     max_bubble_area_ratio: float = 0.20
-    min_bubble_size: int = 24
+    min_bubble_size: int = 24  # px, both sides; this and min_short_bubble at the page's scale (render.pagescale)
     min_short_bubble: int = 60  # px; a smaller region read as 1-2 characters is treated as noise (a bubble's short line the OCR is sure of excepted: Pipeline._short_line)
     ocr_min_confidence: float = 0.65  # drop OCR readings whose confidence (the characters' mean heat times their mean classifier probability) is below this: on the gold set 8 of 197 crops without text reach 0.65 alone, lettering about 0.9
     detect_text_blocks: bool = True  # also find text lettered straight onto light areas (no bubble)
