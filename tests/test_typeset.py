@@ -183,3 +183,50 @@ def test_text_room_grows_with_the_bubble_and_shrinks_with_the_size():
     big = text_room(_ellipse_mask(200, 300), fp, 11)
     assert 0 <= small < 30 < big
     assert text_room(_ellipse_mask(200, 300), fp, 20) < big
+
+
+def _three_pieces(lines):
+    """The lines that are the middle of a word broken twice (a line of one word with a hyphen on each side)."""
+    return [b for a, b in zip(lines, lines[1:]) if a.endswith("-") and b.endswith("-") and " " not in b]
+
+
+def test_the_last_resort_block_sits_on_a_narrow_bubbles_middle():
+    """A tall narrow bubble that takes the text only with words split: the block sits on the bubble's middle, not in
+    its top third (the topmost place it fitted at, taken before)."""
+    font_path = find_font()
+    fp = str(font_path) if font_path else None
+    for text in ("Come on, nobody would do that, normally.", "I never thought you'd come all the way out here."):
+        fit = layout_text(_ellipse_mask(30, 230), text, fp, 9, 64, language="English")
+        ys = [y for _t, _x, y in fit.lines]
+        assert fit.size == 9 and any(t.endswith("-") for t, _x, _y in fit.lines)
+        assert abs((ys[0] + ys[-1] + fit.size * 1.12) / 2.0 - 115) <= fit.size * 1.12
+
+
+def test_a_word_breaks_once_where_the_room_lets_it():
+    """A word is hyphenated once at the most where a layout takes it so, at the same size or a smaller one
+    ("notwith- / stand- / ing" in a narrow bubble before); where it is not (a word two lines cannot hold), as often
+    as it needs."""
+    from taslation.render import typeset
+
+    font_path = find_font()
+    fp = str(font_path) if font_path else None
+    text = "Nevertheless, notwithstanding the circumstances, we'll keep going."
+    for w, h in ((58, 200), (58, 270), (44, 270)):
+        fit = layout_text(_ellipse_mask(w, h), text, fp, 9, 64, language="English")
+        assert fit.size >= 9 and not _three_pieces([t for t, _x, _y in fit.lines])
+    font = load_font(fp, 12)
+    # a line is not filled with a word's first part where its rest would break again and on a line of its own the
+    # word breaks once
+    room = int(font.getlength("extraor-"))
+    assert wrap_lines("So extraordinary", font, room, hyphenate=2, language="English") == ["So", "extraor-", "dinary"]
+    stats = {}
+    narrow = wrap_lines("So extraordinary", font, int(font.getlength("extrao-")), hyphenate=2, stats=stats,
+                        language="English")
+    assert narrow[0] == "So ex-" and stats.get("again") == 1  # there it breaks twice either way
+    # lines filled one after the other: where the rest of a word broken at a line's end does not fit the next line
+    # whole, that line ends before the word
+    pieces = typeset._cut([["So", "extraordinary"]], "lgc", "English", 2, lambda token: False)
+    typeset._measure(pieces, font, "lgc")
+    rooms = [font.getlength(t) + 1 for t in ("So ex-", "extraor-", "dinary")]
+    ends = typeset._greedy(pieces, rooms)
+    assert ends is not None and [pieces.line(j, i) for j, i in zip(ends, ends[1:])] == ["So", "extraor-", "dinary"]
