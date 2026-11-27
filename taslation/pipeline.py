@@ -5132,11 +5132,13 @@ class Pipeline:
         s = self.settings
         eraser = self.art_eraser  # (the window may build another meanwhile)
         dark = is_dark(region)
+        region.toned = False
         if eraser is not None and not quick:
             return eraser.erase(out, region, s.erase_mode, s.white_threshold, s.dark_threshold, dark)
         if not quick and s.erase_mode == "fill":
             toned = artwork.tone_erase(out, region, dark)
             if toned is not None:
+                region.toned = True
                 return toned
         return self._paper_erase(out, region, s.erase_mode, s.white_threshold, s.dark_threshold, dark)
 
@@ -5427,7 +5429,8 @@ class Pipeline:
             # (at one size, a part set larger or not: the page's caps are what they were, and the cap of a region with
             # such a part holds its base)
             one = (DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
-                   self._set_text(None, r, t, (255, 255, 255), None, scaled=False, part=None).size, r.glyph)
+                   self._set_text(None, _in_its_box(r), t, (255, 255, 255), None, scaled=False, part=None).size,
+                   r.glyph)
             if measured is not None:
                 measured[id(r)] = (key, (r, held), one)  # (what the key names by identity is held with it)
             sized.append(one)
@@ -5784,6 +5787,20 @@ def unit_for(units: Sequence[fp.PageUnit], box: Box, capture: Box | None = None,
 def _plain(r: TextRegion) -> bool:
     """A model region with no shape of its own: its plain box."""
     return r.from_model and r.tier == 3
+
+
+def _in_its_box(r: TextRegion) -> TextRegion:
+    """*r* as its size counts among its page's (`Pipeline.cap_sizes`): a model bubble with no shape of its own set in
+    the paper closed round its lettering (`artwork.closed_room`: its mask is not its plain box) as in its plain box, as
+    every such bubble counted before it had a room - its smaller size in a narrow room took the page's median and its
+    neighbours' sizes down with it (three bubbles 38, 30 and 32 px set at 22); it is lettered in its room all the same,
+    under the page's cap. Any other region as it is."""
+    mask = r.mask
+    if not (_plain(r) and isinstance(mask, np.ndarray) and mask.size and not bool((mask == 255).all())):
+        return r
+    boxed = copy.copy(r)
+    boxed.mask = np.full((r.height, r.width), 255, np.uint8)
+    return boxed
 
 
 def _same_lettering(a: TextRegion, b: TextRegion) -> bool:

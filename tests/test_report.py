@@ -228,6 +228,14 @@ def test_a_region_report_holds_why_its_lettering_is_not_shown(tmp_path):
             == "not known (another page on show, or no look yet)")
 
 
+def test_a_region_the_tone_fill_painted_says_so(tmp_path):
+    app = _app(tmp_path)
+    first = app.last_result.regions[0]
+    assert _values(report.report_text(app, [first]), "region")["erase"].startswith("paper fill (")
+    first.toned = True  # (its last erase painted it with its ground's pattern, `artwork.fill_tone`)
+    assert _values(report.report_text(app, [first]), "region")["erase"].startswith("tone fill; mask ")
+
+
 def test_with_text_adds_the_reported_region_s_reading_and_translation_alone(tmp_path):
     app = _app(tmp_path)
     first, second = app.last_result.regions

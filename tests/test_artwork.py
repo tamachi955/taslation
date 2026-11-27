@@ -970,7 +970,7 @@ def test_lettering_with_a_white_ring_on_a_dot_tone_is_painted_over_with_the_tone
     r = region("text", (150, 120, 230, 380))
     assert on_art(page, r)
     eraser.erase(page, r)
-    assert eraser.counts["tone"] == 1 and eraser._model.runs == 0 and not calls
+    assert eraser.counts["tone"] == 1 and eraser._model.runs == 0 and not calls and r.toned  # (the report says so)
     inside = page[130:370, 160:220].astype(int)
     assert np.abs(inside - tone[130:370, 160:220]).mean() < 3  # the tone, dot for dot: no stripes, no white left
 
@@ -988,6 +988,7 @@ def test_with_no_inpainting_model_lettering_on_a_tone_is_painted_over_with_the_t
     r = region("text", box)
     Pipeline._erase(host, page, r)
     assert np.abs(page[130:370, 160:220].astype(int) - tone[130:370, 160:220]).mean() < 3  # the tone, dot for dot
+    assert r.toned  # (the report says so)
     x0, y0, x1, y1 = Pipeline._erase_reach(host, page, region("text", box))
     changed = (page != before).any(axis=2)
     assert changed.sum() == changed[y0:y1, x0:x1].sum() > 0
@@ -997,9 +998,11 @@ def test_with_no_inpainting_model_lettering_on_a_tone_is_painted_over_with_the_t
     assert np.array_equal(quick, paper)  # an early look: the paper fill
     for ground in (drawn(), flat(255)):
         page, paper = white_ringed(ground.copy()), white_ringed(ground.copy())
-        Pipeline._erase(host, page, region("text", box))
+        q = region("text", box)
+        q.toned = True  # (what its last erase did, not this one)
+        Pipeline._erase(host, page, q)
         Pipeline._paper_erase(paper, region("text", box))
-        assert np.array_equal(page, paper)
+        assert np.array_equal(page, paper) and not q.toned
 
 
 def test_hatching_repeats_itself_too_and_a_drawing_does_not():

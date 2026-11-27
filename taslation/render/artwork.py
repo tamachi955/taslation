@@ -944,6 +944,7 @@ class ArtEraser:
         paper colour is what its lettering is drawn against. What the model filled is kept on the region (memory only)
         and used again while the part of the page it saw is the same (a page lettered again, a preview)."""
         app = lambda: self.fallback(image, region, mode, white_threshold, dark_threshold, dark)  # noqa: E731
+        region.toned = False
         judged = as_judged(region)
         scale = pagescale.of(region)
         if self.failed or not on_art(image, region):
@@ -972,6 +973,7 @@ class ArtEraser:
         full = _hole(image, region, judged, full)  # (the model's text box too)
         if TONE_FILL and fill_tone(image, full, scale):  # a screentone, a hatching: painted on from round the hole
             self.counts["tone"] += 1
+            region.toned = True
             return paper_colour(*self._crop_mask(image, region), dark)
         x0, y0, x1, y1 = box_of(image, region)
         wx0, wy0, wx1, wy1 = window(image.shape, x0, y0, y1 - y0, x1 - x0)

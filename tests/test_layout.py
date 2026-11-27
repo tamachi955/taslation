@@ -17,6 +17,7 @@ from taslation.config import LAYOUT_MODEL, ConfigError, Settings
 from taslation.detect import layout
 from taslation.detect.layout import (BUBBLE, TEXT, LayoutModel, Shaper, covered, model_regions, take_shape)
 from taslation.ocr.charspot import CharspotReading
+from taslation import pipeline
 from taslation.pipeline import Pipeline, is_sound_effect
 from taslation.regions import TextRegion
 from taslation.render import artwork
@@ -132,6 +133,22 @@ def test_a_bubble_with_no_shape_of_its_own_takes_the_paper_closed_round_it_as_it
         assert shaped.mask[80, 100] == 255 and shaped.mask[190, 1] == 0
     else:  # paper open to the page: the plain box as before
         assert (shaped.mask == 255).all()
+
+
+def test_a_bubble_set_in_its_room_takes_no_ones_size_down(settings, monkeypatch):
+    p = Pipeline(settings, ocr=None, translator=None)
+    page = [region(10, 10, 230, 230, "bubble"), region(250, 10, 310, 70, "bubble")]
+    plain = region(330, 10, 550, 230, "bubble", from_model=True, tier=3)
+    roomed = region(330, 10, 550, 230, "bubble", from_model=True, tier=3)
+    roomed.mask[:, :100] = roomed.mask[:, 120:] = 0  # its room: a column 20 px wide in its box
+    texts = ["Hey!", "Hey!", "Always!?"]
+    p.cap_sizes([*page, plain], texts)
+    boxed = [r.size_cap for r in [*page, plain]]
+    p.cap_sizes([*page, roomed], texts)
+    assert [r.size_cap for r in [*page, roomed]] == boxed  # the page's caps as with its plain box, its own too
+    monkeypatch.setattr(pipeline, "_in_its_box", lambda r: r)  # (its size in its room among theirs: theirs go down)
+    p.cap_sizes([*page, roomed], texts)
+    assert page[0].size_cap < boxed[0]
 
 
 # ------------------------------------------------------------------ in the pipeline, on stand-ins

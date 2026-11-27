@@ -61,6 +61,7 @@ class TextRegion:
     adopted: Any = None  # the classical region that gave a model region its shape (on that shape only)
     repeats: Any = None  # a region left out as a repeat: the region read as text that it repeated
     inpainted: Any = None  # what LaMa filled in for it: (the key of what it saw, the pixels, the hole), memory only
+    toned: bool = False  # its last erase painted it with its ground's own pattern (`artwork.fill_tone`), memory only
     char_size: float = 0.0  # the size of its reading's largest character (0 = not measured)
     char_boxes: list[Box] = field(default_factory=list)  # a model region: where its reading found each character (page)
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`detect.tilt`; 0 = upright)

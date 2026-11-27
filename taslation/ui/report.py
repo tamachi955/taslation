@@ -239,6 +239,8 @@ def _erase_way(page: _Page, region: Any) -> str:
     area = int(np.count_nonzero(mask)) if isinstance(mask, np.ndarray) else 0
     if getattr(region, "inpainted", None) is not None:
         way = "inpainting"
+    elif getattr(region, "toned", False):
+        way = "tone fill"
     elif page.inpaints:
         way = f"paper fill ({page.erase_mode}) or inpainting not kept"
     else:
