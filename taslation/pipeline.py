@@ -177,6 +177,7 @@ PRINT_LINES = 4  # lines set across in one block of the layout model's: print (a
 SAME_BLOCK = 0.8  # ... a line this much inside the block's text box is one of its lines
 GLYPH_REACH_ERASE = 4.0  # glyphs: ink a bubble's text box holds outside its mask is lettering up to this long ...
 EDGE_KEEP = 4  # ... and off the box's edge by this many px (there, it is the outline)
+LEFT_OUT_LEAST = 8  # px of a piece at 24 px glyphs, at the least (with the glyph's square)
 CHAR_GROW = 0.15  # of a glyph: how far past the reading's character box the lettering of a plain box is painted out
 LOOSE_KINDS = ("text", "text-dark")  # lettering with nothing round it (a closed block is "text-on-page", "text-on-dark")
 ON_ART_KINDS = ("text", "text-dark", "text-on-page", "text-on-dark")  # lettering set on the page's ground
@@ -5190,7 +5191,11 @@ class Pipeline:
         h, w = gray.shape
         scale = pagescale.of(region)  # (the measures in px at the page's scale)
         edge = pagescale.px(EDGE_KEEP, scale)
-        longest = GLYPH_REACH_ERASE * (region.glyph or 20.0 * scale)
+        glyph = region.glyph or 20.0 * scale
+        longest = GLYPH_REACH_ERASE * glyph
+        # the least piece, 8 px at 24 px glyphs: the dots of an ellipsis set small are smaller (an ellipsis of 15 px
+        # glyphs on a page shown 1000 px high stayed as three dots)
+        least = max(2.0, LEFT_OUT_LEAST * (glyph / 24.0) ** 2)
         # a thin line's anti-aliasing breaks it at the dark threshold, not a little above it: a piece of a longer line
         # there is a stretch of the outline (or of the drawing), however short
         linked = (gray > 255 - dark_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
@@ -5201,7 +5206,7 @@ class Pipeline:
         out = np.zeros(gray.shape, bool)
         for i in range(1, n):
             x, y, bw, bh, area = (int(v) for v in stats[i])
-            if (area < 8 or max(bw, bh) > longest or x < edge or y < edge or x + bw > w - edge
+            if (area < least or max(bw, bh) > longest or x < edge or y < edge or x + bw > w - edge
                     or y + bh > h - edge or x + bw <= tx0 or x >= tx1 or y + bh <= ty0 or y >= ty1):
                 continue
             piece = labels == i

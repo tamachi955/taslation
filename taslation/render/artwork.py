@@ -238,7 +238,9 @@ def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
     closed = closed_interior(image, (x0, y0, x1, y1), region.dark, scale)
     if closed is not None:
         (wx0, wy0, wx1, wy1), inside, paper = closed
-        ring &= inside[oy0 - wy0:oy1 - wy0, ox0 - wx0:ox1 - wx0]
+        # (its paper clear of the ink: the rim of a bubble with no outline, white on black, shades off into the black
+        # within it, and the ring of a small one reached it)
+        ring &= paper[oy0 - wy0:oy1 - wy0, ox0 - wx0:ox1 - wx0]
         if int(ring.sum()) < 16:  # lettering that fills its paper: judged on the paper clear of it
             ground = cv2.cvtColor(image[wy0:wy1, wx0:wx1], cv2.COLOR_RGB2GRAY).astype(np.float32)[paper]
             return float(np.percentile(np.abs(ground - np.median(ground)), 90)) >= flat

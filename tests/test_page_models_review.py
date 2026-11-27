@@ -828,6 +828,40 @@ def test_a_thin_outline_broken_by_its_anti_aliasing_is_no_lettering_left_out():
     assert left is not None and left[75:80, 105:110].any() and not left[:, 15:25].any()
 
 
+def test_the_dots_of_an_ellipsis_set_small_are_lettering_left_out_too():
+    """The least piece goes with the glyphs (8 px at 24 px glyphs): at 15 px glyphs, a page shown 1000 px high, the
+    three dots of an ellipsis (2x2 px) outside the mask stayed after the erase."""
+    page = np.full((200, 200, 3), 255, np.uint8)
+    for y in (80, 86, 92):
+        page[y:y + 2, 100:102] = 0  # an ellipsis set down a column, outside the mask
+    r = region(20, 20, 180, 180, kind="bubble", text_box=(60, 30, 140, 170), from_model=True, glyph=15.0)
+    r.mask = np.zeros((160, 160), np.uint8)
+    r.mask[10:150, 10:70] = 255
+    left = Pipeline._left_out(page, r)
+    assert left is not None and all(left[y - 20, 80] for y in (80, 86, 92))
+    r.glyph = 24.0
+    assert Pipeline._left_out(page, r) is None  # (at the glyphs the least was set at: specks of 4 px are no lettering)
+
+
+def test_lettering_on_a_small_white_oval_with_no_outline_on_black_is_not_on_the_art():
+    """A small white bubble with no outline on a black ground, its rim shading off into the black: on its closed paper
+    the ring round the lettering is judged on the paper clear of the ink, not on the rim the ring of a small bubble
+    reached (on the sample set at 1000 px it went to LaMa, which left the glyphs grey)."""
+    import cv2
+
+    from taslation.render import artwork
+
+    page = np.zeros((300, 200, 3), np.uint8)
+    cv2.ellipse(page, (100, 150), (24, 40), 0, 0, 360, (255, 255, 255), -1)
+    page = cv2.GaussianBlur(page, (0, 0), 2.5)  # the rim shades off into the black
+    for y in range(124, 176, 12):
+        page[y:y + 9, 97:103] = 30  # a column of small strokes
+    r = region(76, 110, 124, 190, kind="text-on-page", text_box=(95, 122, 105, 178), glyph=9.5)
+    r.scale = 0.855
+    assert artwork.closed_interior(page, (95, 122, 105, 178), scale=0.855) is not None
+    assert not artwork.on_art(page, r)
+
+
 def test_lines_set_across_in_one_block_of_the_model_are_print():
     """A back cover's blurb: four lines set across that the layout model saw as one block; lettering runs down."""
     from taslation.pipeline import printed_lines
