@@ -245,12 +245,16 @@ def test_a_package_that_will_not_load_is_said(monkeypatch):
 
 
 def test_the_doctor_says_the_route(tmp_path, monkeypatch, capsys):
+    """(doctor looks at Ollama too: a fake on a port of its own, never the server on Ollama's usual port)"""
+    from fake_ollama import FakeOllama
+
     monkeypatch.setattr(wgc, "route", lambda: "PrintWindow (why)")
     import taslation.capture as capture
 
     monkeypatch.setattr(capture, "capture_route", wgc.route)
-    settings = Settings(state_dir=tmp_path, models_dir=tmp_path)
-    cli.cmd_doctor(SimpleNamespace(config=None), settings)
+    with FakeOllama() as server:
+        settings = Settings(state_dir=tmp_path, models_dir=tmp_path, ollama_url=server.url)
+        cli.cmd_doctor(SimpleNamespace(config=None), settings)
     assert "Capture: PrintWindow (why)" in capsys.readouterr().out
 
 

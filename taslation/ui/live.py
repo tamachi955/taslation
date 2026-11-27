@@ -166,6 +166,13 @@ TAKE_BACK_MS = 2000
 # viewer's slide could pass for one -, not that the new picture is final, for the new page is then started early with
 # a gate of its own.
 LEFT_PAGE_MS = 150
+# A page dragged with the pointer (the button held in the viewer, `_held_in_viewer`) and let go: the frame left as it
+# was while held is no page at rest until the viewer has answered the release - the page snapped back, or the next one
+# drawn - or this long has passed with no answer (`_step`). A viewer answers a frame or two after the release; on a
+# busy computer far later: the stand-in's page snapped back short of the edge came some hundreds of ms after the button
+# was up on GitHub's runners, OCR on their processor, and with LEFT_PAGE_MS alone the frame still slid cancelled the job
+# of the page on show (27 s of work there). A frame the release changes is followed as ever, at once.
+RELEASE_ANSWER_MS = 1000
 SAME_PICTURE = 0.5  # the thumbnails' mean difference under which two frames show the same picture (`_step`'s settle)
 
 
@@ -397,6 +404,8 @@ class Operation:
     over_job: bool = False  # "settle": begun while a page job runs, on a frame of another page (`_look_over_job`)
     gave_way: bool = False  # ... a job past its page, cancelled at once (`_tail_gives_way`): no LEFT_PAGE_MS wait
     held_soft: bool = False  # "settle": its frame looks soft (a viewer that draws soft first): not started early on it
+    held_at: float | None = None  # "settle": the last look that found the button held in the viewer, until the viewer
+    # answered its release (a frame that changed) or RELEASE_ANSWER_MS passed (`_step`)
 
 
 @dataclass
@@ -1727,6 +1736,13 @@ class LiveViewMixin(BlackViewerMixin):
         except Exception:  # noqa: BLE001 - not known: as with no press
             return False
 
+    @staticmethod
+    def _release_unanswered(op: Operation, now: float) -> bool:
+        """Whether *op* followed a page dragged with the button held in the viewer, let go less than
+        RELEASE_ANSWER_MS ago, and no frame since has changed (`_step` clears ``held_at`` at the first that does): the
+        viewer has not answered the release yet, and its frame is no page at rest."""
+        return op.held_at is not None and now - op.held_at < RELEASE_ANSWER_MS / 1000
+
     def _mark_taken(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None) -> None:
         """The page just taken, for the looks after it (a sharper frame of it may come), with the gate its job is
         started with when it is started early (`_early_start`)."""
@@ -2226,7 +2242,8 @@ class LiveViewMixin(BlackViewerMixin):
                 self._frame_seen(op)  # (the frame of a page started early on it is on show still)
                 if op.redo and not self.busy:
                     pass  # (the page dropped is gone from the worker: started again on the frame there is, below)
-                elif now - op.last_at < self._settle_s(op) or (op.redo and self._waits_for_worker(op, now)):
+                elif (now - op.last_at < self._settle_s(op) or (op.redo and self._waits_for_worker(op, now))
+                      or self._release_unanswered(op, now)):
                     self._next_step(op, FRAME_STEP_MS)  # ... yet; once its time has passed, it settled
                     return
             op.seq = count
@@ -2263,9 +2280,19 @@ class LiveViewMixin(BlackViewerMixin):
                 # and turn once it is let go at the screen's edge - no frame of it is taken, started or cancels the
                 # running job; it settles from the release on)
                 op.last, op.last_detail, op.last_image = thumb, frame_detail, image
-                op.last_at = op.settle_from = now
+                op.last_at = op.settle_from = op.held_at = now
                 self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
                 return
+            if op.held_at is not None:
+                if moving:
+                    op.held_at = None  # (the viewer answered the release: its frames followed as ever from here)
+                elif self._release_unanswered(op, now):
+                    # (let go, the frame still as it was held: no page at rest - nothing taken, started or cancelled
+                    # on it - until the viewer has answered, RELEASE_ANSWER_MS at most)
+                    self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
+                    return
+                else:
+                    op.held_at = None
             if (moving or op.redo or (op.over_job and not self.busy)) and not (op.redo and self.busy):
                 op.redo = False
                 # (a page the cache holds: taken now, then rechecked - unless a job runs that this frame, not

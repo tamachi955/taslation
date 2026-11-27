@@ -48,16 +48,85 @@ def _usual_port_refused(event: str, args: tuple) -> None:
 sys.addaudithook(_usual_port_refused)
 
 
+def _installed_ollama() -> frozenset[str]:
+    """This computer's own ollama.exe, where `ollama_start.find_ollama` and `translator_install.find_ollama` look -
+    found before any test changes the environment (on the runners none: Ollama is not installed there)."""
+    import os
+    import shutil
+
+    found = []
+    programs = os.environ.get("LOCALAPPDATA")
+    if programs:
+        found.append(Path(programs) / "Programs" / "Ollama" / "ollama.exe")
+    on_path = shutil.which("ollama")
+    if on_path:
+        found.append(Path(on_path))
+    return frozenset(_program_key(p) for p in found if p.is_file())
+
+
+def _program_key(path) -> str:
+    try:
+        return str(Path(path).resolve()).casefold()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return str(path).casefold()
+
+
+INSTALLED_OLLAMA = _installed_ollama()
+_installed_ollama_run: list[str] = []
+
+
+def _installed_ollama_refused(event: str, args: tuple) -> None:
+    """(an audit hook of the whole session, as `_usual_port_refused`) The ollama command installed on this computer is
+    never run: as a process of its own it talks to the person's own server on the usual port, which the hook above does
+    not see (``ollama serve``, ``pull``, ``rm``, ``create``: the tests give a fake command of their own). Refused before
+    the process starts, and noted: the test it came in fails."""
+    if event != "subprocess.Popen" or not INSTALLED_OLLAMA:
+        return
+    try:
+        program = _program_of(args[0], args[1])
+    except (IndexError, TypeError, StopIteration):
+        return
+    if program and _program_key(program) in INSTALLED_OLLAMA:
+        _installed_ollama_run.append(program)
+        raise PermissionError(13, "refused by tests/conftest.py: no test runs this computer's own ollama command")
+
+
+def _program_of(executable, argv) -> str | None:
+    """The program a ``subprocess.Popen`` of *executable* and *argv* runs (a bare name: as the PATH finds it)."""
+    import os
+    import shutil
+
+    program = executable
+    if not program:
+        if isinstance(argv, (str, bytes)):
+            line = (argv.decode("utf-8", "replace") if isinstance(argv, bytes) else argv).strip()
+            program = line[1:].split('"', 1)[0] if line.startswith('"') else line.split(" ", 1)[0]
+        else:
+            program = next(iter(argv))
+    program = os.fsdecode(program) if isinstance(program, (bytes, os.PathLike)) else str(program)
+    if program and not os.path.dirname(program):
+        program = shutil.which(program) or program
+    return program or None
+
+
+sys.addaudithook(_installed_ollama_refused)
+
+
 @pytest.fixture(autouse=True)
 def no_test_reaches_the_usual_port():
     """No test - nor the code it runs, on any thread - reaches the server on Ollama's usual port: on the developer's
-    computer that is the person's own (`_usual_port_refused` refuses it; the test that tried fails here)."""
-    before = len(_usual_port_tried)
+    computer that is the person's own (`_usual_port_refused` refuses it; the test that tried fails here), nor runs
+    the ollama command installed on this computer, which would talk to it (`_installed_ollama_refused`)."""
+    before, before_run = len(_usual_port_tried), len(_installed_ollama_run)
     yield
     tried = sorted(set(_usual_port_tried[before:]))
     if tried:
         pytest.fail(f"the test tried Ollama's usual port on this computer ({', '.join(tried)}): use a fake server on a "
                     "port of its own (tests/fake_ollama.py) or a closed one")
+    ran = sorted(set(_installed_ollama_run[before_run:]))
+    if ran:
+        pytest.fail(f"the test ran this computer's own ollama command ({', '.join(ran)}): give it a fake one "
+                    "(tests/fake_ollama_cli.py)")
 
 
 @pytest.fixture(autouse=True)

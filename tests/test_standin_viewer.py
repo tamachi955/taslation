@@ -75,13 +75,14 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
 
 def test_scenario_s_slides_the_page_with_the_pointer_and_turns_only_where_it_is_let_go_at_the_edge():
     """(by its name only) the page slid to the window's edge and let go: the next screen; slid 150 px and let go: it
-    snaps back, no turn; slid the other way to the edge: the screen before; a slow slide held long: the next."""
+    snaps back 400 ms after the release, no turn; slid the other way to the edge: the screen before; a slow slide held
+    long: the next."""
     assert "s" not in standin_e2e.wanted("all") and standin_e2e.wanted("s") == ["s"]
     segments, steps = standin_e2e.build_plan(["s"], standin_e2e.pages_needed(["s"]))
     (s,) = segments
     assert s.screens == [(2, True), (4, True), (2, True), (4, True)]
     slides = [(step.op, step.a, step.b) for step in steps if step.op in "rlo"]
-    assert slides == [("r", 700, None), ("o", None, None), ("r", 600, 150), ("o", None, None), ("l", 700, None),
+    assert slides == [("r", 700, None), ("o", None, None), ("r", 600, 150), ("o", 400, None), ("l", 700, None),
                       ("o", None, None), ("r", 1500, None), ("o", None, None)]
     with pytest.raises(ValueError):
         sv.parse_script("n,o-5")  # (a distance is a slide's alone)

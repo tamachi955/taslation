@@ -154,6 +154,32 @@ def test_no_test_reaches_ollama_s_usual_port_and_none_leaves_the_guard_on():
     netguard.uninstall()
 
 
+def test_no_test_runs_this_computer_s_own_ollama_command(tmp_path, monkeypatch):
+    """tests/conftest.py refuses to start the ollama command installed on this computer (as a process of its own it
+    would talk to the person's own server on the usual port, which the socket hook does not see), however it is named
+    to ``subprocess.Popen``, and notes it; a fake command elsewhere is let through. Asked as Python asks it, with a
+    stand-in for the installed one: no process is started."""
+    import conftest
+
+    exe = tmp_path / "Programs" / "Ollama" / "ollama.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    monkeypatch.setattr(conftest, "INSTALLED_OLLAMA", frozenset({conftest._program_key(exe)}))
+    before = len(conftest._installed_ollama_run)
+    for executable, argv in ((None, [str(exe), "serve"]), (str(exe), ["ollama", "rm", "m"]), (None, f'"{exe}" pull m'),
+                             (None, [exe, "list"]), (None, f'"{exe}" ps'.encode())):
+        with pytest.raises(PermissionError):
+            conftest._installed_ollama_refused("subprocess.Popen", (executable, argv, None, None))
+    assert len(conftest._installed_ollama_run) == before + 5
+    del conftest._installed_ollama_run[before:]  # (this test's own: not a test that ran it)
+    fake = tmp_path / "fake" / "ollama.cmd"
+    for executable, argv in ((None, [str(fake), "serve"]), (None, [sys.executable, "-c", "pass"]), (None, []),
+                             (None, ""), (None, "ollama-that-is-nowhere list")):
+        conftest._installed_ollama_refused("subprocess.Popen", (executable, argv, None, None))
+    conftest._installed_ollama_refused("socket.connect", (None, ("127.0.0.1", 11435)))
+    assert len(conftest._installed_ollama_run) == before
+
+
 def test_audit_hook_blocks_raw_socket_module():
     """The C-level backstop catches code that bypasses the Python socket wrapper."""
     code = (

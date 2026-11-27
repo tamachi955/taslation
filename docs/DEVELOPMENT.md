@@ -231,8 +231,10 @@ rows' languages.
   asked, else the stand-in made narrow first); s, never in all and refused with `--standin-profile`, the page pressed
   and slid along with the pointer, as a viewer that moves the whole page with a drag does (the stand-in's steps `rN`
   and `lN` slide it to the right or left edge over N ms, `rN-D` only D CSS px; `o` lets go: at the edge the next or
-  the previous screen, else the page snaps back; each frame of a slide has its cells say "slide"): to the edge and
-  let go, 150 px and let go, to the other edge, and a slow slide held long. The tool's own pointer and button follow
+  the previous screen, else the page snaps back; `oN` draws that answer N ms after the release, the page left as it
+  was held meanwhile; each frame of a slide has its cells say "slide"): to the edge and let go, 150 px and let go -
+  the page snapped back 400 ms after the release, as a viewer on a busy computer answers it (the job of the page on
+  show must go on: `live.RELEASE_ANSWER_MS`) -, to the other edge, and a slow slide held long. The tool's own pointer and button follow
   each slide (`SeeWatch._follow_slides`: the window reads them, the real ones never move), and on the hold of the
   slide to the left the press is moved over the left pane's lettering plate and let go there (posted to TASlation's
   own pane). The report's `see_through.slides` gives per slide the panes' hidden spells from the press and why, the

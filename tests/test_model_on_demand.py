@@ -526,13 +526,15 @@ def test_the_new_messages_are_plain_words(code):
 
 # ---------------------------------------------------------------------------- only Ollama
 def test_a_load_and_a_release_go_nowhere_but_to_ollama_under_the_guard(ollama):
+    # (the guard's list of what it blocked is the process's: earlier tests' entries are not this test's)
+    before = len(netguard.state().blocked)
     with pytest.raises(TranslationError):
         OllamaTranslator("http://example.com:11434", MODEL)
     tr, _said = _translator(ollama)
     tr.translate_page(["一"])
     tr.release()
     state = netguard.state()
-    assert state is not None and not state.blocked
+    assert state is not None and state.blocked[before:] == []
 
 
 def test_the_settings_default_is_the_translator_s():

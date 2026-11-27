@@ -44,7 +44,9 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
      right to left) over N ms (700) as far as the window's edge, then held there    lN the same to the left (the
      screen before)    rN-D, lN-D slid D CSS px only    o let go: slid as far as the edge, the screen it was slid
      towards is turned to (a turn as any other: why=next|previous); else the page snaps back into its place
-     (why=slide_back). Without a profile only (with one: said, nothing done). See "a slide" below.
+     (why=slide_back)    oN the same, the answer drawn N ms after the release, the page left as it was held
+     meanwhile (a viewer slow to answer on a busy computer). Without a profile only (with one: said, nothing
+     done). See "a slide" below.
   xN another tab shown (N 0: a plain page, neutral title; 1: made-up Japanese lines and title)   xN-D its title D ms
      after its page    y the book's tab again   yD its title D ms before its page    c the other tab closed
   zN the book's tab moved out into a window of its own (the driver opens it; this window shows the other tab N).
@@ -1014,15 +1016,19 @@ async function slideStart(dir, ms, dist) {
   });
   if (slid && slid.token === drawToken) say("slide", "held=1 dx=" + slid.dx);
 }
-function slideEnd() {  // the release
+function slideEnd(lag) {  // the release; the answer drawn *lag* ms after it (0: at once), the page as held meanwhile
   const s = slid;
   slid = null;
   if (!s) { say("slide", "on=0 why=none"); return; }
   if (s.token !== drawToken) { say("slide", "on=0 why=gone"); return; }
   const turn = s.edge && s.other !== null;
-  say("slide", "on=0 to=" + (turn ? s.toward : index) + " turn=" + (turn ? 1 : 0));
-  if (turn) turnTo(s.toward, s.dir === "r" ? "next" : "previous");
-  else drawScreen(false, "slide_back");
+  say("slide", "on=0 to=" + (turn ? s.toward : index) + " turn=" + (turn ? 1 : 0) + (lag ? " lag=" + lag : ""));
+  const answer = () => {
+    if (s.token !== drawToken) return;  // (something else drawn meanwhile)
+    if (turn) turnTo(s.toward, s.dir === "r" ? "next" : "previous");
+    else drawScreen(false, "slide_back");
+  };
+  if (lag) setTimeout(answer, lag); else answer();
 }
 
 // ------------------------------------------------------------------------------------------------ the tabs
@@ -1177,7 +1183,7 @@ async function run(steps) {
     else if (s.op === "k") { keepMs = s.a; say("soft", "keep=" + (keepMs === null ? "off" : keepMs)); }
     else if (s.op === "u") { await until(() => control.turns > turnsTaken); turnsTaken++; say("released", "turn=" + turnsTaken); }
     else if (s.op === "r" || s.op === "l") await slideStart(s.op, s.a === null ? 700 : s.a, s.b);
-    else if (s.op === "o") slideEnd();
+    else if (s.op === "o") slideEnd(s.a || 0);
     else if ("xycz".includes(s.op) && P) say("tab", "on=0 why=profile");
     else if (s.op === "x") showOther(s.a || 0, s.b || 0);
     else if (s.op === "y") await showBook("switch", s.a || 0);

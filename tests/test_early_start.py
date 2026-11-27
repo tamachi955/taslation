@@ -619,6 +619,63 @@ def test_a_page_dragged_while_its_job_runs_neither_cancels_the_job_nor_starts_on
     assert job.how == "done" and [j.name for j in worker.jobs] == ["1", "2"] and worker.kept == ["1", "2"]
 
 
+@pytest.mark.parametrize("answer_s", [0.3, 0.8])
+def test_a_page_let_go_is_the_job_s_still_until_the_viewer_answered_the_release(follow, monkeypatch, answer_s):
+    """The page dragged while its job runs, let go short of the edge, and the viewer slow to answer the release (a
+    computer busy reading on its processor: the stand-in's scenario "s" on GitHub's runners drew its page snapped back
+    some hundreds of ms after the button was up): the frame left as it was held is not a page the viewer turned to -
+    the job goes on, none is started on it -, and the page snapped back is the job's page still."""
+    held = [False]
+    monkeypatch.setattr(live.overlay, "button_down", lambda: held[0])
+    w, worker = follow.make()
+    worker.ask_s = 2.5  # the model answers for 2.5 s: page 2's job runs on through the drag
+    two = _page(2)
+    follow.show((0.0, "2", two), run=0.3 + 0.9)
+    job = worker.one("2")
+    held[0] = True
+    follow.show((0.0, "slid", _page(50)), (0.1, "slid", _page(51)), run=0.5)
+    held[0] = False  # let go short of the edge: the frame stays as it was held ...
+    follow.viewer.frames.append((follow.clock.now + answer_s, two))  # ... until the viewer draws the page back
+    follow.clock.run(answer_s - 0.01)
+    assert not job.cancel.is_set() and job.how is None, answer_s
+    follow.clock.run(4)
+    assert job.how == "done" and [j.name for j in worker.jobs] == ["1", "2"] and worker.kept == ["1", "2"]
+
+
+def test_a_page_left_where_it_was_let_go_is_another_page_once_the_viewer_had_time_to_answer(follow, monkeypatch):
+    """... and a frame the release leaves as it was for good (a viewer that keeps the page where it was dragged) is a
+    page out of the job's once RELEASE_ANSWER_MS have passed with no answer: the job is cancelled then; a frame the
+    release changes at once - the next page drawn - cancels it as ever, once it has stayed LEFT_PAGE_MS."""
+    held = [False]
+    monkeypatch.setattr(live.overlay, "button_down", lambda: held[0])
+    w, worker = follow.make()
+    worker.ask_s = 6.0
+    two = _page(2)
+    follow.show((0.0, "2", two), run=0.3 + 0.9)
+    job = worker.one("2")
+    held[0] = True
+    follow.show((0.0, "slid", _page(50)), run=0.5)
+    held[0] = False
+    let_go = follow.clock.now
+    follow.clock.run(live.RELEASE_ANSWER_MS / 1000 - 0.05)
+    assert not job.cancel.is_set()
+    follow.clock.run(0.05 + LEFT_PAGE_MS / 1000 + 3 * FRAME_STEP_MS / 1000)
+    assert job.cancel.is_set() and follow.clock.now - let_go < (live.RELEASE_ANSWER_MS + LEFT_PAGE_MS) / 1000 + 0.1
+
+    follow.viewer.frames.append((follow.clock.now, follow.viewer.frames[0][1]))  # (page 1 again, for a new window)
+    w, worker = follow.make()  # a turn at the release: the next page as the button goes up
+    worker.ask_s = 6.0
+    follow.show((0.0, "2", two), run=0.3 + 0.9)
+    job = worker.one("2")
+    held[0] = True
+    follow.show((0.0, "slid", _page(50)), run=0.5)
+    held[0] = False
+    turned = follow.clock.now + 0.02
+    follow.viewer.frames.append((turned, _page(3)))
+    follow.clock.run(LEFT_PAGE_MS / 1000 + 3 * FRAME_STEP_MS / 1000 + 0.02)
+    assert job.cancel.is_set()
+
+
 def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept(follow):
     w, worker = follow.make(asks=False)
     soft, sharp = _page(4, soft=3), _page(4)

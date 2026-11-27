@@ -20,9 +20,9 @@ def places(tmp_path, monkeypatch):
     return work, root, state
 
 
-def _write(folder, model: str):
+def _write(folder, model: str, more: str = ""):
     path = folder / "taslation.toml"
-    path.write_text(f'ollama_model = "{model}"\n', encoding="utf-8")
+    path.write_text(f'ollama_model = "{model}"\n{more}', encoding="utf-8")
     return path
 
 
@@ -62,14 +62,20 @@ def test_config_comes_first_and_must_exist(places, tmp_path):
 
 
 def test_doctor_names_the_file_it_read(places, capsys, monkeypatch):
+    """(doctor looks at Ollama too: at a fake on a port of its own - the file's address -, never at the server on
+    Ollama's usual port)"""
+    from fake_ollama import FakeOllama
+
     _work, _root, state = places
-    path = _write(state, "qwen3.5:4b")
     monkeypatch.setattr(cli, "build_translator", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("no Ollama here")))
-    try:
-        cli.main(["doctor"])
-    finally:
-        cli.netguard.uninstall()
-    assert f"Config file: {path}" in capsys.readouterr().out
+    with FakeOllama() as server:
+        path = _write(state, "qwen3.5:4b", f'ollama_url = "{server.url}"\n')
+        try:
+            cli.main(["doctor"])
+        finally:
+            cli.netguard.uninstall()
+    out = capsys.readouterr().out
+    assert f"Config file: {path}" in out and f"(loopback:{server.port} only;" in out  # (the file's address)
 
 
 @pytest.mark.parametrize("style", ["chat", "mt", "index"])

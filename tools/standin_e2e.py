@@ -276,9 +276,11 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
                                              "w9000", "p", "w6000", "j56", "v15000", "w17000"]),
     # (by its name only; no profile) the page pressed and slid with the pointer, as a viewer that moves the whole page
     # along with a drag does: to the window's edge and let go (the next screen), slid a little and let go (it snaps
-    # back), to the other edge (the screen before; the pointer held on the left pane's lettering switch meanwhile,
-    # `SeeWatch._follow_slides`), and a slow slide held long; the pointer the window reads follows each slide
-    "s": ("the page slid with the pointer", ["n", "w6000", "r700", "w1500", "o", "w7000", "r600-150", "w1500", "o",
+    # back - drawn 400 ms after the release, as a viewer on a busy computer answers it: the frame left as it was held
+    # meanwhile is no page at rest, `live.RELEASE_ANSWER_MS`), to the other edge (the screen before; the pointer held
+    # on the left pane's lettering switch meanwhile, `SeeWatch._follow_slides`), and a slow slide held long; the
+    # pointer the window reads follows each slide
+    "s": ("the page slid with the pointer", ["n", "w6000", "r700", "w1500", "o", "w7000", "r600-150", "w1500", "o400",
                                              "w5000", "l700", "w1500", "o", "w7000", "r1500", "w3000", "o", "w8000"]),
     # (by its name only) one page held long: room for what is measured on a page done (--see-add)
     "g": ("one page held long", ["n", "w90000"]),
@@ -326,6 +328,7 @@ TAB_STEPS_ASKED = ("tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # what "tab"
 TAB_SCENARIOS = ("tab0", *TAB_STEPS_ASKED)  # (tab6 moves the book into a window of its own: always the last)
 NAMED_ONLY = ("q", "f3", "s", "g", "h", *WINDOW_STEPS, *TAB_SCENARIOS)  # scenarios never in "all", by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
+RELEASE = re.compile(r"o\d*")  # its release ("oN": the stand-in's answer drawn N ms after it)
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
 # draws, kept in the report with its time (`stand_in_profile_events`; words and numbers only)
@@ -487,7 +490,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
             if SLIDE.fullmatch(step):
                 slid = SLIDE.fullmatch(step)
                 continue
-            if step == "o":
+            if RELEASE.fullmatch(step):
                 turn, slid = (slid.group(1) if slid is not None and slid.group(2) is None else None), None
                 if turn is None:
                     continue
@@ -512,7 +515,8 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
 
 
 def pages_needed(names: list[str], k_turns: int = 20) -> int:
-    turns = sum((SCENARIOS[n][1].count("n") + SCENARIOS[n][1].count("o")) * (1 if n in NARROW else 2) for n in names)
+    turns = sum(sum(1 for s in SCENARIOS[n][1] if s == "n" or RELEASE.fullmatch(s)) * (1 if n in NARROW else 2)
+                for n in names)
     turns += sum(2 * (k_turns + 2) for n in names if n in K_PACES)
     turns += max((int(s[1:]) for n in names for s in SCENARIOS[n][1] if s[:1] == "j" and s[1:].isdigit()), default=0)
     return turns + 8

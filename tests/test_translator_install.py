@@ -372,7 +372,9 @@ def test_the_reading_model_refused_ends_the_script_with_the_same_code(tmp_path, 
     assert "(HTTP 403)" in out and "will not help" in out and "Check the network" not in out
 
 
-def test_the_window_s_runner_reads_the_refusal(tmp_path):
+def test_the_window_s_runner_reads_the_refusal(tmp_path, monkeypatch):
+    # (no ollama command: the real one, where Ollama is installed, would list the models of the person's own server)
+    monkeypatch.setattr(ti, "find_ollama", lambda: None)
     script = tmp_path / "setup_models.py"
     script.write_text("import sys\nprint('refused', flush=True)\n"
                       f"sys.exit({ti.REFUSED})\n", "utf-8")
