@@ -192,11 +192,78 @@ def test_a_frame_of_no_page_on_a_flat_ground_hides_the_panes_only_at_rest(ground
     rest = app._see_ground
     noise =Image.fromarray(np.random.default_rng(3).integers(0, 255, (300, 400, 3), dtype=np.uint8))  # no flat ground
     assert _note(app, noise) is rest  # (no box: another than the last frame's)
-    assert _note(app, noise) is None  # stayed: the panes hide, as ever
+    assert _note(app, noise) is rest  # no box again: no page in its place yet (`_keeps_ground`) ...
+    clock.now += ui.REST_S + 0.001
+    ui.rest_tick(app)
+    assert app._see_ground is None  # ... until it stayed: the panes hide, as ever
     assert app._see_rest_box == (100, 0, 300, 300)  # (the last box at rest kept: it tells half a spread)
     clock.now += 1
     assert _note(app, at_rest) is None  # back: a box another than the frame before's ...
     assert _note(app, at_rest)[1] == (100, 0, 300, 300)  # ... and at rest on the next
+
+
+def test_a_slide_s_frames_with_no_page_box_leave_the_ground_until_a_page_is_at_rest(ground):
+    """The stand-in's scenario "s" on GitHub's runners (2 runs of 3): both panes hid for about 0.2 s, 0.5 s after the
+    release of a slide to the screen's edge ("no ground"): the frames held showed the page slid half out of the frame,
+    where no page box is found, and the frame captured right after the release, no box either, was taken for the page
+    at rest by being as the frame before."""
+    app, clock = ground.app, ground.clock
+    at_rest, _slid, _far = _frames()
+    half_out = Image.fromarray(page(ground=0, box=(2, 0, 398, 300)))  # (the page out to the frame's edges: no box)
+    assert ui.frame_look(app, half_out, Facts(half_out)).box is None
+    _note(app, at_rest)
+    rest = app._see_ground
+    app.held = True
+    for _n in range(3):  # slid with the pointer
+        clock.now += 0.1
+        assert _note(app, half_out) is rest
+    app.held = False  # let go at the edge
+    for _n in range(3):  # the slid picture captured again, and again: not the page at rest
+        clock.now += 0.1
+        assert _note(app, half_out) is rest
+    turned = Image.fromarray(page(seed=2, ground=0, box=(120, 0, 320, 300)))  # the next screen drawn in its place
+    clock.now += 0.1
+    assert _note(app, turned) is rest
+    clock.now += 0.1
+    assert _note(app, turned)[1] == (120, 0, 320, 300)  # at rest: its own ground
+    # the very picture captured again (its facts shared) keeps its wait: a page on no flat ground at rest hides them
+    noise = Image.fromarray(np.random.default_rng(3).integers(0, 255, (300, 400, 3), dtype=np.uint8))
+    facts = Facts(noise)
+    for _n in range(4):
+        ui.note_frame(app, noise, facts)
+        clock.now += ui.REST_S / 3
+        ui.rest_tick(app)
+    assert app._see_ground is None
+
+
+def test_the_frame_held_last_does_not_become_the_page_at_rest_once_the_next_screen_is_drawn(ground):
+    """... the other way it hid them: the frame held last, the page half out, became the page at rest REST_S after
+    the release, the next screen's soft frame drawn meanwhile being one to wait out."""
+    app, clock = ground.app, ground.clock
+    at_rest, _slid, _far = _frames()
+    half_out = Image.fromarray(page(ground=0, box=(2, 0, 398, 300)))
+    soft = np.zeros((300, 400, 3), np.uint8)
+    soft[:, 120:320] = np.random.default_rng(4).integers(215, 250, (300, 200, 1), dtype=np.uint8)  # pale, no ink
+    soft = Image.fromarray(soft)
+    assert ui.frame_look(app, soft, Facts(soft)).kind == "washed"
+    _note(app, at_rest)
+    rest = app._see_ground
+    app.held = True
+    clock.now += 0.1
+    assert _note(app, half_out) is rest
+    app.held = False  # let go at the edge: the next screen drawn soft first
+    clock.now += 0.05
+    ui.rest_tick(app)
+    assert _note(app, soft) is rest
+    for _n in range(4):
+        clock.now += ui.REST_S / 2
+        ui.rest_tick(app)
+        assert app._see_ground is rest
+    turned = Image.fromarray(page(seed=2, ground=0, box=(120, 0, 320, 300)))  # sharp
+    assert _note(app, turned) is rest
+    clock.now += ui.REST_S + 0.001
+    ui.rest_tick(app)
+    assert app._see_ground[1] == (120, 0, 320, 300)
 
 
 def test_a_frame_of_another_size_or_viewer_is_at_rest_on_its_own(ground):

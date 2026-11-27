@@ -804,8 +804,9 @@ def start(app: Any) -> bool:
     app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
     app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour, the capture area's columns)
     # at the last rest (`note_frame`)
-    app._see_unrested = None  # (when, page box, ground, frame size) of a frame not at rest yet (`note_frame`, `rest_tick`)
+    app._see_unrested = None  # (when, page box, ground, frame size, its facts' memo) of a frame not at rest yet (`_aside`)
     app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
+    app._see_newest = None  # the facts' memo of the newest frame noted, whatever it was (`note_frame`, `rest_tick`)
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
@@ -2016,12 +2017,14 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     (none at rest on no flat ground: the panes hide) and the capture area's columns (the panes at its edges).
 
     Only a frame of the page at rest in its place is that (`_at_rest`): its page box the one the frame before had
-    (within LOOK_STEP; the first frame of a viewer or of a size counts), and no button held in the viewer (`held`).
-    Another is kept aside (`_see_unrested`) and becomes it once REST_S has passed with no frame after it and no press
+    (within LOOK_STEP; the first frame of a viewer or of a size counts), and no button held in the viewer (`held`);
+    a frame with no page box while a ground of frames of its size is had never is (`_keeps_ground`: a slide's frames).
+    Another is kept aside (`_aside`) and becomes it once REST_S has passed with no other picture after it and no press
     (`rest_tick`). Before, every frame was: a page that a viewer drags along with the pointer, out of its place and
     over the panes' places, hid the panes while it was held there, and the frame of a page taken while it moved, or
     found on no flat ground, set the panes by it until the next frame at rest. A frame with bars over the page leaves
     the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`)."""
+    app._see_newest = getattr(facts, "memo", None)  # (the newest picture noted, whatever it is: `rest_tick`)
     found = frame_look(app, image, facts)
     if found.kind is not None:
         note_state(app, found.kind)
@@ -2034,12 +2037,12 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
                 pass
         app._see_bars_since = None
         ground = _ground_of(app, image, facts, found)
-        if _at_rest(app, image, found.box):
+        if _at_rest(app, image, found.box) and not _keeps_ground(app, image, found.box):
             note_state(app, "rest")
             _rest(app, found.box, ground, image.size)
         else:
             note_state(app, "held" if held(app) else "moving")
-            app._see_unrested = (time.monotonic(), found.box, ground, image.size)
+            _aside(app, found.box, ground, image.size, facts)
         return
     note_state(app, "bars")
     if app._see_bars_since is None:
@@ -2092,7 +2095,37 @@ def _ground_under_bars(app: Any, image: Image.Image, facts: Any, found: st.Look)
     if _at_rest(app, image, found.box):
         _rest(app, found.box, under, image.size)
     else:
-        app._see_unrested = (time.monotonic(), found.box, under, image.size)
+        _aside(app, found.box, under, image.size, facts)
+
+
+def _keeps_ground(app: Any, image: Image.Image, box: Any) -> bool:
+    """Whether the frame *image*, in which no page box was found (*box* None), leaves the side panes' ground as it is
+    although the frame before had none either: a ground of frames of its size is had. Such a frame is no page in its
+    place - a slide's frames are such, the page half out of the frame - and it becomes the page at rest only once the
+    very picture has stayed REST_S, no other one noted after it (`rest_tick`). Before, a slide let go at the screen's
+    edge hid both panes for a fifth of a second (the stand-in's scenario "s" on GitHub's runners, 2 runs of 3): the
+    frame held last, the page half out, became the page at rest REST_S after the release, the next screen's soft
+    frame drawn meanwhile being one to wait out (`frame_look`'s kind), until the sharp one had stayed too; and two
+    frames with no box were taken for a page at rest by being alike."""
+    return box is None and _ground_had(app, image.size)
+
+
+def _ground_had(app: Any, size: Any) -> bool:
+    """Whether the side panes have a ground of frames of *size*."""
+    ground = getattr(app, "_see_ground", None)
+    return ground is not None and ground[0] == size
+
+
+def _aside(app: Any, box: Any, ground: Any, size: Any, facts: Any = None) -> None:
+    """A frame not at rest kept aside (`note_frame`): it becomes the page at rest once REST_S has passed with no other
+    picture after it (`rest_tick`). The very picture captured again (its facts shared, `live._captured_facts`) is no
+    other picture: its wait goes on from its first capture."""
+    now = time.monotonic()
+    memo = getattr(facts, "memo", None)
+    pending = getattr(app, "_see_unrested", None)
+    if pending is not None and len(pending) > 4 and memo is not None and pending[4] is memo:
+        now = pending[0]
+    app._see_unrested = (now, box, ground, size, memo)
 
 
 def _at_rest(app: Any, image: Image.Image, box: Any) -> bool:
@@ -2118,9 +2151,10 @@ def _rest(app: Any, box: Any, ground: Any, size: Any = None) -> None:
 
 
 def rest_tick(app: Any) -> None:
-    """(each tick) The frame kept aside by `note_frame` becomes the page at rest once REST_S has passed with no frame
-    after it and no button held in the viewer since (the viewer's own frames stopped coming: a page at rest is drawn
-    once)."""
+    """(each tick) The frame kept aside by `note_frame` becomes the page at rest once REST_S has passed with no other
+    picture after it (`_aside`) and no button held in the viewer since (the viewer's own frames stopped coming: a page
+    at rest is drawn once). One with no page box, while the panes have a ground of frames of its size, does so only
+    while it is still the newest picture noted (`_keeps_ground`); else it is dropped, the ground left as it is."""
     pending = getattr(app, "_see_unrested", None)
     if pending is None:
         return
@@ -2129,7 +2163,12 @@ def rest_tick(app: Any) -> None:
         app._see_held_at = now
         return
     if now - max(pending[0], getattr(app, "_see_held_at", 0.0)) >= REST_S:
-        _rest(app, pending[1], pending[2], pending[3] if len(pending) > 3 else None)
+        size = pending[3] if len(pending) > 3 else None
+        if (pending[1] is None and len(pending) > 4 and getattr(app, "_see_newest", None) is not pending[4]
+                and _ground_had(app, size)):
+            app._see_unrested = None  # (another picture came after it: a frame to wait out, or one with bars)
+            return
+        _rest(app, pending[1], pending[2], size)
 
 
 def _bars_due(app: Any, gone: bool = False) -> None:
