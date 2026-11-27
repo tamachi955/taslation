@@ -116,6 +116,47 @@ but where the window waits a pale or blank frame out as a page still loading: th
 grey covers came out "book" before a page with panels of lines only and no closed frame needed BUBBLES_LINES bubbles; a
 judgement took some 25-30 ms (100 ms at the most) on a 1900 x 915 frame.
 
+## Sound words
+
+`taslation/soundwords.py` is the program's own list of Japanese sound words (some 680 base forms in katakana, written
+from general knowledge of the language, no dictionary or site copied; their lengthened, repeated, small-tsu, hiragana
+and voiced forms come by rule, `skeleton` and `KNOWN`). `Pipeline._sound_word` uses it on lettering set on the page
+whose reading to translate is short kana: what the readers read alike stands (a sound word of the list makes the
+region's kind "sfx"; one that is none is no reading to set right), and only where each reader read another thing is
+one of theirs taken, or one with a kana they mix up changed (`CONFUSABLE`); where then none is a sound word the region
+is left as drawn (the interim rule: neither erased nor lettered).
+
+It was measured on OpenMantra's 214 pages at full size and 1000 px high, through the whole pipeline with no
+translation, each region `_sound_word` saw noted in memory (numbers only; the readings and the gold lines never
+written), and the regions it touched cut out in scratch, looked at by eye and deleted:
+
+| At full size / 1000 px high | Regions |
+|---|---|
+| Sound words found (as the readers read them / set right) | 20 (19 / 1) / 14 (14 / 0) |
+| ... hand-lettered sound words or cries, by eye (full size) | 19 of the 20 (one was drawing that the gate had passed as a line before) |
+| Short kana read alike that is no sound word, left as read | 3 / 3 (at full size a sign and two lines of narration, gold lines all three) |
+| Left as drawn, each reader read another thing (the interim rule) | 0 / 1 (a hand-lettered sound word in outline, no gold line) |
+
+What was tried and dropped, on the same pages at full size:
+
+* Readings the gate drops (``ocr-noise``, ``low-confidence``) asked again of the other readers, and taken as sound words
+  where two of them read alike: 82 regions, of which by eye 14 were sound words or cries (4 of them in bubbles), 2
+  other lettering (part of a sign, a question mark) and 66 drawing - hair, hatching, speed lines, faces. Lettering them
+  would have erased the drawing in 66 places for 14 sound words; they stay as the gate leaves them.
+* A reading set right where the readers read alike: of the 11 readings changed in a first version, 4 changed one kana
+  of what the readers had read alike into a word of the list (a line of narration, a muffled sound, a sniff and a
+  rustle, the last three now on the list as read), 6 only the marks (dots, a long mark) and 1 took the reading the
+  other two readers shared. The readers' agreement now stands, and a reading counts as set right only where its
+  skeleton changes.
+* A confusion table from the shapes alone (ソ and ン, シ and ツ and the like): the readers never mixed those up on the
+  sample set's sound words. The table is what they did mix up: on the 33 regions of hand-lettered sound words among those
+  read as short kana, ウ and カ 4 times and ジ and バ twice; against the gold lines' sound words, ウ and ラ twice and ワ and
+  ア once. A small vowel read for a large one, as common, is folded by `skeleton`. The pairs between readers on the rest
+  (ン and ー, イ and ハ, ...) came from drawing read as kana.
+
+The audit (`tools/audit_render.py`, version 8) counts per set and scale the sound words found, set right and left as
+drawn, and the damage codes on the sound effects lettered (`sound_lines`).
+
 ## A setting in the Settings dialog
 
 Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:

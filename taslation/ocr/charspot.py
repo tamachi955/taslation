@@ -115,12 +115,15 @@ class CharspotChar:
 class CharspotReading:
     """What was read in a crop, in reading order; *text* is `written` and *score* the confidence kept with a region
     (`confidence`). An engine without character boxes gives no *chars*, and then no gate applies. *split*: the readers
-    gave three different lines (`taslation.ocr.readers`)."""
+    gave three different lines (`taslation.ocr.readers`); *readings*: what each reader read once they were asked
+    (`Readers.settle`: charspot's, nar's and, where those two differ, CPT's; () before), which a sound word is looked
+    for among (`taslation.soundwords.find`)."""
 
     text: str = ""
     chars: tuple[CharspotChar, ...] = ()
     score: float = 0.0
     split: bool = False
+    readings: tuple[str, ...] = ()
 
     @cached_property
     def size(self) -> float:

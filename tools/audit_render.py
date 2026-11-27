@@ -23,7 +23,9 @@ region is measured:
   outline), counted per set and scale by ``merge``;
 * the text box against the lettering it holds (``box_cover``, ``box_excess``);
 * regions with no bubble whose readers disagree (``false_likely``), regions far from every gold or made-up text,
-  untranslated regions and gold texts with no region.
+  untranslated regions and gold texts with no region;
+* the sound words (``sound``, the kind ``sfx``: `taslation.soundwords`): found, their reading set right, left as
+  drawn, and the codes on the sound effects lettered (`sound_lines`).
 
 A region whose measure crosses its threshold gets a reason code (`CODES`). The made-up pages (`synthetic_pages`:
 the layouts of tools/make_sample_page.py and risky ones drawn here - tall narrow bubbles, bubbles joined or cut by
@@ -63,7 +65,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 7
+VERSION = 8  # (8: the regions' sound words, `sound_lines`)
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -1164,7 +1166,8 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             "glyph": round(g, 1), "font": int(r.font_size), "cap": int(r.size_cap), "flags": list(r.letter_flags),
             "ocr_conf": round(float(r.ocr_confidence), 3), "ocr_split": bool(r.ocr_split),
             "inpainted": r.inpainted is not None, "toned": id(r) in getattr(rec, "toned", ()),
-            "angle": round(float(r.angle), 1), "codes": [], "m": {}}
+            "angle": round(float(r.angle), 1), "sound": getattr(r, "sound", ""), "sfx": r.tag == "sfx",
+            "codes": [], "m": {}}
         m = row["m"]
         codes = row["codes"]
         before = rec.before.get(id(r))
@@ -1541,6 +1544,42 @@ def crops(record: dict[str, Any], pics: dict[str, Any], out: Path, codes: set[st
 
 
 # ====================================================================== merging the shards
+SOUND_STATES = (("found", "sound words found on the page (as read or set right)"),
+                ("corrected", "... their reading set right: another reader's, or one kana changed"),
+                ("as_drawn", "left as drawn: short kana on the page, each reader read another thing, no sound word"),
+                ("lettered", "sound effects lettered"))
+
+
+def sound_lines(records: Sequence[dict[str, Any]], keys: Sequence[tuple[str, str]]) -> list[str]:
+    """The summary's table of sound words (`TextRegion.sound`, the kind "sfx"): how many were found, set right and
+    left as drawn, and the codes on the sound effects lettered, per set and scale; [] for records of a version before
+    them (no ``sound`` on a region)."""
+    if not any("sound" in r for rec in records for r in rec["regions"]):
+        return []
+    counts: dict[tuple[str, str], Any] = {k: {"codes": {}} for k in keys}
+    for rec in records:
+        cell = counts[(rec["set"], rec["item"].rsplit("@", 1)[1])]
+        for r in rec["regions"]:
+            sound = r.get("sound", "")
+            states = {"found": sound in ("read", "corrected"), "corrected": sound == "corrected",
+                      "as_drawn": sound == "unsure", "lettered": bool(r.get("sfx")) and "ink_px" in r["m"]}
+            for state, on in states.items():
+                cell[state] = cell.get(state, 0) + int(on)
+            if states["lettered"]:
+                for c in set(r["codes"]):
+                    cell["codes"][c] = cell["codes"].get(c, 0) + 1
+    out = ["", "Sound words (`soundwords`): regions per set and scale.", "",
+           "| sound words | " + " | ".join(f"{s} {sc}" for s, sc in keys) + " | what |",
+           "|---|" + "---|" * len(keys) + "---|"]
+    for state, what in SOUND_STATES:
+        out.append(f"| {state} | " + " | ".join(str(counts[k].get(state, 0)) for k in keys) + f" | {what} |")
+    for code in {**CODES, **PAGE_CODES}:
+        if any(counts[k]["codes"].get(code) for k in keys):
+            out.append(f"| on them: {code} | " + " | ".join(f"{counts[k]['codes'].get(code, 0)}/"
+                                                          f"{counts[k].get('lettered', 0)}" for k in keys) + " | |")
+    return out
+
+
 def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
     records: list[dict[str, Any]] = []
     meta: list[dict[str, Any]] = []
@@ -1593,6 +1632,7 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
         if any(totals[k].get(frame) for k in keys):
             lines.append(f"| ({frame}) | " + " | ".join(f"{totals[k].get(frame, 0)}/{totals[k]['lettered']}"
                                                          for k in keys) + f" | {what} |")
+    lines += sound_lines(records, keys)
     failed =[f for m in meta for f in (m.get("failed") or [])]
     if failed:
         lines += ["", f"Items that failed: {len(failed)} ({', '.join(f['item'] for f in failed[:20])})"]

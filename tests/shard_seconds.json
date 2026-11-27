@@ -98,6 +98,7 @@
  "test_shown_again.py": 3.6,
  "test_shown_ahead.py": 4.6,
  "test_slant.py": 0.7,
+ "test_soundwords.py": 1.0,
  "test_spelt_right.py": 4.0,
  "test_stage_devices.py": 4.3,
  "test_start_flow.py": 4.0,

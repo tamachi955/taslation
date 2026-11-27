@@ -76,6 +76,7 @@ from . import fingerprint as fp
 from . import linememo
 from . import locate_large
 from . import size_mix
+from . import soundwords
 from .size_mix import SizeMix
 from .pageimages import ErasedRegion, packed_mask, region_digest
 from .render.memo import ErasedRegions, ShownPages, changed_pixels, pixels_digest, signature
@@ -4351,6 +4352,7 @@ class Pipeline:
                 check_cancel(cancel)  # (the other readers take most of a region's time)
                 reading = self._settle(rgb, r, box, reading, view)
                 status = self._verdict(r, reading, pieces, usual, unanimous)
+            reading, status = self._sound_word(r, reading, status)
             self._doubtful_slant(rgb, r, box, view)
             r.source_text = reading.text
             r.char_size = max((max(c.box[2] - c.box[0], c.box[3] - c.box[1]) for c in reading.chars), default=0.0)
@@ -4366,6 +4368,40 @@ class Pipeline:
             r.status = status
             if fill is not None:
                 fill.read(r)
+
+    def _sound_word(self, r: TextRegion, reading: CharspotReading, status: str) -> tuple[CharspotReading, str]:
+        """The reading of lettering set on the page (`LOOSE_KINDS`: nothing round it, on the drawing) as a sound word
+        (`taslation.soundwords`), with its status: where a reading to translate is short kana
+        (`soundwords.candidate`), the readers' readings (``readings``, `Readers.settle`) are looked for a sound word of
+        the list (`soundwords.find`: the one they read alike, else - where each read another thing - one of theirs,
+        or one with a kana they mix up in hand lettering changed); one found stands as the reading and makes the
+        region's kind "sfx" where the reader gave it none (left as drawn without `Settings.translate_sfx`). None
+        found: where two readers read alike the reading stands; where each read another thing the region is left as
+        drawn (status "sfx": neither erased nor lettered), for a wrong reading of hand lettering, erased and lettered as
+        dialogue, spoilt the drawing. A region in a bubble (a model's bubble with no outline found too: there a short
+        cry is dialogue), one the reader marked (``manual``) or gave another kind, and a reading the gate dropped are
+        as they were read: asked of the other readers, 66 of the 82 short kana two of them read alike where the gate had
+        dropped the reading on the sample set's pages were hair, hatching, speed lines and faces, 14 sound words.
+        ``sound`` says what was found (`TextRegion.sound`)."""
+        r.sound = ""
+        if (r.kind not in LOOSE_KINDS or r.tag not in ("", "sfx") or status != "untranslated"
+                or not soundwords.candidate(reading.text)):
+            return reading, status
+        readings = reading.readings or (reading.text,)
+        found = soundwords.find(readings)
+        if found is None:
+            if r.tag == "sfx" or soundwords.agree(readings):
+                r.sound = "none"
+                return reading, status
+            r.sound = "unsure"
+            return reading, "sfx"
+        r.tag = "sfx"
+        status = status if self.settings.translate_sfx else "sfx"
+        if soundwords.skeleton(found.text) == soundwords.skeleton(reading.text):
+            r.sound = "read"  # (the reading settled on, its marks as they are)
+            return reading, status
+        r.sound = "corrected"
+        return replace(reading, text=found.text), status
 
     def _doubtful_slant(self, rgb: np.ndarray, r: TextRegion, box: Box, view: np.ndarray | None = None) -> None:
         """A doubtful slant (`Tilt.doubtful`: a short word's, or one the long lines' search is unsure of that one

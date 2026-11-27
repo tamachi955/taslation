@@ -229,12 +229,19 @@ class Readers:
         return self.charspot.read_with_confidence(image)
 
     def settle(self, image: Image.Image, reading: CharspotReading) -> CharspotReading:
-        """Charspot's *reading* of *image* with the text the readers `agree` on. Its boxes and scores stay."""
+        """Charspot's *reading* of *image* with the text the readers `agree` on, and what each read (``readings``).
+        Its boxes and scores stay."""
         if self._nar is None:
             return reading
         self._check()
-        text, parted = agree(reading.text, written(self._nar.read(image)), lambda: written(self._cpt.read(image)))
-        return dataclasses.replace(reading, text=text, split=parted)
+        nar, third = written(self._nar.read(image)), []
+
+        def cpt() -> str:
+            third.append(written(self._cpt.read(image)))
+            return third[0]
+
+        text, parted = agree(reading.text, nar, cpt)
+        return dataclasses.replace(reading, text=text, split=parted, readings=(reading.text, nar, *third))
 
     def unanimous(self, image: Image.Image, text: str) -> bool:
         """Whether nar and CPT both read charspot's *text* in *image*, as readings are compared (`normal`); False

@@ -90,6 +90,11 @@ class TextRegion:
     # holds more (`Pipeline._prose`): no detection finds it again, so a page from the cache draws it from its stored
     # outline where the live page shows those pieces (`CachedBubble.joined`)
     joined: bool = False
+    # what its reading was as a sound word (`Pipeline._sound_word`, `taslation.soundwords`): "" not one to look at
+    # (in a bubble, not short kana, dropped by the gate), "read" (a sound word as read), "corrected" (its reading set
+    # right: another reader's, or one kana changed), "unsure" (each reader read another thing and none is a sound word:
+    # left as drawn), "none" (two readers read alike, no sound word). Memory only
+    sound: str = ""
 
     @property
     def reused(self) -> bool:
