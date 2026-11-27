@@ -168,7 +168,7 @@ SCENES: tuple[Scene, ...] = (
           "TASlation's controls and indicators lie in two panes on the viewer's ground beside the page: the controls "
           "on the left, the indicators on the right.", 6.0, present=panes_present,
           follows=cites(MANUAL, "TASlation's controls and indicators lie in two panes on the viewer's ground beside "
-                                "the page, at the left and right edges of the capture area.",
+                                "the page, at the left and right edges of the capture area",
                         "**The left pane** holds the controls",
                         "**The right pane** (while \"Indicators\" is on) shows, at its top, the bubble last under the "
                         "pointer")),
