@@ -147,6 +147,30 @@ def test_a_narrow_bubble_round_one_column_stays_a_bubble():
     assert int(((gray < 160) & (inside > 0)).sum()) == 0  # nothing of the column left
 
 
+def test_the_cut_of_a_white_area_keeps_the_same_share_of_it_on_the_page_shown_at_any_size():
+    """The cut's pad goes with the glyphs (`FOCUS_PAD`): with 6 px fixed, a bubble of the tests' sample page kept 87 %
+    of its area at full size and 90 % at 0.8 of it - lettering on the page at one size, a bubble at the other, and the
+    region editor lost its region when the page was taken again at the other size."""
+    from pathlib import Path
+
+    from PIL import Image
+
+    from taslation.detect.bubbles import FOCUS_MARGIN, FOCUS_PAD, focus_window
+
+    page = Image.open(Path(__file__).parent / "fixtures" / "sample_page.png").convert("RGB")
+    shares = {}
+    for f in (1.0, 0.8, 0.6):
+        img = page if f == 1.0 else page.resize((round(page.width * f), round(page.height * f)))
+        for r in BubbleDetector().detect(np.asarray(img)):
+            win = focus_window(r.core_box or r.text_box, r.bbox, 0.30, FOCUS_MARGIN * r.glyph, FOCUS_PAD * r.glyph)
+            if win is not None:
+                key = (round(r.x0 / img.width, 1), round(r.y0 / img.height, 1))
+                share = (win[2] - win[0]) * (win[3] - win[1]) / (r.width * r.height)
+                shares.setdefault(key, []).append(share)
+    assert len(shares) == 6 and all(len(s) == 3 for s in shares.values())
+    assert all(max(s) - min(s) < 0.045 for s in shares.values())  # (6 px fixed: up to 0.07 apart)
+
+
 def _region(x0, y0, x1, y1):
     return TextRegion(x0, y0, x1, y1, np.full((y1 - y0, x1 - x0), 255, np.uint8), (x0, y0, x1, y1))
 

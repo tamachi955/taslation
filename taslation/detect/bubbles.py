@@ -748,15 +748,23 @@ FOCUS_MARGIN = 1.0  # glyphs of room the cut keeps on every side of the text (se
 # a cut that would keep this share of the area's box or more is none: the area is the text's own bubble - a tall
 # narrow one round a single column, whose text is a small share of it - and stays a bubble (cut down to text on the
 # page, its lettering went to the erase for lettering on the page, judged on a ring round the column that reached its
-# outline on a page shown small: the inpainting there left the strokes' cores as a dotted line)
-FOCUS_WHOLE = 0.9
+# outline on a page shown small: the inpainting there left the strokes' cores as a dotted line). The made-up narrow
+# bubbles keep 0.93-0.99 of their area at every size from 800 to 1754 px of height; the tests' sample page has a bubble
+# with three columns that keeps 0.90 at every size and is cut, as it always was.
+FOCUS_WHOLE = 0.92
+# the cut's own pad round the room it keeps, in glyphs: 6 px at the 24 px glyphs it was set at, so that the cut, and
+# whether it is made at all, is the same on the page shown at any size (6 px fixed were a larger share of a page shown
+# smaller: a bubble's cut kept 87 % of it at full size and 90 % at 0.8 of it, a bubble at one size and lettering on
+# the page at the other)
+FOCUS_PAD = 0.25
 
 
 def focus_window(text_box: tuple[int, int, int, int], area: tuple[int, int, int, int],
-                 max_text_share: float = 0.30, margin: float = 0.0) -> tuple[int, int, int, int] | None:
+                 max_text_share: float = 0.30, margin: float = 0.0,
+                 pad: float = 6.0) -> tuple[int, int, int, int] | None:
     """The neighbourhood of *text_box* that a large white *area* is cut down to, or None when the text fills it:
     room for the translation (wider than vertical Japanese) and at least *margin* pixels on every side of the text
-    (a short line keeps the room a bubble round it would give)."""
+    (a short line keeps the room a bubble round it would give), and *pad* pixels more."""
     tx0, ty0, tx1, ty1 = text_box
     x0, y0, x1, y1 = area
     tw, th = tx1 - tx0, ty1 - ty0
@@ -764,12 +772,13 @@ def focus_window(text_box: tuple[int, int, int, int], area: tuple[int, int, int,
         return None
     side = max(tw, th)
     m = int(round(2 * margin))
+    p = max(1, int(round(pad)))
     want_w, want_h = max(tw + m, int(side * 0.9)), max(th + m, int(side * 0.6))
     cx, cy = (tx0 + tx1) / 2.0, (ty0 + ty1) / 2.0
-    nx0 = max(x0, int(cx - want_w / 2) - 6)
-    nx1 = min(x1, int(cx + want_w / 2) + 6)
-    ny0 = max(y0, int(cy - want_h / 2) - 6)
-    ny1 = min(y1, int(cy + want_h / 2) + 6)
+    nx0 = max(x0, int(cx - want_w / 2) - p)
+    nx1 = min(x1, int(cx + want_w / 2) + p)
+    ny0 = max(y0, int(cy - want_h / 2) - p)
+    ny1 = min(y1, int(cy + want_h / 2) + p)
     if nx1 - nx0 < 8 or ny1 - ny0 < 8:
         return None
     return nx0, ny0, nx1, ny1
@@ -791,7 +800,7 @@ def focus_oversized(regions: list[TextRegion], max_text_share: float = 0.30,
     narrow bubble round one column of text stays a bubble.
     """
     for r in regions:
-        win = focus_window(r.core_box or r.text_box, r.bbox, max_text_share, margin * r.glyph)
+        win = focus_window(r.core_box or r.text_box, r.bbox, max_text_share, margin * r.glyph, FOCUS_PAD * r.glyph)
         if win is None:
             continue
         nx0, ny0, nx1, ny1 = win
