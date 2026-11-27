@@ -90,6 +90,7 @@ PAPER_LEVELS, PAPER_EVEN = 12, 0.75  # grey levels: the paper a reader's rectang
 # a tone, the light of a drawing do not (`drawn_on_art`) ...
 CLOSED_REACH = 3.0  # of the lettering box's own size, each way: where the paper closed round it is looked for (a
 #                     bubble and its tail; at once the box's size, a tail reaching past it left most bubbles open) ...
+CLOSED_WIDE = 10.0  # ... and, where the paper runs out of that, this (two bubbles joined into one) ...
 CLOSED_SHARE = 0.9  # ... which holds this share of the light pixels in the box ...
 CLOSED_PAPER = 0.03  # ... and of the box's area at least this much paper clear of the ink (`closed_interior`; the
 #                      white rings of outlined lettering closed on the made-up layouts' tones and gradients had none)
@@ -280,15 +281,28 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     for light lettering on black) joined to those in the box without crossing ink (four-connected), where none of them
     reaches the window's edge; they must hold `CLOSED_SHARE` of the light pixels in the box (lettering that runs out
     of its bubble lies on what is beyond too), and `CLOSED_PAPER` of the box must be paper further than `LIGHT_REACH`
-    from any ink - not the white rings of outlined lettering set on the drawing, which close on it too. Pixels at the
-    page's *scale* (`pagescale`)."""
+    from any ink - not the white rings of outlined lettering set on the drawing, which close on it too. Where the
+    paper the box lies on runs out of that window, it is looked for again in the box grown by `CLOSED_WIDE` times its
+    size: the paper of two bubbles joined into one, whose lettering lies in the smaller (the closed paper was not found
+    round it, the inpainting took it, and its hole the line where the bubbles join). Pixels at the page's *scale*
+    (`pagescale`)."""
+    found, open_ = _closed_at(image, box, dark, scale, CLOSED_REACH)
+    if found is None and open_:
+        found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE)
+    return found
+
+
+def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, scale: float, reach: float
+               ) -> tuple[tuple[tuple[int, int, int, int], np.ndarray, np.ndarray] | None, bool]:
+    """`closed_interior` in the box grown by *reach* times its size, and whether the paper the box lies on ran out of
+    that window where it holds less than the whole page (it may close in a wider one)."""
     x0, y0, x1, y1 = box
     bw, bh = x1 - x0, y1 - y0
     if bw < 4 or bh < 4:
-        return None
+        return None, False
     h, w = image.shape[:2]
     least = pagescale.px(RING_OUT, scale)
-    gx, gy = max(least, int(CLOSED_REACH * bw)), max(least, int(CLOSED_REACH * bh))
+    gx, gy = max(least, int(reach * bw)), max(least, int(reach * bh))
     wx0, wy0, wx1, wy1 = max(0, x0 - gx), max(0, y0 - gy), min(w, x1 + gx), min(h, y1 + gy)
     gray = cv2.cvtColor(np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3]), cv2.COLOR_RGB2GRAY)
     light = (gray <= 255 - OUTLINE_LEVEL) if dark else (gray >= OUTLINE_LEVEL)
@@ -296,20 +310,21 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     inner = labels[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
     seeds = np.unique(inner[inner > 0])
     if not seeds.size:
-        return None
+        return None, False
     edge = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
     closed = np.zeros(n, bool)
     closed[seeds] = True
     closed[edge] = False
     held = closed[inner]
     if int(held.sum()) < CLOSED_SHARE * int((inner > 0).sum()):
-        return None
+        whole = (wx0, wy0, wx1, wy1) == (0, 0, w, h)
+        return None, not whole and bool(np.isin(seeds, edge).any())
     inside = closed[labels]
     ink = (~light).astype(np.uint8)
     far = inside & (cv2.dilate(ink, pagescale.disc(2 * LIGHT_REACH + 1, scale)) == 0)
     if int(far.sum()) < CLOSED_PAPER * bw * bh:
-        return None
-    return (wx0, wy0, wx1, wy1), inside, far
+        return None, False
+    return ((wx0, wy0, wx1, wy1), inside, far), False
 
 
 def _char_hole(region: TextRegion, shape: tuple[int, ...], x0: int, y0: int, grow: int) -> np.ndarray:

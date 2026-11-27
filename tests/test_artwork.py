@@ -312,6 +312,48 @@ def test_a_model_bubble_the_drawing_shows_through_is_on_the_art():
     assert not artwork.see_through(page, r, found)  # (without the reading's characters: no)
 
 
+def joined_bubbles(neck=True):
+    """Two white bubbles joined into one on a hatching, the line where they join drawn part of the way across
+    (*neck*: the paper runs on between them; else the line closes the small one), a column of lettering in the small
+    one: its paper reaches past the window three times its box's size round it, into the large bubble."""
+    page = flat(255, (800, 1000))
+    page[::5] = 60  # a hatching round the bubbles
+    for centre, axes in (((250, 400), (40, 90)), ((400, 400), (120, 110))):
+        cv2.ellipse(page, centre, axes, 0, 0, 360, (0, 0, 0), 3)
+    for centre, axes in (((250, 400), (37, 87)), ((400, 400), (117, 107))):
+        cv2.ellipse(page, centre, axes, 0, 0, 360, (255, 255, 255), -1)
+    if neck:
+        cv2.line(page, (276, 340), (276, 385), (0, 0, 0), 3)  # the line where they join, open from y 385 to 415
+        cv2.line(page, (276, 415), (276, 460), (0, 0, 0), 3)
+    else:
+        cv2.line(page, (276, 325), (276, 475), (0, 0, 0), 3)
+    for y in range(340, 460, 30):
+        cv2.rectangle(page, (240, y + 2), (259, y + 21), (0, 0, 0), 3)
+    return page, (234, 336, 266, 462)
+
+
+@pytest.mark.parametrize("neck", [True, False])
+def test_lettering_in_one_of_two_joined_bubbles_is_on_their_paper(neck):
+    """Lettering in the smaller of two bubbles joined into one: their paper runs past the window three times the
+    lettering box's size round it (`CLOSED_REACH`), where it was no closed paper - the ring round the box reached the
+    line where they join, the lettering went to the inpainting, and its hole took that line. The paper is looked for
+    again in a wider window (`CLOSED_WIDE`): closed paper, the paper fill's."""
+    page, box = joined_bubbles(neck)
+    found = artwork.closed_interior(page, box)
+    assert found is not None
+    (wx0, wy0, wx1, _wy1), inside, _paper = found
+    assert inside[395 - wy0, 225 - wx0] and not inside[202 - wy0, 250 - wx0]  # the bubbles' paper, not the page's
+    assert (wx1 > 450 and inside[395 - wy0, 450 - wx0]) if neck else wx1 < 450  # (closed by the line: as before)
+    assert not on_art(page, region("text-on-page", box))  # (the ring round its box reaches the line and the hatching)
+
+
+def test_paper_open_to_the_page_past_the_wider_window_is_no_closed_paper():
+    """Paper that runs on past the wider window too (out to the page's white ground) is no closed paper."""
+    page, box = joined_bubbles()
+    page[380:420, 400:1000] = 255  # the large bubble opened to the page's edge
+    assert artwork.closed_interior(page, box) is None
+
+
 @pytest.mark.parametrize("kind", ["manual", "manual-dark"])
 def test_a_readers_rectangle_goes_by_its_ground_as_a_detected_region(kind):
     """(tests/test_drawn_on_art.py: in a bubble, out of one, on a flat box.)"""
