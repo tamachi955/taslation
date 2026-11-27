@@ -16,10 +16,10 @@ _loaded`), which says how much of a loaded model is in video memory and never lo
   (`ocr.place.readers_placement`, which asks NVML and /api/ps, as above, for a plan not made yet);
 * translation: Ollama's model on the GPU, the CPU or both, as /api/ps says while it is loaded, and for an Ollama
   TASlation started, whether it got the window cache (`window_cache_text`, `ollama_start.setup_of`);
-* erasing: the paper fill on the CPU; LaMa on the art where `art_erase` runs it on this computer and it is installed
-  (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU too), on the GPU where torch has CUDA and
-  the judgement at the start put it there. What the start found short, and what it sent to the processor, is
-  `plan_text`."""
+* erasing: the paper fill and the tone fill (`artwork.fill_tone`) on the CPU; LaMa on the art where `art_erase` runs
+  it on this computer and it is installed (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU
+  too), on the GPU where torch has CUDA and the judgement at the start put it there. What the start found short, and
+  what it sent to the processor, is `plan_text`."""
 
 from __future__ import annotations
 

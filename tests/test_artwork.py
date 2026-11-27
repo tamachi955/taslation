@@ -887,6 +887,33 @@ def test_lettering_with_a_white_ring_on_a_dot_tone_is_painted_over_with_the_tone
     assert np.abs(inside - tone[130:370, 160:220]).mean() < 3  # the tone, dot for dot: no stripes, no white left
 
 
+def test_with_no_inpainting_model_lettering_on_a_tone_is_painted_over_with_the_tone_all_the_same():
+    """A computer without a GPU runs no LaMa (`art_erase` "auto"): `Pipeline._erase` paints the hole on a ground
+    that repeats itself from that ground there too (`artwork.tone_erase`), the change within what its erase is
+    recorded over (`_erase_reach`); any other ground, and an early look, the paper fill erases as before."""
+    host = SimpleNamespace(settings=SimpleNamespace(erase_mode="fill", white_threshold=225, dark_threshold=140),
+                           art_eraser=None, _paper_erase=Pipeline._paper_erase, ERASE_REACH=Pipeline.ERASE_REACH)
+    box = (150, 120, 230, 380)
+    tone = dot_tone()
+    page = white_ringed(tone.copy())
+    before = page.copy()
+    r = region("text", box)
+    Pipeline._erase(host, page, r)
+    assert np.abs(page[130:370, 160:220].astype(int) - tone[130:370, 160:220]).mean() < 3  # the tone, dot for dot
+    x0, y0, x1, y1 = Pipeline._erase_reach(host, page, region("text", box))
+    changed = (page != before).any(axis=2)
+    assert changed.sum() == changed[y0:y1, x0:x1].sum() > 0
+    quick, paper = white_ringed(tone.copy()), white_ringed(tone.copy())
+    Pipeline._erase(host, quick, region("text", box), quick=True)
+    Pipeline._paper_erase(paper, region("text", box))
+    assert np.array_equal(quick, paper)  # an early look: the paper fill
+    for ground in (drawn(), flat(255)):
+        page, paper = white_ringed(ground.copy()), white_ringed(ground.copy())
+        Pipeline._erase(host, page, region("text", box))
+        Pipeline._paper_erase(paper, region("text", box))
+        assert np.array_equal(page, paper)
+
+
 def test_hatching_repeats_itself_too_and_a_drawing_does_not():
     hatched = flat(230)
     hatched[::5] = 60

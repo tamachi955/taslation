@@ -712,6 +712,34 @@ def _put_back(image: np.ndarray, kept: Kept | None) -> None:
         image[y0:y1, x0:x1][lines] = pixels
 
 
+def _hole(image: np.ndarray, region: TextRegion, judged: TextRegion, full: np.ndarray) -> np.ndarray:
+    """The hole the art's erase fills for *region* (*full*, `art_mask` of the region as judged), taking in the model's
+    text box too where the region is judged as another one (`as_judged`)."""
+    if judged is not region:
+        wider = art_mask(image, region)
+        if wider is not None:
+            full = full | wider
+    return full
+
+
+def tone_erase(image: np.ndarray, region: TextRegion, dark: bool = False) -> tuple[int, int, int] | None:
+    """The tone fill with no inpainting model (`Pipeline._erase` where LaMa is not set to run, as on a computer without
+    a GPU): lettering on the art (`on_art`, not on paper: `on_paper`) whose ground round it is no flat colour or smooth
+    shading (`plain_ground`) but repeats itself - a screentone's dots, a hatching, stripes - is painted over with that
+    ground (`fill_tone`), as the art eraser does (`ArtEraser.erase`), and its paper colour is returned; None, nothing
+    touched, where the tone fill does not take it: the paper fill erases it as before."""
+    if not TONE_FILL or not on_art(image, region) or on_paper(image, region):
+        return None
+    judged = as_judged(region)
+    full = art_mask(image, judged)
+    scale = pagescale.of(region)
+    if full is None or plain_ground(image, full, scale=scale):
+        return None
+    if not fill_tone(image, _hole(image, region, judged, full), scale):
+        return None
+    return paper_colour(*ArtEraser._crop_mask(image, region), dark)
+
+
 class ArtEraser:
     """`erase` for regions on the art, with LaMa in *models_dir*, loaded on first use."""
 
@@ -837,10 +865,7 @@ class ArtEraser:
                 fill_ground(image, full, scale=scale)  # (strokes, ring and all; the paper fill takes what is left)
                 _put_back(image, kept)
             return app()
-        if judged is not region:  # the hole takes in the model's text box too
-            wider = art_mask(image, region)
-            if wider is not None:
-                full = full | wider
+        full = _hole(image, region, judged, full)  # (the model's text box too)
         if TONE_FILL and fill_tone(image, full, scale):  # a screentone, a hatching: painted on from round the hole
             self.counts["tone"] += 1
             return paper_colour(*self._crop_mask(image, region), dark)

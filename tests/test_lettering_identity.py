@@ -7,7 +7,10 @@ made with: on a computer whose font files differ (another system, another versio
 The sample page has a golden for each set of fonts it was made with (a checkout with its models folder letters it in
 the fonts that folder brings). The quarter turn's golden ("turned-down") was made again when a quarter turn's picture
 stopped being a pixel too large (`detect.tilt.Upright`): the same lines, size and flags, half a pixel over and no
-longer blended into the next pixel.
+longer blended into the next pixel. The sample page's goldens were made again when lettering on a ground that repeats
+itself came to be painted over with that ground with no inpainting model too (`artwork.tone_erase`; the page is
+lettered with it off): the region on the page's tone of lines, erased to a white rectangle before, keeps the tone; the
+same sizes and flags, no pixel apart outside that region.
 
 ``python tests/test_lettering_identity.py --write`` writes the goldens anew (only ever from code known to letter as
 before)."""

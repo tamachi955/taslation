@@ -5119,11 +5119,19 @@ class Pipeline:
 
     def _erase(self, out: np.ndarray, region: TextRegion, quick: bool = False) -> tuple[int, int, int]:
         """Erase *region* on the page *out*, by the inpainting model on the art (unless *quick*: an early look, soon
-        replaced by the finished page), and return its paper's colour."""
+        replaced by the finished page), and return its paper's colour. With no model (LaMa not set to run here, as on
+        a computer without a GPU), lettering on a ground that repeats itself is still painted over with that ground
+        (`artwork.tone_erase`), and the paper fill takes the rest."""
         s = self.settings
         eraser = self.art_eraser  # (the window may build another meanwhile)
-        erase = eraser.erase if eraser is not None and not quick else self._paper_erase
-        return erase(out, region, s.erase_mode, s.white_threshold, s.dark_threshold, is_dark(region))
+        dark = is_dark(region)
+        if eraser is not None and not quick:
+            return eraser.erase(out, region, s.erase_mode, s.white_threshold, s.dark_threshold, dark)
+        if not quick and s.erase_mode == "fill":
+            toned = artwork.tone_erase(out, region, dark)
+            if toned is not None:
+                return toned
+        return self._paper_erase(out, region, s.erase_mode, s.white_threshold, s.dark_threshold, dark)
 
     @staticmethod
     def _paper_erase(image: np.ndarray, region: TextRegion, mode: str = "fill", white_threshold: int = 225,
@@ -5453,15 +5461,20 @@ class Pipeline:
 
     def _erase_reach(self, out: np.ndarray, r: TextRegion) -> tuple[int, int, int, int]:
         """The part of the page *out* erasing *r* may change: `ERASE_REACH` round its box, and with the inpainting
-        model the window it sees and may fill in."""
+        model the window it sees and may fill in; with none, the most the tone fill's hole takes (`artwork.around` its
+        lettering box, grown by `artwork.TONE_GROW` and a pixel)."""
         h, w = out.shape[:2]
         reach = self.ERASE_REACH
         x0, y0 = max(0, r.x0 - reach), max(0, r.y0 - reach)
         x1, y1 = min(w, r.x1 + reach), min(h, r.y1 + reach)
+        bx0, by0, bx1, by1 = artwork.box_of(out, r)
         if self.art_eraser is not None:  # what LaMa sees, and may fill in
-            bx0, by0, bx1, by1 = artwork.box_of(out, r)
             wx0, wy0, wx1, wy1 = artwork.window(out.shape, bx0, by0, by1 - by0, bx1 - bx0)
-            x0, y0, x1, y1 = min(x0, wx0), min(y0, wy0), max(x1, wx1), max(y1, wy1)
+        else:  # (a large box follows its lettering further than ERASE_REACH)
+            g = artwork.TONE_GROW + 1
+            ax0, ay0, ax1, ay1 = artwork.around(out, (bx0, by0, bx1, by1), pagescale.of(r))
+            wx0, wy0, wx1, wy1 = max(0, ax0 - g), max(0, ay0 - g), min(w, ax1 + g), min(h, ay1 + g)
+        x0, y0, x1, y1 = min(x0, wx0), min(y0, wy0), max(x1, wx1), max(y1, wy1)
         return x0, y0, x1, y1
 
     def _erased_record(self, out: np.ndarray, r: TextRegion, key: bytes

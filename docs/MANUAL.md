@@ -807,6 +807,7 @@ The translation cache keeps the part as its place in the translation (no Japanes
 For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
 it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
 On other computers, erasing works as with "Not used", and the model is not even loaded (the setting's row then says so).
+With "Not used" too, lettering on a screentone, a hatching or another pattern that repeats itself is painted over with that pattern (no model takes part in that).
 `install.cmd` installs PyTorch's GPU build (the CUDA build) on a computer with an NVIDIA GPU, so there it is used with "Only with a GPU" as it is.
 On a computer without a GPU (AMD and Intel GPUs are not counted as GPUs either), with an old driver, or where the GPU build did not work, the CPU build is installed, and the inpainting is not used there (docs/INSTALL.md, "Installation").
 On a computer where an installation before this version put in the CPU build, running `install.cmd` again replaces it with the GPU build. The installation after `update.cmd` does not replace it, and says so.
