@@ -1936,7 +1936,8 @@ class JobsMixin:
         whether or not Auto has taken it. While the models load or a job runs it waits, and runs after. A viewer
         not read yet is looked at first (`_enlarge_first`). A Book box that names no book gets its name first
         (`_ask_name`). The pages turned past that wait for a translator that did not answer go on too
-        (`backlog.go_on_after_silence`)."""
+        (`backlog.go_on_after_silence`). A browser window picked, on trial, has nothing read of a frame judged no page
+        of a book; one the judgement cannot tell of is read (`viewers.ViewerMixin._pick_lets`, *asked*)."""
         go_on_after_silence(self)
         if not self.ready or self.busy:
             self._queue("translate")
@@ -1954,6 +1955,10 @@ class JobsMixin:
             self._capture_failed(e)
             return
         thumb = thumbnail(image)
+        lets = getattr(self, "_pick_lets", None)
+        if lets is not None and not lets(image, asked=True):
+            self._show_live(image, thumb)
+            return
         if generic_book_name(self.book_var.get()):  # `_name_needed`: the name first
             self._show_live(image, thumb)
             self._ask_name(lambda _name: self.translate_now(), image)

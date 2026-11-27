@@ -5112,7 +5112,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
             run_["monitors"] = {"failed": f"{type(e).__name__}{_where(e)}"}
     if tabs is not None:
         try:
-            run_["tabs"] = tabs.report(ended)
+            # (with --standin-start-tab, the other tab on show at the start; with --chooser, the window picked so)
+            run_["tabs"] = {**tabs.report(ended), "start_tab": getattr(args, "standin_start_tab", None),
+                            "picked": bool(getattr(args, "chooser", False))}
         except Exception as e:  # noqa: BLE001 - said by its type and where, the rest of the report kept
             traceback.print_exc()
             run_["tabs"] = {"failed": f"{type(e).__name__}{_where(e)}"}

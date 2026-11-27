@@ -5,10 +5,12 @@ another tab shows nothing of it is captured for reading (`OtherTab`, before the 
 follow under way ends, the lettering hides and takes no mouse (`SeeThrough.set_away`), the right pane says so in one
 line, nothing is learned; the book's tab back, it is looked at at once; the book's tab dragged out into a window of
 its own is followed there. The viewer chooser says under its list to bring the book's tab to the front first. A
-browser window the person picked is on trial until a page with lettering is read under its tab: nothing of it is
-learned before, a tab that looks like a viewer's is followed as the chosen one, and with nothing read for a while the
-right pane says so and how to choose the window again. No window, no browser: tools/standin_e2e.py's tab scenarios
-play it on the stand-in viewer."""
+browser window the person picked is on trial until a frame under its tab is judged a page of a book
+(`bookpage.judge`, stubbed here; tests/test_bookpage.py judges pages): nothing of it is read or learned before, a frame
+judged no book's page has the right pane say so at once and how to choose the window again (one the layout cannot tell
+of after a while), Translate reads such a frame and lettering read there ends the trial, and a tab that looks like a
+viewer's is followed as the chosen one. No window, no browser: tools/standin_e2e.py's tab scenarios play it on the
+stand-in viewer."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -184,10 +186,15 @@ BEFORE = "Star Road 1 - Reading Site - Google Chrome"  # (a title chosen before 
 
 
 class Pick(Tabs):
-    """`Tabs` with the pick on trial: its page read, what is learned."""
+    """`Tabs` with the pick on trial: its frames judged, its page read, what is learned."""
 
+    _pick_lets = viewers.ViewerMixin._pick_lets
     _pick_read = viewers.ViewerMixin._pick_read
+    _pick_tab_kept = viewers.ViewerMixin._pick_tab_kept
     _learn_viewer = viewers.ViewerMixin._learn_viewer
+
+    def _area_box(self, image):
+        return 0, 0, image.width, image.height
 
 
 @pytest.fixture
@@ -202,10 +209,26 @@ def pick(monkeypatch):
     monkeypatch.setattr(viewers, "window_exists", lambda hwnd: hwnd in titles)
     monkeypatch.setattr(viewers, "window_title", lambda hwnd: titles[hwnd])
     monkeypatch.setattr(viewers, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    judged: list[int] = []
+
+    def judge(rgb):  # (a frame's verdict by its grey level: 10 "not", 20 "unsure", 30 "book")
+        judged.append(int(rgb[0, 0, 0]))
+        return {10: "not", 20: "unsure", 30: "book"}[int(rgb[0, 0, 0])]
+
+    monkeypatch.setattr(viewers.bookpage, "judge", judge)
     p = Pick(NOTES)
     p._pick_trial = {"since": clock.now}
-    p.titles, p.clock, p.learned = titles, clock, learned
+    p.titles, p.clock, p.learned, p.judged = titles, clock, learned, judged
     return p
+
+
+def frame(level: int) -> Image.Image:
+    return Image.new("RGB", (64, 48), (level, level, level))
+
+
+def right_lines(app) -> list[str]:
+    state = {**vars(app), "selected": None, "status_var": SimpleNamespace(get=lambda: "")}
+    return [r.text for r in ui.right_rows(SimpleNamespace(**state))[0]]
 
 
 def test_on_trial_a_tab_that_looks_like_a_viewer_s_is_followed_as_the_chosen_one(pick):
@@ -221,19 +244,15 @@ def test_on_trial_a_tab_that_looks_like_a_viewer_s_is_followed_as_the_chosen_one
 
 
 def test_on_trial_the_right_pane_says_no_page_was_found_after_a_while_with_nothing_read(pick):
-    def rows(app) -> list[str]:
-        state = {**vars(app), "selected": None, "status_var": SimpleNamespace(get=lambda: "")}
-        return [r.text for r in ui.right_rows(SimpleNamespace(**state))[0]]
-
     from taslation.ui.constants import PICK_AGAIN, PICK_NO_PAGE, PICK_NOTHING_S
 
     assert pick._tab_now() == "book" and not pick._pick_nothing
     pick.clock.now += PICK_NOTHING_S - 1
     pick._tab_now()
-    assert not pick._pick_nothing and PICK_NO_PAGE not in rows(pick)
+    assert not pick._pick_nothing and PICK_NO_PAGE not in right_lines(pick)
     pick.clock.now += 1
     pick._tab_now()
-    assert pick._pick_nothing and PICK_NO_PAGE in rows(pick)
+    assert pick._pick_nothing and PICK_NO_PAGE in right_lines(pick)
     pick.busy = True  # (a page job under way: the wait begins again)
     pick._tab_now()
     assert not pick._pick_nothing
@@ -243,23 +262,130 @@ def test_on_trial_the_right_pane_says_no_page_was_found_after_a_while_with_nothi
     assert pick._pick_nothing
     pick.titles[NOTES.hwnd] = OTHER  # (another tab, not a viewer's: said, and how to have it read)
     assert pick._tab_now() == "other" and not pick._pick_nothing
-    assert rows(pick) == [TAB_AWAY, PICK_AGAIN]
+    assert right_lines(pick) == [TAB_AWAY, PICK_AGAIN]
     pick._pick_trial = None
-    assert rows(pick) == [TAB_AWAY]
+    assert right_lines(pick) == [TAB_AWAY]
 
 
-def test_on_trial_nothing_is_learned_until_a_page_with_lettering_is_read(pick):
+def test_on_trial_a_frame_judged_no_book_s_page_is_not_read_and_said_at_once(pick):
+    from taslation.ui.constants import PICK_NO_PAGE, PICK_NOTHING_S
+
+    assert not pick._pick_lets(frame(10))  # (a page of text in the tab picked: nothing read)
+    assert pick._pick_nothing and PICK_NO_PAGE in right_lines(pick) and pick.learned == []
+    pick._tab_now()  # (the wait's own time not over: the verdict holds while that tab is in front)
+    assert pick._pick_nothing and pick._pick_trial is not None
+    assert not pick._pick_lets(frame(10)) and pick.judged == [10]  # (the same frame: judged once)
+    pick.titles[NOTES.hwnd] = OTHER
+    assert pick._tab_now() == "other" and not pick._pick_nothing  # (another tab: TAB_AWAY says it)
+    pick.titles[NOTES.hwnd] = NOTES.title
+    pick._tab_now()
+    assert pick._pick_nothing  # (back, the same frame on show)
+    assert not pick._pick_lets(frame(20)) and not pick._pick_nothing  # (a frame the layout cannot tell of: waits)
+    pick.clock.now += PICK_NOTHING_S
+    pick._tab_now()
+    assert pick._pick_nothing and pick._pick_trial is not None and pick.learned == []
+
+
+def test_on_trial_a_frame_judged_a_book_s_page_is_read_and_its_lettering_under_the_tab_chosen_ends_the_trial(pick):
+    assert not pick._pick_lets(frame(20))
+    assert pick._pick_lets(frame(30))  # (a page turned: judged in its turn, read)
+    assert pick._pick_trial["asked"] and not pick._pick_nothing and pick.learned == []
+    pick._pick_read(SimpleNamespace(regions=[object()]))  # (its lettering read, the tab chosen still in front)
+    assert pick._pick_trial is None and pick.learned == [("chosen", NOTES.title)]
+    assert pick._pick_lets(frame(10)) and pick.judged == [20, 30]  # (no trial: every frame read, none judged)
+
+
+def test_on_trial_a_page_read_as_another_tab_came_teaches_nothing_and_a_frame_after_it_is_not_read(pick):
+    # the book's tab brought to the front: its first frame captured before its title was seen (the title comes a
+    # moment later), read, and its lettering read while that tab's title is in front - not the tab picked with
+    assert pick._pick_lets(frame(30))
+    pick.titles[NOTES.hwnd] = OTHER
+    pick._pick_read(SimpleNamespace(regions=[object()]))
+    assert pick._pick_trial is not None and pick.learned == [] and pick._pick_trial["since"] == pick.clock.now
+    assert not pick._pick_lets(frame(30))  # (a frame asked for as that tab came: not read, nor judged again)
+    assert pick.judged == [30]
+    pick.titles[NOTES.hwnd] = NOTES.title  # (the tab picked with back: its page read, its lettering ends the trial)
+    assert pick._pick_lets(frame(30))
+    pick._pick_read(SimpleNamespace(regions=[object()]))
+    assert pick._pick_trial is None and pick.learned == [("chosen", NOTES.title)]
+
+
+def test_on_trial_translate_reads_a_frame_the_layout_cannot_tell_of_and_lettering_read_so_ends_the_trial(pick):
     from taslation.ui.constants import PICK_NOTHING_S
 
+    pick._pick_read(SimpleNamespace(regions=[object()]))  # (a page job of no frame asked for: nothing)
+    assert pick._pick_trial is not None and pick.learned == []
+    assert not pick._pick_lets(frame(10), asked=True)  # (no page of a book: not even when asked)
+    assert pick._pick_lets(frame(20), asked=True) and pick._pick_trial["asked"]
     pick._pick_read(SimpleNamespace(regions=[]))  # (a page with nothing to letter: the wait begins again)
-    assert pick.learned == [] and pick._pick_trial == {"since": pick.clock.now}
+    assert pick.learned == [] and pick._pick_trial["since"] == pick.clock.now and not pick._pick_trial["asked"]
     pick.clock.now += PICK_NOTHING_S
     pick._tab_now()
     assert pick._pick_nothing
+    assert pick._pick_lets(frame(20), asked=True)
     pick._pick_read(SimpleNamespace(regions=[object()]))
     assert pick._pick_trial is None and not pick._pick_nothing and pick.learned == [("chosen", NOTES.title)]
     pick._pick_read(SimpleNamespace(regions=[object()]))  # (no trial: nothing more)
     assert pick.learned == [("chosen", NOTES.title)]
+
+
+def test_on_trial_a_frame_that_cannot_be_judged_is_read_and_lettering_ends_the_trial(pick, monkeypatch):
+    def broken(rgb):
+        raise RuntimeError("no judgement")
+
+    monkeypatch.setattr(viewers.bookpage, "judge", broken)
+    assert pick._pick_lets(frame(20)) and pick._pick_trial["asked"]
+    pick._pick_read(SimpleNamespace(regions=[object()]))
+    assert pick._pick_trial is None and pick.learned == [("chosen", NOTES.title)]
+
+
+class NewPage:
+    """What `live.LiveViewMixin._on_new_page` and `_early_allowed` use, the page job's start recorded."""
+
+    _on_new_page = live.LiveViewMixin._on_new_page
+    _early_allowed = live.LiveViewMixin._early_allowed
+    _early_on = live.LiveViewMixin._early_on
+
+    def __init__(self, lets: bool):
+        self.lets, self.started, self._start_pending = lets, [], None
+        self.ready, self.busy, self._early, self._auto_last = True, False, None, None
+        self.auto_var = SimpleNamespace(get=lambda: True)
+        self.settings = SimpleNamespace(early_start=True)
+        self.selected = BOOK
+        self._enlarge_asked = BOOK.hwnd
+
+    def _pick_lets(self, image, asked=False):
+        return self.lets
+
+    def _follows_events(self):
+        return True
+
+    def _held_in_viewer(self):
+        return False
+
+    def _black_open(self):
+        return False
+
+    def _enlarge_first(self):
+        pass
+
+    def _starts_book(self, image):
+        return False
+
+    def _all_cached(self, image):
+        return False
+
+    def _start_translate(self, image, thumb=None, complete=None):
+        self.started.append(image)
+
+
+def test_a_page_job_starts_only_on_a_frame_the_pick_on_trial_lets_be_read():
+    page = frame(30)
+    held, let = NewPage(False), NewPage(True)
+    held._on_new_page(page)
+    let._on_new_page(page)
+    assert held.started == [] and let.started == [page]
+    assert not held._early_allowed(None, page, None) and let._early_allowed(None, page, None)
 
 
 def test_a_browser_window_picked_is_on_trial_and_one_of_another_program_is_learned_at_once(monkeypatch, memory):

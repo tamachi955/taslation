@@ -1,13 +1,14 @@
 # The two checks that need the developer's computer with its GPU for their timings - the real window beside the
 # stand-in viewer (tools/standin_e2e.py) and the OpenMantra benchmark (tools/openmantra_eval.py) - run for their
 # verdicts on GitHub's own Windows runners (4 processors, 16 GB, no GPU: the OCR, the layout model and the translator
-# run on the CPU), in parallel jobs: the stand-in's scenarios in nine groups, each with --wait-done (a rest held until
-# its page is finished, scenario x's soft frames kept until the window asked on them, so that every scenario keeps its
-# meaning on a slower computer), each in the role it states (Reader mode; one group in editing, where TASlation
-# starts) and at the stand-in's size it states, scenario k (pages flipped past, read behind the reader, then read back)
-# in a short form, another tab shown, the window resized, the page slid, a start behind another window, editing on
-# the page measured (--see-edit: its region editor takes the keys, so it runs here, where no person's window is in
-# front, and never on the developer's computer), and the benchmark's five titles a job each. A stand-in job fails
+# run on the CPU), in parallel jobs: the stand-in's scenarios in eleven groups, each with --wait-done (a rest held
+# until its page is finished, scenario x's soft frames kept until the window asked on them, so that every scenario
+# keeps its meaning on a slower computer), each in the role it states (Reader mode; one group in editing, where
+# TASlation starts) and at the stand-in's size it states, scenario k (pages flipped past, read behind the reader, then
+# read back) in a short form, another tab shown, the window picked in its chooser while another tab is in front, the
+# window resized, the page slid, a start behind another window, editing on the page measured (--see-edit: its region
+# editor takes the keys, so it runs here, where no person's window is in front, and never on the developer's
+# computer), and the benchmark's five titles a job each. A stand-in job fails
 # when a criterion of correctness fails (summarise.py's `correctness`: the run went through, nothing kept or shown
 # from a frame that was not the sharp one, no request sent for nothing, a page translated before came back without
 # a request, the narrow window's page read at its new size, no frame held behind the reader after its read and
@@ -42,7 +43,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h,g-see-edit"
+        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h,g-see-edit,tab0-pick,tab0-pick-plain"
         type: string
         default: all
       titles:
@@ -109,8 +110,10 @@ env:
   # area at DISPLAY_SIZE) and what it measures besides ("": nothing; "edit": --see-edit in place of --editing, its
   # role editing and its name ending in -see-edit - on the first page done, before its scenario g turns: a click
   # chooses a region, a double click opens its editor, drags, a number plate, a click and a rectangle on the empty
-  # ground, the Delete key's message; all posted to TASlation's own windows)
-  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": "", "measure": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": "", "measure": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": "", "measure": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": "", "measure": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000", "measure": ""}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000", "measure": ""}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000", "measure": ""}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000", "measure": ""}, "g-see-edit": {"scenarios": "g", "role": "editing", "size": "", "measure": "edit"}}'
+  # ground, the Delete key's message; all posted to TASlation's own windows; "pick" and "pick-plain": scenario tab0
+  # with --chooser and --standin-start-tab japanese or plain, the stand-in's window picked in the viewer chooser while
+  # its other tab - made-up Japanese lines, or grey bars - is in front; the name ending in -pick or -pick-plain)
+  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": "", "measure": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": "", "measure": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": "", "measure": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": "", "measure": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000", "measure": ""}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000", "measure": ""}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000", "measure": ""}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000", "measure": ""}, "g-see-edit": {"scenarios": "g", "role": "editing", "size": "", "measure": "edit"}, "tab0-pick": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick"}, "tab0-pick-plain": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick-plain"}}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}
@@ -165,7 +168,7 @@ jobs:
           foreach ($g in $all.Keys) {
               if ($all[$g].role -notin 'reader', 'editing') { throw "group $g's role is reader or editing, not '$($all[$g].role)'" }
               if ("$($all[$g].size)" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "group $g's size is WxH or nothing, not '$($all[$g].size)'" }
-              if ("$($all[$g].measure)" -notin '', 'edit') { throw "group $g's measure is edit or nothing, not '$($all[$g].measure)'" }
+              if ("$($all[$g].measure)" -notin '', 'edit', 'pick', 'pick-plain') { throw "group $g's measure is edit, pick, pick-plain or nothing, not '$($all[$g].measure)'" }
               if ("$($all[$g].measure)" -eq 'edit' -and $all[$g].role -ne 'editing') { throw "group $g measures editing: its role is editing" }
           }
           $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_].scenarios; role = $all[$_].role; size = "$($all[$_].size)"; measure = "$($all[$_].measure)" } })
@@ -477,7 +480,7 @@ jobs:
           . .github/gpu-checks/helpers.ps1
           if ($env:SCENARIO_TIMEOUT -notmatch '^\d{2,4}$') { throw "scenario_timeout is seconds, not '$env:SCENARIO_TIMEOUT'" }
           if ($env:ROLE -notin 'reader', 'editing') { throw "the role is reader or editing, not '$env:ROLE'" }
-          if ("$env:MEASURE" -notin '', 'edit') { throw "the measure is edit or nothing, not '$env:MEASURE'" }
+          if ("$env:MEASURE" -notin '', 'edit', 'pick', 'pick-plain') { throw "the measure is edit, pick, pick-plain or nothing, not '$env:MEASURE'" }
           if ("$env:STANDIN_SIZE" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "the stand-in's size is WxH or nothing, not '$env:STANDIN_SIZE'" }
           if ($env:CANCEL_SOFT_MS -notmatch '^\d{2,5}$') { throw "cancel_soft_ms is milliseconds, not '$env:CANCEL_SOFT_MS'" }
           if ($env:WAIT_DONE -notmatch '^\d{1,4}$') { throw "wait_done is seconds, not '$env:WAIT_DONE'" }
@@ -492,6 +495,10 @@ jobs:
           if ($env:MEASURE -eq 'edit') { $arguments += @('--see-edit') }
           elseif ($env:ROLE -eq 'editing') { $arguments += @('--editing') }
           if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }
+          # a window picked in the viewer chooser while the stand-in's other tab is in front (scenario tab0): made-up
+          # Japanese lines, or grey bars (pick-plain)
+          if ($env:MEASURE -eq 'pick') { $arguments += @('--chooser', '--standin-start-tab', 'japanese') }
+          if ($env:MEASURE -eq 'pick-plain') { $arguments += @('--chooser', '--standin-start-tab', 'plain') }
           # scenario k in a short form: 6 pages flipped past at each pace and 3 of them read back (the tool's own form
           # is 20 and all 20). On the CPU the window reads and translates a caught page in some 20 to 30 s, and each
           # pace waits until the backlog has nothing left: 20 pages would take near --timeout at the 2 s pace

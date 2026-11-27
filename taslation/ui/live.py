@@ -861,7 +861,11 @@ class LiveViewMixin(BlackViewerMixin):
         book first (`_begin_book`): its name is asked for. While that is under way the latest page waits for it. A
         viewer not looked at yet is looked at first (`_enlarge_first`: its size, as it is chosen). *complete*: the
         page job's own (None: as the role has it; False: a page the cache holds whole, drawn from it alone,
-        `_take_at_once`)."""
+        `_take_at_once`). A browser window the person picked, on trial, has nothing read of a frame whose layout is not
+        judged a page of a book (`viewers.ViewerMixin._pick_lets`)."""
+        lets = getattr(self, "_pick_lets", None)
+        if lets is not None and not lets(image):
+            return
         if self._start_pending is not None:
             self._start_pending = (image, thumb)
             return
@@ -1990,7 +1994,8 @@ class LiveViewMixin(BlackViewerMixin):
         """Whether *op*'s frame *image* may be started at once, before it settles (`_early_start`): early_start on,
         none started early yet, the models ready, the worker free; Auto on and the frame a new page whose start asks
         nothing (no book start); the viewer's window looked at once as it was chosen (`_enlarge_first`); no button held
-        in the viewer (`_held_in_viewer`: a page dragged out of its place); and a page the cache does not hold whole
+        in the viewer (`_held_in_viewer`: a page dragged out of its place); a frame judged a page of a book where a
+        browser window picked is on trial (`viewers.ViewerMixin._pick_lets`); and a page the cache does not hold whole
         (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
         if not self._early_on() or getattr(self, "_early", None) is not None:
             return False
@@ -2004,6 +2009,9 @@ class LiveViewMixin(BlackViewerMixin):
         if win is None or getattr(self, "_enlarge_asked", None) != win.hwnd:
             return False  # (the first page of a viewer: its window is looked at first, `_enlarge_first`)
         if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
+            return False
+        lets = getattr(self, "_pick_lets", None)
+        if lets is not None and not lets(image):
             return False
         if getattr(self, "_start_pending", None) is not None or self._starts_book(image):
             return False

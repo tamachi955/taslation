@@ -811,6 +811,7 @@ def start(app: Any) -> bool:
     app._see_unrested = None  # (when, page box, ground, frame size, its facts' memo) of a frame not at rest yet (`_aside`)
     app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
     app._see_newest = None  # the facts' memo of the newest frame noted, whatever it was (`note_frame`, `rest_tick`)
+    app._see_frame_seen = None  # (its size, its capture area's box) (`note_frame`, `_pick_ground`)
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
     # ((frame size, columns, dpi), the page's edges seen the panes go by, the panes' edges toward it) (`panes_tick`)
@@ -1270,7 +1271,9 @@ def panes_tick(app: Any) -> None:
     page, beside the page at the last rest - placed by the widest the page has been in frames of this size
     (`pn.reaches`) and where they were (`pn.place`'s *before*, both in `_see_pane_places`), so that they stand still
     from spreads to a single page -, or hidden (no page on a flat ground yet, no room, the right one switched off).
-    The right
+    While a browser window picked shows no page of a book in its tab and no page on a flat ground (a page of text, a
+    blank tab: `viewers.ViewerMixin._pick_nothing`) they stand in the viewer's window all the same (`_pick_ground`),
+    the right one saying so - nothing else would. The right
     one is a column as high as the band (`pn.column_height`): the bubble's block and the changing rows from its top
     down, its foot at the bottom, the foot's rows where they stay (`right_rows`); the bubble's block only where it
     fits with the foot, else the indicators alone; its plates' boxes go with it (the window lets it take a click there
@@ -1284,6 +1287,9 @@ def panes_tick(app: Any) -> None:
     bubble_tick(app, over)
     rest_tick(app)
     ground = getattr(app, "_see_ground", None)
+    made_up = ground is None and bool(getattr(app, "_pick_nothing", False))
+    if made_up:
+        ground = _pick_ground(app)
     if ground is None:
         for side, memo in list(app._see_pane_memo.items()):
             app._see_pane_memo[side] = (memo[0], memo[1], None)  # (a click comes to nothing)
@@ -1300,6 +1306,8 @@ def panes_tick(app: Any) -> None:
     key = (tuple(size), tuple(columns) if columns else None, dpi)
     kept = getattr(app, "_see_pane_places", None)
     seen, before = (kept[1], kept[2]) if kept is not None and kept[0] == key else ((None, None), None)
+    if made_up:
+        seen, before = (None, None), None  # (no page: the made-up one neither goes by nor leaves a page seen)
     indicators = [*changing, *foot]
     fits = (lambda room: pn.width_for(rows, language, dpi, room) is not None,
             lambda room: bool(indicators) and pn.width_for(indicators, language, dpi, room, fill=True) is not None)
@@ -1320,7 +1328,8 @@ def panes_tick(app: Any) -> None:
         right = _column(app, used, [], changing, foot, drop, room_right, height, language, dpi, scheme)
         box_left, box_right = pn.place(size, wide, band, left_size, right.size if right else None, dpi, columns,
                                        before=before)
-    app._see_pane_places = (key, pn.seen_after(reach, seen), pn.edges((box_left, box_right), before))
+    if not made_up:
+        app._see_pane_places = (key, pn.seen_after(reach, seen), pn.edges((box_left, box_right), before))
     app._see_right_used = used
     origin = over.client_origin() if callable(getattr(over, "client_origin", None)) else None
     box_left, box_right = pane_on_screen(box_left, origin), pane_on_screen(box_right, origin)
@@ -1332,6 +1341,21 @@ def panes_tick(app: Any) -> None:
     over.set_panes((left.bgra, box_left) if left is not None and box_left is not None else None,
                    (right.bgra, box_right, tuple(b for _name, b in right.hits))
                    if right is not None and box_right is not None else None)
+
+
+def _pick_ground(app: Any) -> Any:
+    """The side panes' ground while a browser window picked shows no page of a book in its tab and no page on a flat
+    ground (`panes_tick`): the newest frame's size and capture area (`note_frame`), the area's middle third taken for
+    the page, no ground's colour (the dark plates). None before any frame."""
+    seen = getattr(app, "_see_frame_seen", None)
+    if seen is None:
+        return None
+    size, (left, top, right, bottom) = seen
+    third = (right - left) // 3
+    if third <= 0 or bottom <= top:
+        return None
+    steady = st.steady_box(size, (left, top, right, bottom))
+    return size, (left + third, top, right - third, bottom), (steady[1], steady[3]), None, (left, right)
 
 
 def pane_click(app: Any, side: str, x: int, y: int) -> str:
@@ -1979,14 +2003,20 @@ def present(app: Any) -> None:
 # ------------------------------------------------------------------ which frames start a job
 def area_rgb(app: Any, image: Image.Image, facts: Any) -> tuple[np.ndarray, tuple[int, int, int, int]]:
     """The capture area of *image* (the reader's own when set, else the whole frame) and its box."""
+    box = _area_of(app, image)
+    rgb = facts.rgb()
+    return rgb[box[1]:box[3], box[0]:box[2]], box
+
+
+def _area_of(app: Any, image: Image.Image) -> tuple[int, int, int, int]:
+    """The box of *image*'s capture area (`area_rgb`)."""
     hand = app._hand_set() if getattr(app, "_manual_area", False) else (0, 0, 0, 0)
     from . import area
 
     box = area.margins_to_box(hand, image.size)
     if box[2] <= box[0] or box[3] <= box[1]:
         box = (0, 0, image.width, image.height)
-    rgb = facts.rgb()
-    return rgb[box[1]:box[3], box[0]:box[2]], box
+    return box
 
 
 def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
@@ -2048,6 +2078,7 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     found on no flat ground, set the panes by it until the next frame at rest. A frame with bars over the page leaves
     the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`)."""
     app._see_newest = getattr(facts, "memo", None)  # (the newest picture noted, whatever it is: `rest_tick`)
+    app._see_frame_seen = (image.size, _area_of(app, image))  # (the newest frame's size and area: `_pick_ground`)
     found = frame_look(app, image, facts)
     if found.kind is not None:
         note_state(app, found.kind)

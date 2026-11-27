@@ -1,7 +1,7 @@
 """The window's words about a browser window that shows another tab than the book's: the right pane's line while it
 does (`ui.seethrough.right_rows`; `ui.viewers.ViewerMixin._tab_seen`), and the viewer chooser's line under its list
 (`ui.see_menu.ViewerDialog`): a browser window is listed by the title of the tab in front; the right pane's line while
-a window picked shows no page with text in its tab (`ui.viewers.ViewerMixin._pick_wait`).
+a window picked shows no page of a book in its tab (`ui.viewers.ViewerMixin._pick_lets`, `_pick_wait`).
 
 Machine-translated; no native review."""
 

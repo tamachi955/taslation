@@ -235,8 +235,9 @@ class TabRun:
     def tick(self) -> None:
         """(the Tk thread, each tick) The right pane's line on another tab, the status line's kind, the book's name and
         the window followed, kept where they changed (as digests: compared, never kept); a window picked in the viewer
-        chooser on trial (`ui.viewers.ViewerMixin._pick_trial`) and the right pane's lines of it ("no page": no page
-        with text in the tab picked, "again": how to have the tab in front read)."""
+        chooser on trial (`ui.viewers.ViewerMixin._pick_trial`) with its last frame's verdict (`_pick_lets`), whether
+        the window would say that the tab picked shows no page of a book (`_pick_nothing`), and the right pane's lines
+        of it as drawn ("no page": no page of a book in the tab picked, "again": how to have the tab in front read)."""
         app = self.app
         try:
             says = bool(self.away_line(app))
@@ -255,6 +256,8 @@ class TabRun:
         sel = getattr(app, "selected", None)
         rec = {"t": now_ms(), "away_line": says, "away": bool(getattr(app, "_tab_away", False)),
                "trial": getattr(app, "_pick_trial", None) is not None, "pick_line": pick,
+               "pick_nothing": bool(getattr(app, "_pick_nothing", False)),
+               "pick_verdict": str((getattr(app, "_pick_trial", None) or {}).get("verdict") or ""),
                "status": str(getattr(app, "_status_key", "") or "")[:40],
                "book": _digest(_get(getattr(app, "book_var", None))),
                "follows": self.windows().index(sel.hwnd) + 1 if sel is not None and sel.hwnd in self.windows() else 0,
@@ -339,13 +342,16 @@ class TabRun:
                     1 for r in rows if r.get("patches") and self._other_at(r["t"], r.get("on"))),
                 "chosen_by_the_other_tab_s_title": any(r["other_title"] for r in self.tk_rows),
                 "memory_holds_an_other_tab_title": _memory_holds(self.other_titles),
-                # (a window picked in the viewer chooser: on trial until a page with lettering was read under its tab)
+                # (a window picked in the viewer chooser: on trial until a page of a book was read under its tab)
                 "pick": {"on_trial_looks": sum(1 for r in self.tk_rows if r["trial"]),
+                         "no_page_looks": sum(1 for r in self.tk_rows if r.get("pick_nothing")),
                          "trial_ended_ms": next((round(r["t"] - self.tk_rows[0]["t"]) for k, r in
                                                  enumerate(self.tk_rows) if k and self.tk_rows[k - 1]["trial"]
                                                  and not r["trial"]), None),
                          "on_trial_at_end": bool(self.tk_rows and self.tk_rows[-1]["trial"]),
-                         "lines_said": sorted({r["pick_line"] for r in self.tk_rows if r["pick_line"]})},
+                         "lines_said": sorted({r["pick_line"] for r in self.tk_rows if r["pick_line"]}),
+                         # (the right pane's line drawn, in ms after the trial began)
+                         "no_page_said_ms": _first_ms(self.tk_rows, "trial", "pick_line", "no page")},
                 "tk_rows": [{**r, "t": round(r["t"] - (self.spells[0]["away_t"] if self.spells else 0))}
                             for r in self.tk_rows][-60:],
                 "events": len(self.events), "looks": len(rows)}
@@ -367,6 +373,13 @@ class TabRun:
 
 def _last_ms(times: list[float], since: float) -> int | None:
     return round(max(times) - since) if times else None
+
+
+def _first_ms(rows: list[dict[str, Any]], start: str, key: str, value: Any) -> int | None:
+    """Ms from the first of *rows* with *start* true to the first with *key* equal to *value* (None: none)."""
+    began = next((r["t"] for r in rows if r.get(start)), None)
+    said = next((r["t"] for r in rows if r.get(key) == value), None)
+    return None if began is None or said is None else round(said - began)
 
 
 def _get(var: Any) -> str:

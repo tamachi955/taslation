@@ -90,6 +90,32 @@ the file lists what differs. A title's context never reaches another title; what
 run of the whole is that a line asked for before in another title is drawn anew there, and that each part's server
 starts without the caches of the titles before it.
 
+## Whether a frame shows a page of a book
+
+A browser window picked in the viewer chooser is read only once a frame under its tab is judged a page of a book
+(`taslation/bookpage.py`, from the frame's layout alone: drawing in panels, lettering in bubbles, no grid of cards and
+no colour off a page laid on a ground). `python tools/bookpage_eval.py` measures the judgement, all drawn in memory and
+nothing written: OpenMantra's 214 pages as a viewer shows them (on a dark, white and black ground, as spreads, as the
+capture area itself, in a window narrower than the page, and as a soft first picture), the made-up book pages of
+`tools/make_sample_page.py`, and made-up pages of no book (pages of text in Latin letters and in Japanese, light and
+dark, with a picture, a table or two columns; a document; a shop's grid of cards, bordered, dark, with outlined buttons
+and one item's page; shelves of covers in colour and grey; grids of pictures; a forum; blank tabs; the stand-in's other
+tab), each in several window sizes and seeds; `--set made` only the made-up pages (no dataset needed), `--holdout`
+other window sizes and seeds than the rules were set on. It prints per kind how many came out "book", "not" and
+"unsure", the false accepts (a page of no book judged "book"), the false rejects (a page of a book judged "not") and
+the time a judgement took. The measurements so far:
+
+| Set | Pages of books | False rejects | Unsure | Pages of no book | False accepts | "not" | Unsure |
+|---|---|---|---|---|---|---|---|
+| The rules' set | 1,541 | 0 | 240 (15.6 %; 65 of 214 soft first pictures) | 240 | 0 | 113 | 127 |
+| Hold-out | 846 | 0 | 100 (11.8 %) | 300 | 0 | 145 | 155 |
+
+A page of text, a document, a blank tab and the stand-in's other tabs come out "not" (the right pane says so at once,
+but where the window waits a pale or blank frame out as a page still loading: then after PICK_NOTHING_S, as for
+"unsure"); a shop, covers, a gallery or a forum "unsure" (nothing read, the right pane says so after PICK_NOTHING_S). One shelf of
+grey covers came out "book" before a page with panels of lines only and no closed frame needed BUBBLES_LINES bubbles; a
+judgement took some 25-30 ms (100 ms at the most) on a 1900 x 915 frame.
+
 ## A setting in the Settings dialog
 
 Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:
@@ -536,7 +562,10 @@ rows' languages.
   `--standin-draws-covered` has it: hidden from its start, it was taken for a window out of sight even once raised,
   its page went on minutes late and no frame of it came -, and brought above it without activation at the move).
   `--standin-start-tab plain|japanese` starts the window with the other tab on show (with tab0, which brings the
-  book's tab back after 3 s; with `--chooser` the chooser is answered while it shows). `run.tabs`
+  book's tab back after 3 s; with `--chooser` the chooser is answered while it shows: the window picked on trial
+  with that tab, whose title is then the one chosen - the right pane's lines of the pick and when the one that the
+  tab shows no page of a book came in `run.tabs.pick`, the frames' verdicts in `run.tabs.tk_rows` -, the book's tab
+  back being another tab to it). `run.tabs`
   (`tools/standin_tabs.py`) gives per spell away from the book's tab what was captured, read, asked, looked up,
   learned and said while it lasted, the lettering's, the editing ground's and the mouse's looks over the other tab
   (and the last of the lettering and of the mouse taken there, in ms after its title came; a look lies on the window
@@ -640,17 +669,21 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then nine stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+Then eleven stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
 three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
 shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as the tool may on a runner,
 `GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor;
-c-a-b-editing, c, a and b again in editing; and g-see-edit, editing on the page measured with `--see-edit` on the
-first page done, then g's one page held long; each with `--wait-done`, which holds no rest of k; seven at a time).
+c-a-b-editing, c, a and b again in editing; g-see-edit, editing on the page measured with `--see-edit` on the
+first page done, then g's one page held long; and tab0-pick and tab0-pick-plain, tab0 with the window picked in the
+viewer chooser while the stand-in's other tab is in front - made-up Japanese lines, grey bars -, judged on nothing of
+that tab read or learnt and the right pane's line that it shows no page of a book; each with `--wait-done`, which
+holds no rest of k; seven at a time).
 Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
 TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900
 leaves no room for the side panes beside a spread, so the groups whose criteria look at the panes (the tabs, the
 resizes, s, h) run at 1900 x 1000, the others at the tool's size, as the GPU computer's timings have it - and what
-it measures besides (`measure`: "edit" runs `--see-edit` in place of `--editing`). `--see-edit` runs there and
+it measures besides (`measure`: "edit" runs `--see-edit` in place of `--editing`; "pick" and "pick-plain" run
+`--chooser --standin-start-tab japanese` or `plain`). `--see-edit` runs there and
 nowhere else: the region editor its double click opens takes the keys, which a runner has no person's window to
 take them from; with it (and with `--see-add`) the first scenario is released only once the measure is over, so
 that no turn comes under its drags and the jobs they start. And five

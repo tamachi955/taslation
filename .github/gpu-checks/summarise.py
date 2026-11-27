@@ -38,10 +38,11 @@ only a page job's asked before its frame's confirmation and dropped as the page 
 was not the sharp one, none of the backlog's), the backlog holds no frame after its read, and once the window has come
 to rest at the end it holds nothing and no screen is told at work; the stale lettering, the soft frames kept and left
 are the criteria of all the scenarios. How many pages it caught, how the pages read back began and how long they took
-are reported (`k_figures`, and its meaning). Another tab shown in the stand-in's window (tab1-tab6) is judged on
-nothing read, asked, stored or learnt of it, no lettering or mouse over it a second after its title came, the right
-pane's line, and the book's tab followed into a window of its own (`_tab_correctness`); the window resized (r1-r8) on
-no job or request while the button was held, no side pane outside the window and each pane back at rest
+are reported (`k_figures`, and its meaning). Another tab shown in the stand-in's window (tab1-tab6; tab0, on show
+from the start, the window picked with it in front) is judged on nothing read, asked, stored or learnt of it, no
+lettering or mouse over it a second after its title came, the right pane's line (tab0 picked so: that the tab shows
+no page of a book), and the book's tab followed into a window of its own (`_tab_correctness`); the window resized
+(r1-r8) on no job or request while the button was held, no side pane outside the window and each pane back at rest
 (`_resize_correctness`); the page slid with the pointer (s) on no side pane hidden (`_slide_correctness`); a start
 behind other windows (h, with --start-behind) on both panes on the screen once the stand-in is back in sight
 (`_behind_correctness`). With --check, ``standin`` exits 1 when a criterion of correctness failed (or there is no
@@ -291,8 +292,13 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
                          else f"lost: no request on the soft frame, {how}: the window read it too slowly here")
         elif name in K_PACES:
             out[name] = _k_meaning(_k_paces(run).get(name))
+        elif name == "tab0" and _picked_with_another_tab(run):
+            said = ((run.get("tabs") or {}).get("pick") or {}).get("no_page_said_ms")
+            out[name] = ("lost: the right pane never said that the tab picked shows no page of a book" if said is None
+                         else f"holds: the tab picked said to show no page of a book [{said}] ms after the pick")
         elif name in TAB_NAMES:
-            spells = [s for s in (run.get("tabs") or {}).get("spells") or [] if s.get("segment") == name]
+            spells = [s for s in (run.get("tabs") or {}).get("spells") or []
+                      if (s.get("kind") == "start" if name == "tab0" else s.get("segment") == name)]
             back = [s.get("back_to_lettered_ms") for s in spells]
             out[name] = ("unclear: no spell away from the book's tab" if not spells else
                          f"holds: another tab shown {[s.get('away_ms') for s in spells]} ms, the book's page lettered "
@@ -409,13 +415,22 @@ def _k_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
     check(mine[-1], "no screen was left told at work at the end of the run, the window at rest", not left, left)
 
 
+def _picked_with_another_tab(run: dict[str, Any]) -> bool:
+    """Whether the run started with the stand-in's other tab on show (--standin-start-tab) and the window picked it in
+    the viewer chooser (--chooser): `standin_e2e`'s ``tabs.start_tab`` and ``tabs.picked``."""
+    tabs = run.get("tabs")
+    return isinstance(tabs, dict) and bool(tabs.get("picked")) and bool(tabs.get("start_tab"))
+
+
 def _tab_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
     """The tab scenarios' criteria (`standin_tabs.TabRun.report`), true on any computer however slow: while the
     stand-in's window showed another tab, no page job made on a frame of it and nothing asked or stored for it, no
     lettering over its page and no mouse taken there TAB_AFTER_TITLE_MS after its title came (the title tells the
     window), nothing of its title learnt (the viewer's memory, the window chosen by it, the book's name), the right
-    pane's line said in each spell; the book's tab moved out into a window of its own followed there. How soon the
-    lettering came back is its meaning (`meanings`)."""
+    pane's line said in each spell; the book's tab moved out into a window of its own followed there. tab0 (the other
+    tab on show from the start, --standin-start-tab): the same of the start's spell; with the window picked in the
+    viewer chooser so (--chooser, its title the one chosen), the right pane's line that the tab picked shows no page of
+    a book said and nothing of that tab read. How soon the lettering came back is its meaning (`meanings`)."""
     mine = [n for n in names if n in TAB_NAMES]
     if not mine:
         return
@@ -428,12 +443,22 @@ def _tab_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
     other = tabs.get("jobs_on_the_other_tab") or {}
     check(mine[0], "no page job made on a frame of the other tab, nothing asked or stored for it",
           not other.get("made") and not other.get("requests") and not other.get("stored"), other)
-    learnt = [k for k in ("memory_holds_an_other_tab_title", "chosen_by_the_other_tab_s_title") if tabs.get(k)]
-    check(mine[0], "nothing of the other tab's title learnt in the viewer's memory, the window never chosen by it",
-          not learnt, learnt)
+    # (the window picked with the other tab in front: chosen by its title, nothing of it learnt)
+    if "tab0" in mine and _picked_with_another_tab(run):
+        learnt = [k for k in ("memory_holds_an_other_tab_title",) if tabs.get(k)]
+        check("tab0", "nothing of the other tab's title learnt in the viewer's memory, the window picked with it in "
+              "front", not learnt, learnt)
+        pick = tabs.get("pick") or {}
+        check("tab0", "the right pane said that the tab picked shows no page of a book",
+              "no page" in (pick.get("lines_said") or []),
+              {k: pick.get(k) for k in ("lines_said", "no_page_looks", "on_trial_looks")})
+    else:
+        learnt = [k for k in ("memory_holds_an_other_tab_title", "chosen_by_the_other_tab_s_title") if tabs.get(k)]
+        check(mine[0], "nothing of the other tab's title learnt in the viewer's memory, the window never chosen by it",
+              not learnt, learnt)
     spells = [s for s in tabs.get("spells") or [] if isinstance(s, dict)]
     for name in mine:
-        its = [s for s in spells if s.get("segment") == name]
+        its = [s for s in spells if (s.get("kind") == "start" if name == "tab0" else s.get("segment") == name)]
         check(name, "the stand-in showed another tab", bool(its), len(its))
         for s in its:
             late = {k: s.get(k) for k in ("lettering_over_the_other_tab_last_ms", "mouse_over_the_other_tab_last_ms")
@@ -756,7 +781,9 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     for name in names:
         mine = by_name.get(name) or []
         check(name, "the stand-in drew its turns", bool(mine), len(mine))
-        if mine:
+        # (tab0 with the window picked while another tab was in front: the book's tab is another tab to it, of which
+        # nothing is read until the window is chosen again - `_tab_correctness` judges it)
+        if mine and not (name == "tab0" and _picked_with_another_tab(run)):
             last = mine[-1]
             check(name, "its last page was translated once the window came to rest",
                   last.get("at_rest") == "translated" or last.get("finished_ms") is not None,

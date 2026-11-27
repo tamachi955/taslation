@@ -7,6 +7,7 @@
  "test_book_areas.py": 12.9,
  "test_book_fields.py": 1.3,
  "test_bookid.py": 0.6,
+ "test_bookpage.py": 3.0,
  "test_bubble_zoom.py": 0.7,
  "test_cache_at_another_size.py": 0.7,
  "test_cache_index.py": 2.3,

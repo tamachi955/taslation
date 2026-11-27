@@ -459,6 +459,31 @@ def test_panes_tick_hands_both_panes_beside_the_page_and_the_right_one_only_when
     assert app._see_through.handed[-1] == (None, None)
 
 
+def test_a_window_picked_whose_tab_shows_no_page_has_the_panes_in_the_viewer_s_window_saying_so(tmp_path):
+    from taslation.ui.constants import PICK_NO_PAGE
+
+    # a browser window picked whose tab shows a page of text or a blank page (no page on a flat ground): the panes
+    # stand in the viewer's window all the same, the right one saying so - nothing else would
+    app = fake_app(tmp_path, _see_ground=None, _see_frame_seen=(FRAME, (0, 0, FRAME[0], FRAME[1])),
+                   _pick_trial={"since": 0.0}, _pick_nothing=True)
+    kept = app._see_pane_places = ((FRAME, (0, FRAME[0]), 96), (SPREAD[0], SPREAD[2]), (40, FRAME[0] - 40))
+    ui.panes_tick(app)
+    left, right = app._see_through.handed[-1]
+    assert left is not None and right is not None
+    third = FRAME[0] // 3
+    assert left[1][2] <= third and right[1][0] >= FRAME[0] - third  # (beside the area's middle third)
+    assert all(0 <= box[0] and box[2] <= FRAME[0] for _bgra, box, *_ in (left, right))
+    changing = app._see_pane_memo["right"][0][1]
+    assert any(row.text == PICK_NO_PAGE for row in changing)
+    assert app._see_pane_places is kept  # (no page seen: the places of the book's page as they were)
+    app._pick_nothing = False  # (nothing to say: no page, no panes, as ever)
+    ui.panes_tick(app)
+    assert app._see_through.handed[-1] == (None, None)
+    app._pick_nothing, app._see_frame_seen = True, None  # (no frame yet: nowhere to stand)
+    ui.panes_tick(app)
+    assert app._see_through.handed[-1] == (None, None)
+
+
 def test_panes_tick_keeps_the_panes_still_from_spreads_to_a_single_page_and_starts_afresh_at_another_size(tmp_path):
     app = fake_app(tmp_path)
 
