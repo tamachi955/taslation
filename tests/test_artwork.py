@@ -229,6 +229,43 @@ def test_a_model_bubble_on_a_white_area_goes_by_its_ground():
     assert not on_art(flat(), region("bubble", tier=2))
 
 
+def narrow_bubble_on_hatching():
+    """A tall narrow white bubble (a 3 px outline) on hatching, and a column of glyphs nearly as wide as it: the ring
+    round the column's box crosses the outline onto the hatching. The column's box."""
+    page = flat(255, (600, 400))
+    page[::5] = 60
+    cv2.ellipse(page, (200, 300), (34, 150), 0, 0, 360, (255, 255, 255), -1)
+    cv2.ellipse(page, (200, 300), (34, 150), 0, 0, 360, (0, 0, 0), 3)
+    for y in range(190, 390, 26):
+        cv2.rectangle(page, (182, y), (218, y + 18), (0, 0, 0), 4)
+    return page, (182, 190, 219, 391)
+
+
+@pytest.mark.parametrize("kind, tier", [("text-on-page", 0), ("text", 0), ("bubble", 2), ("bubble", 3)])
+def test_lettering_on_paper_closed_all_round_stays_with_the_paper_fill(kind, tier):
+    """Whatever the detectors called it (text on the page, a model bubble they could not shape), a column in a tall
+    narrow bubble is judged on the bubble's paper, not on the hatching its box's ring reaches past the outline: it went
+    to the inpainting, which left grey ghosts of the glyphs on the paper."""
+    page, box = narrow_bubble_on_hatching()
+    found = artwork.closed_interior(page, box)
+    assert found is not None
+    (wx0, wy0, _wx1, _wy1), inside, _paper = found
+    assert inside[300 - wy0, 170 - wx0] and not inside[300 - wy0, 100 - wx0]  # the bubble's paper, not the page's
+    assert not on_art(page, region(kind, box, tier=tier, from_model=True))
+
+
+def test_white_rings_closed_on_the_drawing_are_no_paper():
+    """Outlined lettering on a tone: its white rings close on the tone, but hold no paper clear of the ink - it stays
+    on the art."""
+    page = toned()
+    gray = np.ascontiguousarray(page[..., 0])
+    ringed_glyphs(gray, 140)
+    page = np.repeat(gray[..., None], 3, axis=2)
+    box = (137, 37, 164, 164)
+    assert artwork.closed_interior(page, box) is None
+    assert on_art(page, region("text-on-page", box))
+
+
 @pytest.mark.parametrize("kind", ["manual", "manual-dark"])
 def test_a_readers_rectangle_goes_by_its_ground_as_a_detected_region(kind):
     """(tests/test_drawn_on_art.py: in a bubble, out of one, on a flat box.)"""
@@ -314,9 +351,10 @@ def test_lettering_on_a_flat_or_shaded_ground_goes_to_the_app(tmp_path, ground):
     page[[88, 90, 92, 308, 310, 312], :] = 128  # lines of the panel's drawing round the box: it is on the art
     page[:, [88, 90, 92, 208, 210, 212]] = 128
     page = lettered(page)
-    assert on_art(page, region())
+    # (on the white panel the lines close a white box round the lettering: on paper as such, `closed_interior`)
+    assert on_art(page, region()) is (ground != "white")
     eraser.erase(page, region())
-    assert calls and eraser.counts["ground"] == 1 and eraser._model.runs == 0
+    assert calls and eraser.counts["ground" if ground != "white" else "plain"] == 1 and eraser._model.runs == 0
 
 
 def test_too_little_lettering_goes_to_the_app(tmp_path):
@@ -714,7 +752,9 @@ def test_a_model_region_shaped_by_a_classical_one_is_judged_on_that_one_s_letter
     judged = artwork.as_judged(r)
     assert artwork.box_of(page, judged) == (125, 125, 175, 275) and artwork.box_of(page, r) == (64, 64, 296, 396)
     assert r.from_model and not on_art(page, r)
-    assert on_art(page, model_text((64, 64, 296, 396), (125, 125, 175, 275), adopted=False))  # judged on the union
+    # judged on the union, whose ring crosses the outline onto the tone: on the bubble's paper all the same (the ring
+    # taken inside the paper closed round it, `closed_interior`)
+    assert not on_art(page, model_text((64, 64, 296, 396), (125, 125, 175, 275), adopted=False))
     calls, app = fallback_calls()
     eraser = ArtEraser(tmp_path, "auto", app)
     eraser._model = FakeModel()
@@ -723,20 +763,21 @@ def test_a_model_region_shaped_by_a_classical_one_is_judged_on_that_one_s_letter
 
 
 def test_a_model_region_shaped_by_a_classical_one_takes_the_paper_fill_where_its_own_lettering_lies_on_paper(tmp_path):
-    """Its own ring reaches a small bubble's outline, so it is on the art as it was without the model; the ground right
-    round its own lettering's hole is the bubble's paper, and that hole alone is painted. The lettering followed in the
-    model's larger text box took the small outline for a stroke ringed by white."""
+    """Its own ring reaches a small bubble's outline (on the art as it was without the model, before the ring was taken
+    inside the paper closed round the lettering, `closed_interior`); the ground right round its own lettering's hole
+    is the bubble's paper, and that hole alone is painted. The lettering followed in the model's larger text box took
+    the small outline for a stroke ringed by white."""
     page = _in_a_bubble_on_a_tone()
     cv2.rectangle(page, (114, 114), (186, 286), (0, 0, 0), 2)  # a small bubble's outline, 10 px from the lettering
     r = model_text((64, 64, 296, 396), (125, 125, 175, 275))
     hole = art_mask(page, artwork.as_judged(r))
-    assert on_art(page, r) and artwork.plain_ground(page, hole) and not hole[200, 114]
+    assert not on_art(page, r) and artwork.plain_ground(page, hole) and not hole[200, 114]
     assert art_mask(page, r)[200, 114]
     calls, app = fallback_calls()
     eraser = ArtEraser(tmp_path, "auto", app)
     eraser._model = FakeModel()
     eraser.erase(page, r)
-    assert calls and eraser._model.runs == 0 and eraser.counts["ground"] == 1
+    assert calls and eraser._model.runs == 0 and eraser.counts["plain"] == 1
     assert (page[200, 114] == 0).all() and (page[150, 140] == 255).all()  # the outline stays, a stroke is painted
 
 

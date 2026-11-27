@@ -9,9 +9,12 @@ layout model's region that took the shape of a classical region is judged as tha
 lettering box (`as_judged`); only the hole the model fills takes in the model's text box too (`box_of`).
 
 A model "bubble" that the classical detectors could not close is judged here too: with its plain box as the mask (tier
-3) always, with a white area (tier 2) when its ground is not flat; one that has paper between its strokes after all
-(`on_paper`: an open or a thin outline) goes back to the paper fill. So does lettering whose ground right round it is
-one flat colour or a smooth shading (`plain_ground`: a black or white panel, a gradient), where the model only
+3) unless it lies on paper closed all round, with a white area (tier 2) when its ground is not flat; one that has paper
+between its strokes after all (`on_paper`: an open or a thin outline) goes back to the paper fill. So does lettering
+on paper closed all round (`closed_interior`: a bubble, whatever found it, a white area the layout model called text on
+the page), judged on that paper alone, never on a ring that crosses the bubble's outline: round a tall narrow bubble's
+column the ring always reached the outline, and the inpainting left grey ghosts of the glyphs on its paper. So does
+lettering whose ground right round it is one flat colour or a smooth shading (`plain_ground`: a black or white panel, a gradient), where the model only
 blotches what a fill paints as it was: its hole, ring and all, is painted with that ground (`fill_ground`) first. So is
 the hole of outlined lettering on a flat ground, which is no art (`FLAT_RINGS`): the paper fill took a thick white ring
 for paper and left it.
@@ -81,6 +84,11 @@ PAPER_SHARE = 0.3  # of an unclosed model bubble's lettering box: the ground bet
 PAPER_LEVELS, PAPER_EVEN = 12, 0.75  # grey levels: the paper a reader's rectangle is cut back to is a bubble's when
 # three in four of its pixels (its lettering and a fringe of 3 px left out) lie this close to its median; a gradient,
 # a tone, the light of a drawing do not (`drawn_on_art`) ...
+CLOSED_REACH = 3.0  # of the lettering box's own size, each way: where the paper closed round it is looked for (a
+#                     bubble and its tail; at once the box's size, a tail reaching past it left most bubbles open) ...
+CLOSED_SHARE = 0.9  # ... which holds this share of the light pixels in the box ...
+CLOSED_PAPER = 0.03  # ... and of the box's area at least this much paper clear of the ink (`closed_interior`; the
+#                      white rings of outlined lettering closed on the made-up layouts' tones and gradients had none)
 PAPER_SURE = 0.95  # ... and a rectangle whose own ground, white (`RINGED` or lighter), is this even lies on a bubble's
 WINDOW = 512  # px: the part of the page the model sees (at least)
 SMALLEST = 256  # px: a page narrower than this is left to the paper fill (the network pads by reflection)
@@ -176,10 +184,11 @@ def box_of(image: np.ndarray, region: TextRegion) -> tuple[int, int, int, int]:
 def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> bool:
     """Whether *region* is lettering on the page whose ground, in a ring round its box, is not one flat colour; a
     bubble the classical detectors could not close, and a rectangle of the reader's (`drawn_on_art`), are judged as
-    the module's docstring says."""
+    the module's docstring says. Lettering on paper closed all round (`closed_interior`) is judged within that paper
+    (`_ring_not_flat`), and a model bubble with no shape of its own is on the art only off such paper."""
     if region.kind in ("bubble", "dark-bubble"):
         if region.tier == 3:
-            return True
+            return closed_interior(image, box_of(image, region), region.dark) is None
         if region.tier != 2:
             return False
     elif region.kind in MANUAL_KINDS:
@@ -206,7 +215,11 @@ def as_judged(region: TextRegion) -> TextRegion:
 
 
 def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
-    """Whether the ground in a ring round *region*'s lettering box (`as_judged`) is not one flat colour (`on_art`)."""
+    """Whether the ground in a ring round *region*'s lettering box (`as_judged`) is not one flat colour (`on_art`).
+    Lettering on paper closed all round (`closed_interior`: a bubble, whatever found it or missed it) is judged on the
+    ring's part inside that paper alone: round a box that nearly fills its bubble (a tall narrow one) the ring reaches
+    the outline and the ground beyond, which are no ground of the lettering's, and the inpainting it was sent to left
+    grey ghosts of the glyphs on the bubble's paper."""
     x0, y0, x1, y1 = box_of(image, as_judged(region))
     if x1 - x0 < 4 or y1 - y0 < 4:
         return False
@@ -215,10 +228,56 @@ def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
     gray = cv2.cvtColor(image[oy0:oy1, ox0:ox1], cv2.COLOR_RGB2GRAY).astype(np.float32)
     ring = np.ones(gray.shape, bool)
     ring[max(0, y0 - RING_IN - oy0):y1 + RING_IN - oy0, max(0, x0 - RING_IN - ox0):x1 + RING_IN - ox0] = False
+    closed = closed_interior(image, (x0, y0, x1, y1), region.dark)
+    if closed is not None:
+        (wx0, wy0, wx1, wy1), inside, paper = closed
+        ring &= inside[oy0 - wy0:oy1 - wy0, ox0 - wx0:ox1 - wx0]
+        if int(ring.sum()) < 16:  # lettering that fills its paper: judged on the paper clear of it
+            ground = cv2.cvtColor(image[wy0:wy1, wx0:wx1], cv2.COLOR_RGB2GRAY).astype(np.float32)[paper]
+            return float(np.percentile(np.abs(ground - np.median(ground)), 90)) >= flat
     ground = gray[ring]
     if ground.size < 16:
         return False
     return float(np.percentile(np.abs(ground - np.median(ground)), 90)) >= flat
+
+
+def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: bool = False
+                    ) -> tuple[tuple[int, int, int, int], np.ndarray, np.ndarray] | None:
+    """The light paper closed all round that the lettering box *box* lies on (a bubble's interior, whatever tier of
+    the detectors found it or none did), as (window, bool mask of the window, the part of it clear of the ink), or
+    None. Looked at in the box grown by
+    its own size each way (`CLOSED_REACH`, at least `RING_OUT`): the pixels at least `OUTLINE_LEVEL` light (dark ones
+    for light lettering on black) joined to those in the box without crossing ink (four-connected), where none of them
+    reaches the window's edge; they must hold `CLOSED_SHARE` of the light pixels in the box (lettering that runs out
+    of its bubble lies on what is beyond too), and `CLOSED_PAPER` of the box must be paper further than `LIGHT_REACH`
+    from any ink - not the white rings of outlined lettering set on the drawing, which close on it too."""
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    if bw < 4 or bh < 4:
+        return None
+    h, w = image.shape[:2]
+    gx, gy = max(RING_OUT, int(CLOSED_REACH * bw)), max(RING_OUT, int(CLOSED_REACH * bh))
+    wx0, wy0, wx1, wy1 = max(0, x0 - gx), max(0, y0 - gy), min(w, x1 + gx), min(h, y1 + gy)
+    gray = cv2.cvtColor(np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3]), cv2.COLOR_RGB2GRAY)
+    light = (gray <= 255 - OUTLINE_LEVEL) if dark else (gray >= OUTLINE_LEVEL)
+    n, labels = cv2.connectedComponents(light.astype(np.uint8), connectivity=4)
+    inner = labels[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
+    seeds = np.unique(inner[inner > 0])
+    if not seeds.size:
+        return None
+    edge = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    closed = np.zeros(n, bool)
+    closed[seeds] = True
+    closed[edge] = False
+    held = closed[inner]
+    if int(held.sum()) < CLOSED_SHARE * int((inner > 0).sum()):
+        return None
+    inside = closed[labels]
+    ink = (~light).astype(np.uint8)
+    far = inside & (cv2.dilate(ink, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * LIGHT_REACH + 1,) * 2)) == 0)
+    if int(far.sum()) < CLOSED_PAPER * bw * bh:
+        return None
+    return (wx0, wy0, wx1, wy1), inside, far
 
 
 def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
