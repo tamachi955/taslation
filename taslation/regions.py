@@ -32,6 +32,9 @@ class TextRegion:
     font_size: int = 0
     size_cap: int = 0  # the largest size it may be set at, from the rest of its page (`Pipeline.cap_sizes`; 0 = none)
     letter_flags: tuple[str, ...] = ()  # what its lettering could not do as formatted ("no-fit", "font-missing", ...)
+    # the room its automatic lettering took beyond its own across, when it was last lettered (`typeset.fitted_frame`):
+    # "turned" (the line turned 90 degrees clockwise), "overrun" (over the bubble's outline); "" none. Memory only
+    fitted: str = ""
     from_cache: bool = False
     unit: int = 0  # index of the page unit (0 = right page of a spread or the single page)
     pieces: int = 0  # glyph-sized dark pieces the detector counted (text blocks only)

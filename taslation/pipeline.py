@@ -119,7 +119,8 @@ from .annotations import LetteringStyle, RegionStyle, ink_of
 from .render import covers, drawable, strip_marks
 from .render.erase import LINK_LEVELS, MANUAL_KINDS, erase_strokes
 from .render.rooms import in_own_room, room_mask, shifted, share_rooms
-from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat, ink_rgb, letter_text, page_caps
+from .render.typeset import (FIT_KINDS, QUARTER_TURNS, TURN_TALL, UNCAPPED_KINDS, Lettered, TextFormat, fitted_frame,
+                              frames_for, ink_rgb, letter_text, overrun_region, page_caps, tried)
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
 from .translate import base as _base
@@ -439,7 +440,9 @@ def translation_room(mask: np.ndarray, text_box: Box, source_text: str, settings
     """Characters of translation a region has room for at the size of its original lettering (readable at
     least), or 0 when it has plenty (more than the translation of *source_text* is likely to need). *font* is
     the family name the series sheet suggests, if any; *direction* the region's text direction (turned a quarter:
-    the room of the mask turned, its width and height swapped; stacked: the cells its columns hold)."""
+    the room of the mask turned, its width and height swapped; stacked: the cells its columns hold). A tall, narrow
+    bubble with an Auto direction (`TURN_TALL`) whose lettering may be turned (``fit_tries``) has the larger of its
+    rooms across and turned: what it holds either way, as its lettering takes the one that sets it larger."""
     s = settings
     if not s.readable_font_size:
         return 0
@@ -455,6 +458,10 @@ def translation_room(mask: np.ndarray, text_box: Box, source_text: str, settings
         room = stacked_room(mask, size, s.line_spacing, centre)
     else:
         room = text_room(mask, spec.path, size, s.line_spacing, spec.bold_variation, centre)
+        if (not direction and kind in FIT_KINDS and "turn" in s.fit_tries
+                and mask.shape[0] >= TURN_TALL * mask.shape[1]):
+            room = max(room, text_room(np.ascontiguousarray(mask.T), spec.path, size, s.line_spacing,
+                                       spec.bold_variation, None))
     likely = 2 * len(source_text.replace(" ", ""))  # a translation runs to about twice the characters
     return max(4, room) if room < likely else 0
 
@@ -4956,7 +4963,8 @@ class Pipeline:
                  direction: str = "") -> int:
         """Font size *text* would be set at in a region (its mask, kind and lettering box in page coordinates;
         *tag* is the reader's kind, which chooses the lettering; *direction* its text direction: turned a quarter,
-        the mask turned; stacked, the size of its columns)."""
+        the mask turned; stacked, the size of its columns; Auto, in a bubble, the room its lettering takes by
+        ``fit_tries``, `typeset.fitted_frame`)."""
         s = self.settings
         if not text:
             return 0
@@ -4970,11 +4978,46 @@ class Pipeline:
             size = layout_stacked(mask, text, self.lettering_for(text, tag), s.min_font_size, s.max_font_size,
                                   s.line_spacing, False, centre).size
         else:
-            size = layout_text(mask, text, self.lettering_for(text, tag), s.min_font_size, s.max_font_size,
-                               s.line_spacing, False, None, kind in ("text", "text-dark"), local)[2]
+            size = self._size_in(mask, text, kind, local, (x0, y0), anchor, tag, direction)
         if float(s.text_scale) < 1.0 and size:  # set smaller by the lettering size (`_scaled_top`)
             size = max(s.min_font_size, round(size * float(s.text_scale)))
         return size
+
+    def _size_in(self, mask: np.ndarray, text: str, kind: str, local: Box, corner: tuple[int, int], anchor: Box,
+                 tag: str, direction: str) -> int:
+        """`set_size` set across (*local*: the lettering box in the mask's frame): the size `layout_text` gives with
+        the set tries of ``fit_tries``, or, for a bubble with an Auto direction, the size in the room
+        `typeset.fitted_frame` takes (the mask turned, or grown over the outline)."""
+        s = self.settings
+        lettering = self.lettering_for(text, tag)
+        on_page = kind in ("text", "text-dark")
+
+        def fit_in(m: np.ndarray, a: Box, sets: Sequence[str]) -> Any:
+            h, c, first = tried(sets)
+            return layout_text(m, text, lettering, s.min_font_size, s.max_font_size, s.line_spacing, False, None,
+                               on_page, a, h, c, "", first)
+
+        tries = s.fit_tries
+        size = fit_in(mask, local, tries).size
+        probe = TextRegion(corner[0], corner[1], corner[0] + mask.shape[1], corner[1] + mask.shape[0], mask, anchor,
+                           kind=kind)
+        frames = frames_for(probe, text, s.target_language, tries) if not direction else ()
+        if not frames:
+            return size
+
+        def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool]:
+            m, a = mask, local
+            if frame == "turn":
+                m, a = np.ascontiguousarray(mask.T), (local[1], local[0], local[3], local[2])
+            elif frame == "overrun":
+                grown = overrun_region(probe)
+                d = probe.x0 - grown.x0
+                m, a = grown.mask, (local[0] + d, local[1] + d, local[2] + d, local[3] + d)
+            fit = fit_in(m, a, sets)
+            return fit.size, fit.hyphens > 0
+
+        frame = fitted_frame(tries, sized, s.readable_font_size, s.min_font_size, frames)
+        return sized(frame, tries)[0] if frame else size
 
     def tighten(self, entries: list[dict[str, Any]]) -> list[str]:
         """The translations of *entries* (per bubble "text", "" when there is none) as they are set: stray emphasis
@@ -5400,8 +5443,8 @@ class Pipeline:
         done = letter_text(image, region, text, lettering, s.min_font_size, top, s.line_spacing, s.uppercase,
                            background, False, s.target_language, outline, fmt=fmt, direction=direction,
                            color=ink_rgb(colour), outline_color=ink_rgb(outline_colour), large=part,
-                           floor=s.readable_font_size)
-        return Lettered(done.size, flags + done.flags, done.won)
+                           floor=s.readable_font_size, tries=s.fit_tries)
+        return Lettered(done.size, flags + done.flags, done.won, done.frame)
 
     def _scaled_top(self, region: TextRegion, text: str, lettering: Any, top: int, background: tuple[int, int, int],
                     fmt: TextFormat | None, direction: str, part: tuple[int, int, float] | None = None) -> int:
@@ -5417,7 +5460,7 @@ class Pipeline:
             return max(s.min_font_size, min(s.max_font_size, round(top * scale)))
         size = letter_text(None, region, text, lettering, s.min_font_size, top, s.line_spacing, s.uppercase,
                            background, False, s.target_language, fmt=fmt, direction=direction, large=part,
-                           floor=s.readable_font_size).size
+                           floor=s.readable_font_size, tries=s.fit_tries).size
         return max(s.min_font_size, min(top, round(size * scale))) if size else top
 
     def _display_size(self) -> float:
@@ -5522,9 +5565,9 @@ class Pipeline:
                 if r.status == ERASED:  # erased, nothing set
                     del backgrounds[i]
                     if record:
-                        r.letter_flags = ()
+                        r.letter_flags, r.fitted = (), ""
             elif record:
-                r.letter_flags = ()
+                r.letter_flags, r.fitted = (), ""
         if not backgrounds:
             return
         if record and recap:
@@ -5536,7 +5579,7 @@ class Pipeline:
             r = regions[i]
             done = self._set_text(pil, r, r.translated_text, bg, r.style)
             if record:
-                r.font_size, r.letter_flags = done.size, done.flags
+                r.font_size, r.letter_flags, r.fitted = done.size, done.flags, done.frame
         out[:] = np.asarray(pil)
 
     def _erase_reach(self, out: np.ndarray, r: TextRegion) -> tuple[int, int, int, int]:

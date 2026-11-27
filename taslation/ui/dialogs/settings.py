@@ -3,9 +3,11 @@ file's notes and other lines kept (`config.write_settings`) and applied at once 
 an "Open settings file" button for all the others, which makes the file first where there is none (`config.
 create_settings_file`, at the place the settings are read from: `config.settings_file`).
 
-What it holds (`KEYS`): the lettering's smallest and largest size and the size under which a translation is listed
+What it holds (`KEYS`): the lettering's largest size and the size under which a translation is listed
 for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book may have its own: `book_settings`), capitals,
-slanted lettering; the dialogs' text size (`ui_scale`, `ui.scaling`) and colours (`theme`,
+slanted lettering; Fitting lettering into bubbles (``fit_tries``, `FIT_ROWS`: the line turned 90 degrees, narrower
+letters, hyphens and running over the bubble's outline, each ticked or not, in the order tried, moved with the arrows
+beside it) with the smallest size under them; the dialogs' text size (`ui_scale`, `ui.scaling`) and colours (`theme`,
 `ui.theme`: as Windows is set, light or dark, said to wait while Windows' high contrast is on); the two optional page models
 (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither says where its
 training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
@@ -45,6 +47,7 @@ from tkinter import ttk
 from typing import Any, Callable
 
 from ...config import (
+    FIT_TRIES,
     HOVER_DELAY_RANGE,
     LAMA_MODEL,
     LAYOUT_MODEL,
@@ -56,6 +59,7 @@ from ...config import (
 )
 from ...i18n import _, load_ui_table, save_ui_entry
 from ...render import artwork
+from ...render.typeset import CONDENSE_STEPS
 from .. import theme
 from ..layout import dialog_area, frame_extents, place_window, work_area
 from ..scaling import UI_SCALES, clamp_scale
@@ -176,15 +180,47 @@ SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # (ollama_num_gpu, load_model_at_start, ocr_runs_on, gpu_short, ollama_window_cache and update_check: on the System
 # page, `system_page.SystemPage.num_gpu`, `load_at_start`, `ocr_runs_on`, `gpu_short`, `window_cache` and
 # `update_check`)
-KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "theme", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
+KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text",
+        "fit_tries", "ui_scale", "theme", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
         *dict.fromkeys(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
         "gpu_short",
         "ollama_window_cache", "update_check")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
-PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "detect_model", "art_erase",
-                           *(row.key for row in SHOWN_ROWS if row.page)})
+PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "fit_tries", "detect_model",
+                           "art_erase", *(row.key for row in SHOWN_ROWS if row.page)})
+# Fitting lettering into bubbles (``fit_tries``, `render.typeset.fitted_frame`): a row for each try there is (label,
+# tip), ticked where it is tried, in the order tried (the arrows beside it move it), and the smallest size under them;
+# the words: `locales/features/fitting.py`
+FIT_TITLE = "Fitting lettering into bubbles"
+FIT_TEXT = ("Where a translation would be lettered small or with a hyphen, these are tried from the top down (the "
+            "arrows change the order). The translation itself is never shortened.")
+FIT_ROWS: dict[str, tuple[str, str]] = {
+    "turn": ("Turn the line 90 degrees",
+             "In a tall, narrow bubble, the line is set across and turned to read from the top down, the tops of the "
+             "letters to the right, as on an English book's spine, where that letters it clearly larger. Only where "
+             "the text direction is Auto."),
+    "condense": ("Narrower letters (down to {percent} %)",
+                 "The letters are set a little narrower, down to {percent} % of their width, so that the lines fit at "
+                 "a larger size."),
+    "hyphenate": ("Hyphens (at most one in a word)",
+                  "A long word may be broken with a hyphen, once at most, leaving three letters or more on each line. "
+                  "Off: no hyphens, except in a word too wide for its bubble even at the smallest size."),
+    "overrun": ("Run over the bubble's outline",
+                "Where the lettering would still be small, it may run a few pixels over the bubble's outline, edged in "
+                "the paper's colour so that it stays readable. Off by default."),
+}
+FIT_PERCENT = round(min(CONDENSE_STEPS) * 100)  # the narrowest the letters are set (`render.typeset.CONDENSE_STEPS`)
+MOVE_UP, MOVE_DOWN = "Move up", "Move down"  # the arrows' tips
+MIN_SIZE_TIP = "The translation is never lettered smaller than this, however small its bubble."
+MAX_SIZE_TIP = "The translation is lettered as large as its bubble allows, up to this size."
+READABLE_TIP = "A translation lettered smaller than this is listed for a second look (Review)."
+
+
+def fit_order(tries: tuple[str, ...]) -> list[str]:
+    """Every try there is (`config.FIT_TRIES`) in the order the rows show them: those of *tries* in their order, then
+    the others in theirs."""
+    return [*(t for t in tries if t in FIT_TRIES), *(t for t in FIT_TRIES if t not in tries)]
 # the lettering sizes offered: 80 % to 130 % by 5, then on to 200 % by 10 (`config.TEXT_SCALE_RANGE`)
 TEXT_SCALES = (*(round(0.8 + 0.05 * i, 2) for i in range(11)), *(round(1.4 + 0.1 * i, 2) for i in range(7)))
 SIZE_RANGE = (0, 200)  # what a size box steps through (the bounds are checked on Save: `size_problem`)
@@ -356,36 +392,53 @@ class SettingsDialog(tk.Toplevel):
         letters = ttk.LabelFrame(general, text=_("Lettering"), padding=8)
         letters.pack(fill="x")
         self.sizes: dict[str, tk.StringVar] = {}
-        for row, (key, label, hint) in enumerate((
-                ("min_font_size", "Smallest size (pixels):", "The translation is lettered as large as its bubble allows, between these two sizes."),
-                ("max_font_size", "Largest size (pixels):", "The translation is lettered as large as its bubble allows, between these two sizes."),
-                ("readable_font_size", "List for review below (pixels, 0: never):", "A translation lettered smaller than this is listed for a second look (Review)."))):
-            name = ttk.Label(letters, text=_(label))
-            name.grid(row=row, column=0, sticky="w", pady=1)
-            var = tk.StringVar(self, value=str(getattr(settings, key)))
-            box = ttk.Spinbox(letters, from_=SIZE_RANGE[0], to=SIZE_RANGE[1], textvariable=var, width=5)
-            box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=1)
-            tip(_(hint), name, box)
-            self.sizes[key] = var
+        self._size_row(letters, 0, "max_font_size", "Largest size (pixels):", MAX_SIZE_TIP)
+        self._size_row(letters, 1, "readable_font_size", "List for review below (pixels, 0: never):", READABLE_TIP)
         name = ttk.Label(letters, text=_("Lettering size:"))
-        name.grid(row=3, column=0, sticky="w", pady=1)
+        name.grid(row=2, column=0, sticky="w", pady=1)
         self.text_scale = tk.StringVar(self, value=percent(settings.text_scale))
         box = ttk.Combobox(letters, textvariable=self.text_scale, values=text_scale_choices(settings.text_scale),
                            state="readonly", width=7)
-        box.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=1)
+        box.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=1)
         tip(_("Every translation lettered smaller or larger by so much (100 %: as large as its bubble allows), never past its bubble or the largest size. A book can have its own: Book settings... in the Menu while editing."), name, box)
         self.uppercase = tk.BooleanVar(self, value=bool(settings.uppercase))
         check = ttk.Checkbutton(letters, text=_("Capital letters"), variable=self.uppercase)
-        check.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         tip(_("Letter the translations in capitals, as many comics in English are."), check)
         self.slant = tk.BooleanVar(self, value=bool(settings.slant_text))
         check = ttk.Checkbutton(letters, text=_("Slanted lettering: read upright and lettered at its slant"),
                                 variable=self.slant)
-        check.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        check.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_("Lettering set at a slant is turned upright to be read, and the translation is lettered at the same slant. Off: everything upright."), check)
         self.extra: dict[str, tk.Variable] = {}
         self.numbers: dict[str, tk.StringVar] = {}  # (the boxes of `SHOWN_NUMBERS`)
-        self._extra_rows(letters, "lettering", 6)
+        self._extra_rows(letters, "lettering", 5)
+
+        fitting = ttk.LabelFrame(general, text=_(FIT_TITLE), padding=8)
+        fitting.pack(fill="x", pady=(10, 0))
+        ttk.Label(fitting, text=in_lines(_(FIT_TEXT), self.text_width), justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        self.fit_frame = ttk.Frame(fitting)
+        self.fit_frame.grid(row=1, column=0, columnspan=2, sticky="we", pady=(4, 0))
+        self.fit_order = fit_order(tuple(settings.fit_tries))  # (the rows' order, top first)
+        self.fit_ticked: dict[str, tk.BooleanVar] = {}
+        self.fit_rows: dict[str, tuple[ttk.Frame, ttk.Checkbutton, ttk.Button, ttk.Button]] = {}
+        for key in FIT_TRIES:
+            label, hint = FIT_ROWS[key]
+            line = ttk.Frame(self.fit_frame)
+            self.fit_ticked[key] = tk.BooleanVar(self, value=key in settings.fit_tries)
+            check = ttk.Checkbutton(line, text=_(label).format(percent=FIT_PERCENT), variable=self.fit_ticked[key])
+            down = ttk.Button(line, text="▼", width=2, command=lambda k=key: self.move_try(k, 1))
+            up = ttk.Button(line, text="▲", width=2, command=lambda k=key: self.move_try(k, -1))
+            down.pack(side="right")
+            up.pack(side="right", padx=(8, 2))
+            check.pack(side="left")
+            tip(_(hint).format(percent=FIT_PERCENT), check)
+            tip(_(MOVE_UP), up)
+            tip(_(MOVE_DOWN), down)
+            self.fit_rows[key] = (line, check, up, down)
+        self._lay_tries()
+        self._size_row(fitting, 2, "min_font_size", "Smallest size (pixels):", MIN_SIZE_TIP, pady=(6, 1))
 
         window = ttk.LabelFrame(general, text=_("Dialogs"), padding=8)
         window.pack(fill="x", pady=(10, 0))
@@ -579,6 +632,39 @@ class SettingsDialog(tk.Toplevel):
         tip(_(spec.tip), name, box)
         self.numbers[spec.key] = var
 
+    def _size_row(self, frame: ttk.LabelFrame, row: int, key: str, label: str, hint: str,
+                  pady: Any = 1) -> None:
+        """A lettering size's row (`SIZE_KEYS`) in *frame* at grid row *row*: its label and a box with arrows."""
+        name = ttk.Label(frame, text=_(label))
+        name.grid(row=row, column=0, sticky="w", pady=pady)
+        var = tk.StringVar(self, value=str(getattr(self.settings, key)))
+        box = ttk.Spinbox(frame, from_=SIZE_RANGE[0], to=SIZE_RANGE[1], textvariable=var, width=5)
+        box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=pady)
+        tip(_(hint), name, box)
+        self.sizes[key] = var
+
+    def _lay_tries(self) -> None:
+        """The fitting rows in `fit_order`, top first; the first one's up arrow and the last one's down arrow off."""
+        for line, *_widgets in self.fit_rows.values():
+            line.pack_forget()
+        for i, key in enumerate(self.fit_order):
+            line, _check, up, down = self.fit_rows[key]
+            line.pack(fill="x", pady=1)
+            up.state(["disabled"] if i == 0 else ["!disabled"])
+            down.state(["disabled"] if i == len(self.fit_order) - 1 else ["!disabled"])
+
+    def move_try(self, key: str, step: int) -> None:
+        """The fitting row *key* moved up (*step* -1) or down (+1) by one, where it can be."""
+        i = self.fit_order.index(key)
+        j = i + step
+        if 0 <= j < len(self.fit_order):
+            self.fit_order[i], self.fit_order[j] = self.fit_order[j], self.fit_order[i]
+            self._lay_tries()
+
+    def fit_tries(self) -> tuple[str, ...]:
+        """The tries ticked, in the order the rows show them (``fit_tries``)."""
+        return tuple(key for key in self.fit_order if self.fit_ticked[key].get())
+
     @staticmethod
     def _shown(choices: tuple[tuple[str, str], ...], value: str) -> str:
         return next((_(label) for v, label in choices if v == value), _(choices[0][1]))
@@ -604,6 +690,7 @@ class SettingsDialog(tk.Toplevel):
         out["text_scale"] = percent_of(self.text_scale.get())
         out["uppercase"] = bool(self.uppercase.get())
         out["slant_text"] = bool(self.slant.get())
+        out["fit_tries"] = self.fit_tries()
         out["ui_scale"] = scale_of(self.scale.get())
         out["theme"] = self._value(THEME_CHOICES, self.colours_var.get())
         out["detect_model"] = self._value(DETECT_CHOICES, self.detect.get())

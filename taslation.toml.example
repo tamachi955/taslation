@@ -54,6 +54,7 @@ max_font_size = 64
 text_scale = 1.0              # the lettering's size (0.5-2.0; the dialogs offer 80-200 %): 0.9 sets every translation a tenth smaller, 1.2 larger where the page's sizes held it back (never over its bubble or max_font_size); a book can have its own (Book settings... in translator mode)
 line_spacing = 1.12
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
+fit_tries = ["turn", "condense", "hyphenate"]  # what is tried, in order, where lettering would be small or hyphenated: "turn" (a tall, narrow bubble's line turned 90 degrees), "condense" (letters up to 8 % narrower), "hyphenate" (one hyphen a word at most), "overrun" (over the bubble's outline, outlined in the paper's colour); the translation is never shortened
 spellcheck = false           # flag a word the dictionary does not know; its word lists (the pyspellchecker package) are an optional extra that TASlation does not install
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering" for review
 uppercase = false

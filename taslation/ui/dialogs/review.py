@@ -56,7 +56,8 @@ DIRECTION_WORDS = {"": AUTO, "horizontal": "Horizontal", "down": "Rotate all tex
                    "stacked": "Stacked"}
 DIRECTION_TIP = ("Which way the lines run. Horizontal: across. Rotate all text 90°: turned to read from the top down, "
                  "as an English book's spine. Rotate all text 270°: turned to read from the bottom up. Stacked: "
-                 "vertical writing, the letters one below the other in columns from right to left. Auto: across.")
+                 "vertical writing, the letters one below the other in columns from right to left. Auto: across, or "
+                 "turned 90° in a tall, narrow bubble where across would be small (Settings...).")
 AUTOMATIC_FONT = "(automatic)"  # the font list's first entry: the lettering the series sheet gives the region's kind
 # the ink: the text colour and the outline's, each Auto, black, white or a colour of the reader's (`InkChoice`), and
 # the outline Auto, on or off; the region's own Auto is its kind's in the series sheet, else the automatic one
@@ -452,7 +453,8 @@ class EditBubbleDialog(tk.Toplevel):
     size (Auto: the largest that fits) and whether the text may be condensed to fit (as the size goes until it is
     clicked: with an automatic size only), the alignment left, centre or right and top, middle or bottom, the line
     spacing (Auto: the setting) and the room between characters, the slant the lines are set at (Auto: the one
-    measured on the original lettering), the text direction (Auto: across; `DIRECTION_WORDS`), the text colour, the
+    measured on the original lettering), the text direction (Auto: across, or turned in a tall, narrow bubble as
+    ``fit_tries`` says, `render.typeset.fitted_frame`; `DIRECTION_WORDS`), the text colour, the
     outline and its colour (`InkChoice`, the system's colour chooser for a colour of the reader's; Auto: as the series
     sheet says for the region's kind, else the automatic ink), Reset formatting, and Copy format and Paste format
     (Ctrl+Shift+C, Ctrl+Shift+V; *clip*: what the window copied, `formats.FormatClip`). Enter in the translation

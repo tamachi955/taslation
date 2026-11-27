@@ -42,6 +42,9 @@ FOREGROUND_LINES = 20  # lines of the log of the foreground a report gives (`see
 JOBS_BEFORE = 3  # page jobs before the newest a report gives a line each
 STREAMS_SHOWN = 2  # the translator's streams a report gives (`Pipeline.stream_log`, the newest: a page's units)
 DARK_TOL = 24  # (`dark_kept`) an original's dark pixel is left as it was where the page's differs by no more
+# the room a bubble's automatic lettering took beyond its own across (`TextRegion.fitted`), as the direction line
+# says it
+FITTED_WORDS = {"turned": "turned", "overrun": "over the outline"}
 
 # the menu's entries, the editor's button and box, and what the right pane says after a copy (the window's words)
 COPY_REPORT = "Copy a report"
@@ -291,8 +294,10 @@ def _region_facts(page: _Page, i: int, region: Any) -> dict[str, str]:
     text_box = getattr(r, "text_box", None) or box
     tall = (text_box[3] - text_box[1]) > (text_box[2] - text_box[0])
     style = getattr(r, "style", None)
+    fitted = FITTED_WORDS.get(str(getattr(r, "fitted", "") or ""), "")
     out["direction"] = (f"original {'tall' if tall else 'wide'}; lettering "
-                        f"{getattr(style, 'direction', '') or 'auto'}; slant {round(float(getattr(r, 'angle', 0.0) or 0.0), 1)}")
+                        f"{getattr(style, 'direction', '') or 'auto'}{f' ({fitted})' if fitted else ''}; "
+                        f"slant {round(float(getattr(r, 'angle', 0.0) or 0.0), 1)}")
     out["box"] = f"{_box(box)} ({box[2] - box[0]}x{box[3] - box[1]})"
     out["page_box"] = _box((box[0] - p[0], box[1] - p[1], box[2] - p[0], box[3] - p[1]))
     out["text_box"] = _box(text_box)

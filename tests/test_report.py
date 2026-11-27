@@ -248,6 +248,18 @@ def test_a_region_report_holds_why_its_lettering_is_not_shown(tmp_path):
             == "not known (another page on show, or no look yet)")
 
 
+def test_a_region_lettered_with_its_line_turned_or_over_its_outline_says_so(tmp_path):
+    app = _app(tmp_path)
+    first = app.last_result.regions[0]
+    line = _values(report.report_text(app, [first]), "region")["direction"]
+    assert line == "original tall; lettering auto; slant 0.0"
+    first.fitted = "turned"  # (`Lettered.frame` as `Pipeline._render` keeps it)
+    assert (_values(report.report_text(app, [first]), "region")["direction"]
+            == "original tall; lettering auto (turned); slant 0.0")
+    first.fitted = "overrun"
+    assert "lettering auto (over the outline);" in _values(report.report_text(app, [first]), "region")["direction"]
+
+
 def test_a_region_the_tone_fill_painted_says_so(tmp_path):
     app = _app(tmp_path)
     first = app.last_result.regions[0]

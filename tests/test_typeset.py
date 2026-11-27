@@ -204,8 +204,8 @@ def test_the_last_resort_block_sits_on_a_narrow_bubbles_middle():
 
 def test_a_word_breaks_once_where_the_room_lets_it():
     """A word is hyphenated once at the most where a layout takes it so, at the same size or a smaller one
-    ("notwith- / stand- / ing" in a narrow bubble before); where it is not (a word two lines cannot hold), as often
-    as it needs."""
+    ("notwith- / stand- / ing" in a narrow bubble before); a word two lines cannot hold is left to the last resort
+    at the smallest size (at its hyphenation points: `SPLIT_AT_POINTS`), the rescue taking one hyphen a word."""
     from taslation.render import typeset
 
     font_path = find_font()
@@ -222,7 +222,9 @@ def test_a_word_breaks_once_where_the_room_lets_it():
     stats = {}
     narrow = wrap_lines("So extraordinary", font, int(font.getlength("extrao-")), hyphenate=2, stats=stats,
                         language="English")
-    assert narrow[0] == "So ex-" and stats.get("again") == 1  # there it breaks twice either way
+    # there it breaks twice either way (where wrapping is asked so; the rescue takes one a word: HYPHENS_PER_WORD),
+    # never after two letters ("ex-": HYPHEN_LEAST)
+    assert narrow[:2] == ["So", "extra-"] and stats.get("again") == 1
     # lines filled one after the other: where the rest of a word broken at a line's end does not fit the next line
     # whole, that line ends before the word
     pieces = typeset._cut([["So", "extraordinary"]], "lgc", "English", 2, lambda token: False)

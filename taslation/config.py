@@ -101,6 +101,10 @@ CONFIG_FILENAME = "taslation.toml"
 MIN_UI_SCALE, MAX_UI_SCALE = 0.5, 3.0  # the bounds of `Settings.ui_scale`
 TEXT_SCALE_RANGE = (0.5, 2.0)  # the bounds of `Settings.text_scale` (the dialogs offer 80-200 %)
 HOVER_DELAY_RANGE = (0, 3000)  # the bounds of `Settings.hover_delay_ms` (milliseconds)
+# what a bubble's lettering may try where it comes out small or hyphenated (`Settings.fit_tries`, `render.typeset`):
+# the line turned 90 degrees, narrower letters, hyphens, running over the bubble's outline
+FIT_TRIES = ("turn", "condense", "hyphenate", "overrun")
+DEFAULT_FIT_TRIES = ("turn", "condense", "hyphenate")
 
 
 def default_models_dir() -> Path:
@@ -249,6 +253,12 @@ class Settings:
     # at one size, and no request for it
     size_emphasis: bool = True
     readable_font_size: int = 11  # a translation set smaller than this is flagged "small" for review (0 = never)
+    # what a bubble's automatic lettering tries where it comes out under readable_font_size or hyphenated, in this
+    # order (`FIT_TRIES`; one left out is not tried): "turn" the line turned 90 degrees clockwise in a tall, narrow
+    # bubble where that gives clearly larger letters, "condense" letters up to 8 % narrower, "hyphenate" one hyphen a
+    # word at the most, never leaving one or two letters, "overrun" the lettering over the bubble's outline, edged in
+    # the paper's colour (`render.typeset.fitted_frame`). The translation itself is never shortened to fit
+    fit_tries: tuple[str, ...] = DEFAULT_FIT_TRIES
     enforce_terms: bool = True  # a translation that misses a rendering from the series sheet is flagged "rendering"
     # flag a translation with a word the dictionary does not know; off by default, as its word lists come from the
     # optional pyspellchecker package, which TASlation does not install (`review.spell_checker`)
@@ -387,6 +397,11 @@ class Settings:
             raise ConfigError("font sizes out of range")
         if self.readable_font_size and not self.min_font_size <= self.readable_font_size <= self.max_font_size:
             raise ConfigError("readable_font_size must be 0 or between the minimum and maximum font sizes")
+        tries = self.fit_tries
+        if (not isinstance(tries, tuple) or any(t not in FIT_TRIES for t in tries)
+                or len(set(tries)) != len(tries)):
+            raise ConfigError(f"fit_tries must name each of {', '.join(FIT_TRIES)} once at the most, in the order "
+                              f"they are tried (none: nothing is tried); got {tries!r}")
         if not TEXT_SCALE_RANGE[0] <= float(self.text_scale) <= TEXT_SCALE_RANGE[1]:
             raise ConfigError(f"text_scale must be between {TEXT_SCALE_RANGE[0]} and {TEXT_SCALE_RANGE[1]} (1.0: as it fits)")
         if any(m < 0 for m in self.margins):
@@ -695,6 +710,11 @@ def _coerce(data: dict[str, Any]) -> dict[str, Any]:
         out["margins"] = m
     if "font_path" in out and out["font_path"] is not None:
         out["font_path"] = str(out["font_path"])
+    tries = out.get("fit_tries")
+    if isinstance(tries, str):  # (on the command line or in an old note: "turn, condense, hyphenate")
+        tries = [t for t in tries.replace(" ", "").split(",") if t]
+    if isinstance(tries, list):
+        out["fit_tries"] = tuple(str(t).strip().lower() for t in tries)
     keep_alive = out.get("ollama_keep_alive")
     if isinstance(keep_alive, (int, float)) and not isinstance(keep_alive, bool):
         out["ollama_keep_alive"] = str(keep_alive)  # ollama_keep_alive = -1 in the file: seconds, as "-1" says them

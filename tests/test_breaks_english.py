@@ -109,7 +109,7 @@ def test_apostrophes_and_a_word_with_its_own_hyphen():
         letters = [i for i, ch in enumerate(word) if ch.isalpha()]
         cuts = [i for i in letters[3: len(letters) - 2] if word[i - 1].isalpha() or word[i - 1] == "-"]
         assert _split_points(word, cuts, "English") == want, word
-        assert _split_points(word, cuts, "") == [] == _split_points(word, cuts, "German"), word
+        assert _split_points(word, cuts, "") == [] == _split_points(word, cuts, "Turkish"), word  # (no patterns)
 
 
 def test_letters_outside_ascii():
@@ -146,7 +146,9 @@ def _font(size: int = 12):
 
 def test_the_last_resort_splits_an_english_word_at_a_point():
     """A word that fits nowhere is split where English breaks it, where a point's first part fits (for-ward, where
-    forw- also fits); in no language, and in German, as before: as many letters as fit."""
+    forw- also fits), and so in every language with patterns (Kunst-werk: `SPLIT_AT_POINTS`, since the rescue takes
+    one hyphen a word and leaves a word too long for two lines to the last resort); in no language, and in one with
+    no patterns, as before: as many letters as fit."""
     _spec, font = _font()
     for word, head, old in (("forward", "for-", "forw-"), ("members", "mem-", "memb-"), ("return", "re-", "ret-"),
                             ("EVERYBODY", "EVERY-", "EVERYB-"), ("everybody's", "every-", "everybo-")):
@@ -169,8 +171,11 @@ def test_the_last_resort_splits_an_english_word_at_a_point():
     assert _split_word("table", font, 5, "lgc", "English") is None
     width = int(font.getlength("proj-"))
     assert _split_word("project", font, width, "lgc", "English") == ("proj-", "ect")
-    # the other languages split as before
-    for word, language in (("Kunstwerk", "German"), ("biblioteca", "Spanish"), ("malheureux", "French")):
+    # the other languages with patterns at their points too (never Kunstw-erk); one with none as before
+    width = int(font.getlength("Kunstw-"))
+    assert font.getlength("Kunstwerk") > width
+    assert _split_word("Kunstwerk", font, width, "lgc", "German") == ("Kunst-", "werk")
+    for word, language in (("Kunstwerk", "Turkish"), ("biblioteca", "Japanese"), ("malheureux", "")):
         for width in (20, 30, 40, 50):
             assert _split_word(word, font, width, "lgc", language) == _split_word(word, font, width, "lgc"), word
 

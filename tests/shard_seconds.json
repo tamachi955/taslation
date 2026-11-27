@@ -32,6 +32,7 @@
  "test_erase_colour.py": 1.2,
  "test_erase_only.py": 2.0,
  "test_errorlog.py": 1.0,
+ "test_fit_tries.py": 1.5,
  "test_follow.py": 2.4,
  "test_font_memory.py": 0.6,
  "test_formats.py": 8.1,

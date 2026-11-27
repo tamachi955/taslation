@@ -52,12 +52,15 @@ smallest size, it may instead be condensed by up to 8 % or a long Latin or
 Cyrillic word hyphenated at a syllable-like point (`hyphen_points`: by the
 target language's patterns or rules, `breaks.hyphen_points`, English among
 them, else by a rule of its own), the largest size that then fits winning, with
-the fewest hyphens and the mildest condensing there. The `Fit` says which
+the fewest hyphens and the mildest condensing there. A word takes one hyphen at
+the most, never with fewer than three letters on either side of it
+(`HYPHENS_PER_WORD`, `HYPHEN_LEAST`). The `Fit` says which
 layout won. Lettering at 14 or more, and any text that fits without them, is
 set exactly as before. A Latin, Greek or Cyrillic word that fits nowhere even
 so is split only as a last resort (`_split_word`): one of at least six
-letters, three or more on either side, with a hyphen, in English at one of
-its hyphenation points where one fits (`SPLIT_AT_POINTS`); a shorter word
+letters, three or more on either side, with a hyphen, in a language with
+hyphenation patterns at one of its hyphenation points where one fits
+(`SPLIT_AT_POINTS`); a shorter word
 stays whole, past its room if it must. A Thai word is split so between two of
 its clusters of letters, without a hyphen.
 
@@ -71,8 +74,12 @@ median size for its kind.
 The reader may set a region's text direction (`RegionStyle.direction`), as a word processor's text box: turned a
 quarter clockwise to read from the top down or a quarter the other way to read from the bottom up (the lines set as
 always in the region's frame turned, its width and height swapped, then turned onto the page by `render.slant`
-with the slant added: `QUARTER_TURNS`), or stacked in columns of upright glyphs (`render.vertical`). Auto and
-horizontal letter the region as before, byte for byte.
+with the slant added: `QUARTER_TURNS`), or stacked in columns of upright glyphs (`render.vertical`). Horizontal
+letters the region across. Auto does too, but in a tall, narrow bubble where the lettering across comes out under
+the readable size or hyphenated (`letter_text`'s *tries*, `fitted_frame`): there the line is turned a quarter
+clockwise, as "down" turns it, where that gives a size at least `TURN_GAIN` times as large and `TURN_GAIN_PX`
+larger, and the person may have the tries made in another order, or the lettering run over the bubble's outline
+(`overrun_region`). The translation itself is never shortened to fit.
 
 A translation with a part set larger (`TextRegion.large`: the counterpart of Japanese lettered larger than the rest
 of its bubble) is set by `render.emphasis` in paragraphs of their own sizes, where the part fits so; a text without
@@ -99,6 +106,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from PIL import Image
 
+from ..config import DEFAULT_FIT_TRIES, FIT_TRIES  # noqa: F401 - (FIT_TRIES' names: `fitted_frame`'s tries)
 from ..regions import Box, TextRegion
 from . import breaks
 from .fonts import NO_SPACE_SCRIPTS, RTL_SCRIPTS, FontT, drawable, script_of
@@ -122,10 +130,14 @@ HYPHEN_EDGE = 3  # letters a hyphen leaves on each side of a word split as a las
 HYPHEN_HEAD = 2  # letters a hyphenation point leaves before it (ex-tra, re-turn: two are a syllable that reads)
 HYPHENS_AVOIDABLE = 1  # at the limit, the most hyphens a layout may take where the text fits whole at a smaller size
 #                        (where it does not: as many as the smallest size that fits needs, if more)
+HYPHEN_LEAST = 3  # at the limit, a hyphen leaves at least so many letters on either side of it (never one or two)
+HYPHENS_PER_WORD = 1  # at the limit, how often one word may take a hyphen (2: twice where no size takes it once)
 BREAK_MIN_LETTERS = 6  # a shorter word is never split, even where it fits nowhere: it stays whole
 # target languages (`breaks.language_key`) whose word split as a last resort goes at one of its hyphenation points by
-# the language's patterns (or after a hyphen it has) where one fits, before any other place (`_split_word`)
-SPLIT_AT_POINTS: tuple[str, ...] = ("english",)
+# the language's patterns (or after a hyphen it has) where one fits, before any other place (`_split_word`): every
+# language with patterns (a word too long for two lines, as a German compound, breaks at its syllables: one hyphen a
+# word at the limit, `HYPHENS_PER_WORD`, leaves such a word to the last resort)
+SPLIT_AT_POINTS: tuple[str, ...] = tuple(breaks.PATTERNS)
 BALANCE_LINES = True  # share the words out over the lines (False: as the greedy fill leaves them)
 # In a rectangle (`_balanced_lines`):
 LAST_LINE_FREE = 0.1  # how much of its width a paragraph's last line may leave empty free of penalty
@@ -285,7 +297,7 @@ def _split_word(word: str, font: FontT, max_width: int, script: str, language: s
     first part as long as *max_width* allows (the shortest there is when none fits); None when it stays whole. In
     Latin, Greek and Cyrillic only a word of BREAK_MIN_LETTERS letters or more is split, only between two letters
     (or after a hyphen it has), HYPHEN_EDGE letters or more on either side, and the break shows a hyphen; "Damn" stays
-    whole. In a target *language* of `SPLIT_AT_POINTS` (English) the split goes at the last of the word's
+    whole. In a target *language* of `SPLIT_AT_POINTS` (those with patterns) the split goes at the last of the word's
     hyphenation points whose first part fits (`_split_points`: for-ward, mem-bers), and only where none fits
     anywhere else (where nothing fits, at the shorter of its first point and the shortest other place). A Thai word
     breaks between two of its clusters of letters (`breaks.cluster_cuts`), other scripts between any two letters,
@@ -437,10 +449,16 @@ def hyphen_points(word: str, language: str = "") -> list[int]:
     return points
 
 
+def _try_points(word: str, language: str = "") -> list[int]:
+    """The hyphenation points of *word* in *language* (`hyphen_points`) that the rescue may take: those leaving
+    `HYPHEN_LEAST` letters or more on either side (ex-tra and re-turn stay whole)."""
+    return [p for p in hyphen_points(word, language) if HYPHEN_LEAST <= p <= len(word) - HYPHEN_LEAST]
+
+
 def _hyphenate(token: str, script: str, fits: Any, language: str = "") -> tuple[str, str] | None:
     """*token* (a word with its punctuation and emphasis markers) split at the last of its hyphenation points in
-    *language* whose first part, with the hyphen, still *fits*: (that part, the rest); None when it has none that
-    fits."""
+    *language* that the rescue may take (`_try_points`) whose first part, with the hyphen, still *fits*: (that part,
+    the rest); None when it has none that fits."""
     if script != "lgc":
         return None
     a = 0
@@ -452,7 +470,7 @@ def _hyphenate(token: str, script: str, fits: Any, language: str = "") -> tuple[
     lead, word, trail = token[:a], token[a:b], token[b:]
     if any(c.isdigit() for c in lead + trail) or any(c.isalpha() for c in trail):
         return None
-    for p in reversed(hyphen_points(word, language)):
+    for p in reversed(_try_points(word, language)):
         head = f"{lead}{word[:p]}-"
         if fits(head):
             return head, word[p:] + trail
@@ -1083,7 +1101,7 @@ def _language(language: str) -> str:
 
 def _cut(paras: list[list[str]], script: str, language: str, hyphenate: int, too_wide: Any) -> _Pieces:
     """*paras* cut into `_Pieces`. With *hyphenate* 2 every Latin (or Cyrillic) word of eight letters or more may take
-    a hyphen at its hyphenation points in *language* (`hyphen_points`), with 1 only one *too_wide* says fits on no
+    a hyphen at its hyphenation points in *language* (`_try_points`), with 1 only one *too_wide* says fits on no
     line; never a name (a word with a capital inside a sentence, but in `NAME_LANGUAGES_NOT`). A word with a hyphen of
     its own may break after it. A break is free after a sentence, cheap after a comma, a colon or a dash, dearer inside
     a clause, dearer still where it leaves a word that leans on the next one at a line's end (`WEAK_WORDS` of
@@ -1152,7 +1170,7 @@ def _cut(paras: list[list[str]], script: str, language: str, hyphenate: int, too
             prev_name = name or (capital and n == 0 and core.lower() in titles)
             points: list[int] = []
             if lgc and hyphenate and not name and a < b and core.isalpha() and (hyphenate >= 2 or too_wide(tok)):
-                points = hyphen_points(core, language)
+                points = _try_points(core, language)
             own = ([i for i in range(1, len(core) - 1) if core[i - 1] == "-" and core[i - 2:i - 1].isalpha()
                     and core[i].isalpha()] if lgc else [])
             cuts = sorted({a + p for p in points} | {a + p for p in own})
@@ -1887,7 +1905,7 @@ def _tunables() -> tuple[Any, ...]:
 def layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None, min_size: int = 9, max_size: int = 64,
                 line_spacing: float = 1.12, bold_variation: bool = False, script: str | None = None,
                 on_page: bool = False, anchor: Box | None = None, hyphenate: bool = True,
-                condense: bool = True, language: str = "") -> Fit:
+                condense: bool = True, language: str = "", hyphen_first: bool = False) -> Fit:
     """`_layout_text`, remembered (in memory, the last `LAYOUTS_KEPT`): a layout is a function of its arguments - the
     mask's pixels among them - so a region measured for its page's sizes (`Pipeline.cap_sizes`) and then drawn, an early
     look and the finished page, or a page lettered again, is laid out once. The `Fit` handed out is shared: it is
@@ -1897,7 +1915,7 @@ def layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None, 
         key: tuple[Any, ...] | None = (m.shape, str(m.dtype), hashlib.blake2b(m.data, digest_size=16).digest(), text,
                                        font_path, min_size, max_size, line_spacing, bold_variation, script, on_page,
                                        tuple(anchor) if anchor is not None else None, hyphenate, condense,
-                                       _language(language), _tunables())
+                                       _language(language), hyphen_first, _tunables())
         hash(key)
     except TypeError:  # a font argument that cannot be a key: laid out every time
         key = None
@@ -1908,7 +1926,7 @@ def layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None, 
                 _LAYOUTS.move_to_end(key)
                 return fit
     fit = _layout_text(mask, text, font_path, min_size, max_size, line_spacing, bold_variation, script, on_page,
-                       anchor, hyphenate, condense, language)
+                       anchor, hyphenate, condense, language, hyphen_first)
     if key is not None:
         with _LAYOUTS_LOCK:
             _LAYOUTS[key] = fit
@@ -1920,7 +1938,7 @@ def layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None, 
 def _layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None, min_size: int = 9, max_size: int = 64,
                  line_spacing: float = 1.12, bold_variation: bool = False, script: str | None = None,
                  on_page: bool = False, anchor: Box | None = None, hyphenate: bool = True,
-                 condense: bool = True, language: str = "") -> Fit:
+                 condense: bool = True, language: str = "", hyphen_first: bool = False) -> Fit:
     """Where and how large *text* is set inside *mask*: the font, the lines as (text, x centre, y top) in mask
     coordinates, and the font size (a `Fit`, which unpacks as those three, and says which layout won).
 
@@ -1929,9 +1947,10 @@ def _layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None,
     (*on_page*) stays where that lettering was and may also grow past the drawing around it, a bubble's text is
     centred in the bubble. At *min_size* the text is set even where it does not fit. At the limit (`_rescue`), when
     the size found is under `RESCUE_BELOW`, a larger size (or one that fits at *min_size*) may come from condensing the
-    text (*condense*) or hyphenating a long word (*hyphenate*); elsewhere, and where neither helps, the layout is the
-    one found without them. *language* (the target language's name) chooses the words a line should not end on
-    (`WEAK_WORDS`) and whether a capital inside a sentence is a name (`NAME_LANGUAGES_NOT`).
+    text (*condense*) or hyphenating a long word (*hyphenate*; with *hyphen_first* a hyphen is tried before narrower
+    letters); elsewhere, and where neither helps, the layout is the one found without them. *language* (the target
+    language's name) chooses the words a line should not end on (`WEAK_WORDS`) and whether a capital inside a sentence
+    is a name (`NAME_LANGUAGES_NOT`).
     """
     script = script or script_of(text)
     centre = _text_centre(on_page, anchor)
@@ -1958,7 +1977,7 @@ def _layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None,
                   measure=rx1 - rx0)
     if hyphenate or condense:
         fit = _rescue(mask, text, font_path, fit, max_size, line_spacing, bold_variation, script, centre, rects,
-                      TextFormat(), False, hyphenate, condense, room, language) or fit
+                      TextFormat(), False, hyphenate, condense, room, language, hyphen_first) or fit
     fit = _balanced(fit, text, script)
     if centre is None and room:  # a bubble: its body's centroid and size, for the checks (`lettering_flags`)
         cols = np.flatnonzero((room[0].depth > 0).any(axis=0))
@@ -1978,19 +1997,20 @@ def _rect_holds(text: str, font: FontT, lines: list[str], line_h: float, box_w: 
 def _rescue(mask: np.ndarray, text: str, font_path: str | Lettering | None, base: Fit, hi: int, line_spacing: float,
             bold_variation: bool, script: str, centre: tuple[float, float] | None, rects: list[Box], fmt: TextFormat,
             keep_blank: bool, hyphenate: bool, condense: bool, bodies: list[_Body] | None = None,
-            language: str = "") -> Fit | None:
+            language: str = "", hyphen_first: bool = False) -> Fit | None:
     """At the limit, for small lettering: the text where *base* (the layout found without these) would have dropped
     to its size, or does not fit cleanly at it - set at the sizes above *base*'s (from its own, when it is not clean),
     one at a time and up to *hi*, condensed by up to 8 % (*condense*: the mildest step of CONDENSE_STEPS that fits) or
     with long Latin words hyphenated (*hyphenate*: first only a word too wide for its line, then words that fill a
-    line), or both; at each size the first of those that fits, fewest hyphens and mildest condensing first, and where
-    the text fits whole at a smaller size, never with more than `HYPHENS_AVOIDABLE` hyphens (where it does not, never
-    with more than the first size that fits needs, or than that). A word is hyphenated once at the most; where no size
-    takes the text so, the sizes are climbed again with words broken as often as they need. Returns the layout at the
-    largest size reached (one that beats *base* by a point or more, or fits where it does not), None when none does.
-    Only for a *base* under `RESCUE_BELOW` points: larger lettering reads well as it is and keeps its natural letter
-    shapes (a region formatted to be condensed, *fmt.condense*, is as the reader asked at any size). *bodies* is
-    `_bodies` of the mask, when the caller has it."""
+    line), or both; at each size the first of those that fits, mildest condensing and fewest hyphens first (with
+    *hyphen_first* the hyphens before the condensing), and where the text fits whole at a smaller size, never with
+    more than `HYPHENS_AVOIDABLE` hyphens (where it does not, never with more than the first size that fits needs, or
+    than that). A word is hyphenated once at the most (`HYPHENS_PER_WORD`; at 2, where no size takes the text so, the
+    sizes are climbed again with words broken as often as they need), at a point that leaves `HYPHEN_LEAST` letters
+    or more on either side (`_try_points`). Returns the layout at the largest size reached (one that beats *base* by a
+    point or more, or fits where it does not), None when none does. Only for a *base* under `RESCUE_BELOW` points:
+    larger lettering reads well as it is and keeps its natural letter shapes (a region formatted to be condensed,
+    *fmt.condense*, is as the reader asked at any size). *bodies* is `_bodies` of the mask, when the caller has it."""
     hyphenate = hyphenate and script == "lgc"
     if not (hyphenate or condense):
         return None
@@ -2016,23 +2036,34 @@ def _rescue(mask: np.ndarray, text: str, font_path: str | Lettering | None, base
             return None  # more hyphens than the text needs, for a larger size
         return fit
 
-    def first(size: int) -> Fit | None:
-        """The preferred layout at *size*: condensed as little as fits; else hyphenated (a word too wide for its
-        line, then line-filling ones); else both. The most permissive try of each kind decides whether to look
-        further, so a size where nothing fits costs a try or two."""
+    def narrower(size: int) -> Fit | None:  # condensed as little as fits
         if condense and at(size, strongest, 0) is not None:
             return next(f for f in (at(size, factor, 0) for factor in CONDENSE_STEPS) if f is not None)
+        return None
+
+    def first(size: int) -> Fit | None:
+        """The preferred layout at *size*: condensed as little as fits; else hyphenated (a word too wide for its
+        line, then line-filling ones); else both (with *hyphen_first*: hyphenated, condensed, both). The most
+        permissive try of each kind decides whether to look further, so a size where nothing fits costs a try or
+        two."""
+        fit = None if hyphen_first else narrower(size)
+        if fit is not None:
+            return fit
         if hyphenate:
             fit = at(size, 1.0, 1) or at(size, 1.0, 2)
             if fit is not None:
                 return fit
-            if condense and at(size, strongest, 2) is not None:
-                return next(f for f in (at(size, factor, mode) for mode in (1, 2) for factor in CONDENSE_STEPS)
-                            if f is not None)
+        fit = narrower(size) if hyphen_first else None
+        if fit is not None:
+            return fit
+        if hyphenate and condense and at(size, strongest, 2) is not None:
+            return next(f for f in (at(size, factor, mode) for mode in (1, 2) for factor in CONDENSE_STEPS)
+                        if f is not None)
         return None
 
-    # every word broken once at the most; where no size above *base* takes the text so, as often as it needs
-    for again[0] in (False, True):
+    # every word broken once at the most; with HYPHENS_PER_WORD 2, where no size above *base* takes the text so, as
+    # often as it needs
+    for again[0] in (False, True)[:max(1, HYPHENS_PER_WORD)]:
         limit[0] = HYPHENS_AVOIDABLE if base.clean else None
         found: Fit | None = None
         size = reached + 1 if base.clean else base.size
@@ -2101,11 +2132,105 @@ class TextFormat:
 @dataclass(frozen=True)
 class Lettered:
     """What lettering a region did: the font size used, what it could not do as formatted (`NO_FIT`) or what the
-    checks of an automatic lettering found (`LETTER_CHECKS`), and which layout won (`Fit.won`)."""
+    checks of an automatic lettering found (`LETTER_CHECKS`), which layout won (`Fit.won`), and the room a bubble's
+    automatic lettering took beyond its own across (*frame*: `TURNED`, `OVERRUN`; "" none, `fitted_frame`)."""
 
     size: int
     flags: tuple[str, ...] = ()
     won: str = ""
+    frame: str = ""
+
+
+# --- fitting a bubble's automatic lettering: what is tried, in order (`Settings.fit_tries`) ----------------------
+
+# (every try there is, by its name, and those tried by default, in their order: `config.FIT_TRIES`, `DEFAULT_FIT_TRIES`)
+SET_TRIES = ("condense", "hyphenate")  # the lettering's own steps at the limit, in its room (`_rescue`)
+FRAME_TRIES = ("turn", "overrun")  # other rooms: the line turned a quarter clockwise; the bubble's outline run over
+FIT_KINDS = frozenset({"bubble", "dark-bubble"})  # the regions another room is tried for
+TURN_TALL = 1.2  # a bubble this many times as tall as it is wide, or more, is tried turned
+TURN_GAIN = 1.25  # another room is taken where its size is this many times the size across, or more ...
+TURN_GAIN_PX = 2  # ... and this many pixels larger, or more
+TURN_SCRIPTS_NOT = frozenset({"jp", "sc", "tc"})  # set in columns in a tall bubble ("stacked"): never turned
+OVERRUN_PX = 6  # the room of lettering that may run over a bubble's outline: its interior grown by so much (px, at the
+#                 page's scale, `render.pagescale`)
+TURNED, OVERRUN = "turned", "overrun"  # (`Lettered.frame`)
+
+
+def poor(size: int, hyphenated: bool, floor: int, min_size: int) -> bool:
+    """Whether lettering at *size*, *hyphenated* or not, calls for another room: under the readable size *floor*, at
+    the smallest size *min_size* (where a word too wide for every line is split as a last resort), or with a word
+    hyphenated."""
+    return size < floor or size <= min_size or hyphenated
+
+
+def gains(size: int, base: int) -> bool:
+    """Whether *size*, in another room, beats *base* across by a clear margin (`TURN_GAIN`, `TURN_GAIN_PX`)."""
+    return size >= base * TURN_GAIN and size - base >= TURN_GAIN_PX
+
+
+def fitted_frame(tries: Sequence[str], sized: Any, floor: int, min_size: int, frames: Sequence[str]) -> str:
+    """The room a bubble's automatic lettering takes, by the *tries* in their order (names of `FIT_TRIES`): "" its
+    own, across, where the lettering across with every set try (`SET_TRIES`: what would be drawn) is not `poor`;
+    else the first frame try (`FRAME_TRIES`, of those this bubble may take: *frames*) whose room gives a size larger
+    by a clear margin (`gains`) than the lettering across with the set tries listed before it - those after it are
+    the ones the person put after that room -, never smaller than what would be drawn across, and with no more
+    hyphens; "" where none does. *sized*(frame, sets) gives the (size, hyphenated) of the text in a room ("" across,
+    "turn", "overrun") with the set tries *sets*, in their order."""
+    across, hyphenated = sized("", tuple(t for t in tries if t in SET_TRIES))
+    if not poor(across, hyphenated, floor, min_size):
+        return ""
+    sets: list[str] = []
+    for name in tries:
+        if name in SET_TRIES:
+            sets.append(name)
+            continue
+        if name not in frames:
+            continue
+        base, base_hyphenated = sized("", tuple(sets))
+        other, other_hyphenated = sized(name, tuple(sets))
+        if gains(other, base) and other >= across and (base_hyphenated or not other_hyphenated):
+            return name
+    return ""
+
+
+def tried(tries: Sequence[str]) -> tuple[bool, bool, bool]:
+    """(hyphenate, condense, hyphen_first) of the set tries in *tries*: whether each is tried, and whether the
+    hyphens come before the narrower letters."""
+    names = [t for t in tries if t in SET_TRIES]
+    hyphenate, condense = "hyphenate" in names, "condense" in names
+    return hyphenate, condense, hyphenate and condense and names.index("hyphenate") < names.index("condense")
+
+
+def frames_for(region: TextRegion, text: str, language: str, tries: Sequence[str]) -> tuple[str, ...]:
+    """The frame tries of *tries* a region's automatic lettering may take: a bubble's (`FIT_KINDS`) set upright;
+    "turn" where it is `TURN_TALL` times as tall as wide or more and the text's script is set in lines
+    (`TURN_SCRIPTS_NOT`), "overrun" anywhere."""
+    if region.kind not in FIT_KINDS or getattr(region, "angle", 0.0):
+        return ()
+    out = []
+    for name in tries:
+        if name == "turn" and (region.height < TURN_TALL * region.width
+                               or script_of(text, language) in TURN_SCRIPTS_NOT):
+            continue
+        if name in FRAME_TRIES:
+            out.append(name)
+    return tuple(out)
+
+
+def overrun_region(region: TextRegion) -> TextRegion:
+    """*region* with the room of lettering that may run over its outline: its box and its interior grown by
+    `OVERRUN_PX` at its page's scale (`render.pagescale`), round the interior's shape."""
+    from . import pagescale
+
+    d = pagescale.px(OVERRUN_PX, pagescale.of(region))
+    mask = region.mask
+    if mask.shape != (region.height, region.width):
+        mask = cv2.resize(mask, (region.width, region.height), interpolation=cv2.INTER_NEAREST)
+    padded = cv2.copyMakeBorder(np.where(mask > 0, 255, 0).astype(np.uint8), d, d, d, d, cv2.BORDER_CONSTANT, value=0)
+    grown = copy.copy(region)
+    grown.mask = cv2.dilate(padded, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * d + 1, 2 * d + 1)))
+    grown.x0, grown.y0, grown.x1, grown.y1 = region.x0 - d, region.y0 - d, region.x1 + d, region.y1 + d
+    return grown
 
 
 def _rect_fit(text: str, font_path: str | Lettering | None, box_w: int, box_h: int, lo: int, hi: int,
@@ -2153,15 +2278,17 @@ def _placed(lines: list[str], line_h: float, rect: Box, fmt: TextFormat) -> list
 def layout_formatted(mask: np.ndarray, text: str, font_path: str | Lettering | None, fmt: TextFormat,
                      min_size: int = 9, max_size: int = 64, line_spacing: float = 1.12, bold_variation: bool = False,
                      script: str | None = None, on_page: bool = False, anchor: Box | None = None,
-                     language: str = "") -> Fit:
+                     language: str = "", hyphenate: bool = True, condense: bool = True,
+                     hyphen_first: bool = False) -> Fit:
     """Where and how large *text* is set inside *mask* as the reader formatted it (*fmt*), as a `Fit`.
 
     Each line break ends a line and an empty line keeps its height; within a line the text wraps as usual. Centred
     text is laid out as layout_text lays it, along the bubble's body or in the inner rectangle, whichever allows the
     larger font (the block at the top, middle or bottom of the room it has); text aligned left or right is set in the
     inner rectangle. The size is the largest that fits between *min_size* and *max_size*, or *fmt.size*, which is
-    never shrunk; at the limit (`_rescue`) a long word may take a hyphen, and the text may be condensed as
-    *fmt.condense* says. Centred lines are shared out as layout_text's (`_plan_lines`, `_balanced`, between the line
+    never shrunk; at the limit (`_rescue`) a long word may take a hyphen (with *hyphenate*; *hyphen_first*: before the
+    condensing), and the text may be condensed as *fmt.condense* says (None: at an automatic size, where *condense*
+    allows it). Centred lines are shared out as layout_text's (`_plan_lines`, `_balanced`, between the line
     breaks), text aligned left or right wraps as in a word processor. A text that does not fit at its size even so (at
     *min_size*, or at the fixed size) is set at it in the mask's bounding box instead, aligned the same way, and marked
     as overflowing: the caller cuts it at the mask.
@@ -2190,10 +2317,10 @@ def layout_formatted(mask: np.ndarray, text: str, font_path: str | Lettering | N
         (font, lines, size), rect = best
         fit = Fit(font, _placed(lines, size * ls, rect, fmt), size, size * ls, "rect", fmt.align,
                   measure=rect[2] - rect[0])
-    condense = fmt.condense if fmt.condense is not None else not fmt.size
+    condense = fmt.condense if fmt.condense is not None else condense and not fmt.size
     base = fit if fit is not None else Fit(None, [], lo, lo * ls, "box", fmt.align, overflow=True, clean=False)
-    better = _rescue(mask, text, font_path, base, hi, ls, bold_variation, script, centre, rects, fmt, True, True,
-                     condense, room if isinstance(room, list) else None, language)
+    better = _rescue(mask, text, font_path, base, hi, ls, bold_variation, script, centre, rects, fmt, True, hyphenate,
+                     condense, room if isinstance(room, list) else None, language, hyphen_first)
     if better is not None or fit is not None:
         fit = better or fit
         return _balanced(fit, text, script) if fmt.align == "center" else fit
@@ -2374,9 +2501,11 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
                 bold_variation: bool = False, language: str = "", outline: bool | None = None,
                 fmt: TextFormat | None = None, *, hyphenate: bool = True, condense: bool = True,
                 direction: str = "", color: Colour | None = None, outline_color: Colour | None = None,
-                large: tuple[int, int, float] | None = None, floor: int = 0) -> Lettered:
-    """Draw *text* inside the bubble (on no *image*: only find out how it would be set): as layout_text sets it (at the limit hyphenated or condensed when *hyphenate*,
-    *condense* allow it), or with *fmt* as the reader formatted it (layout_formatted; a text that does not fit at its
+                large: tuple[int, int, float] | None = None, floor: int = 0, hyphen_first: bool = False,
+                tries: Sequence[str] | None = None) -> Lettered:
+    """Draw *text* inside the bubble (on no *image*: only find out how it would be set): as layout_text sets it (at
+    the limit hyphenated or condensed when *hyphenate*, *condense* allow it, the hyphens first with *hyphen_first*),
+    or with *fmt* as the reader formatted it (layout_formatted; a text that does not fit at its
     size is cut at the bubble's edge and said, `NO_FIT`). *font_path* may be a Lettering (italic, bold, the cuts for
     stressed words marked *like this*, letter spacing). The text is in *color* (None: black on a light *background*,
     white on a dark one, `ground_ink`). Text that lands on a drawing or a tone is given an outline in *outline_color*
@@ -2393,13 +2522,42 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     *large* (start, end, ratio: offsets into *text*, `TextRegion.large`) sets that part of the text larger, as its own
     paragraph, the rest at a base size never under *floor* nor under `emphasis.BASE_SHARE` of the size the text gets
     without the part (`render.emphasis`; the size returned is the base's); where it cannot be set so, or is none, the
-    text is lettered as without it."""
+    text is lettered as without it.
+
+    *tries* (names of `FIT_TRIES`, in order: `Settings.fit_tries`; None: *hyphenate*, *condense* and *hyphen_first* as
+    given, nothing else) say what the automatic lettering may try where it comes out small or hyphenated: narrower
+    letters and hyphens at the limit (`tried`), and for a bubble set upright with an Auto direction, a part of it set
+    no larger and no format (`frames_for`) another room (`fitted_frame`, *floor* the readable size): the line turned a
+    quarter clockwise, as "down" sets it ("turn"), or the bubble's interior grown over its outline, the letters edged
+    in the paper's colour (*background*) where they cross it ("overrun", `overrun_region`). The room taken is said
+    (`Lettered.frame`)."""
     lead = len(text) - len(text.lstrip())
     text = text.strip()
     if not text:
         return Lettered(0)
     if large is not None:
         large = (large[0] - lead, large[1] - lead, large[2])
+    if tries is not None:
+        hyphenate, condense, hyphen_first = tried(tries)
+        frames = frames_for(region, text, language, tries) if fmt is None and not direction and large is None else ()
+        if frames:
+            def lettered(im: Image.Image | None, frame: str, sets: Sequence[str]) -> Lettered:
+                h, c, first = tried(sets)
+                room = overrun_region(region) if frame == "overrun" else region
+                over = frame == "overrun"
+                return letter_text(im, room, text, font_path, min_size, max_size, line_spacing, uppercase,
+                                   background, bold_variation, language, True if over else outline, None,
+                                   hyphenate=h, condense=c, direction="down" if frame == "turn" else "", color=color,
+                                   outline_color=tuple(background) if over else outline_color, floor=floor,
+                                   hyphen_first=first)
+
+            def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool]:
+                done = lettered(None, frame, sets)
+                return done.size, "+hyphens" in done.won
+
+            frame = fitted_frame(tries, sized, floor, min_size, frames)
+            if frame:
+                return replace(lettered(image, frame, tries), frame=TURNED if frame == "turn" else OVERRUN)
     quarter = QUARTER_TURNS.get(direction, 0.0)
     angle = getattr(region, "angle", 0.0) + quarter
     if angle:  # slanted or turned lettering: set in the region's own frame, turned onto the page
@@ -2413,7 +2571,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
         return letter_slanted(image, turned, lambda im, upright: letter_text(
             im, upright, text, font_path, min_size, max_size, line_spacing, uppercase, background, bold_variation,
             language, outline, fmt, hyphenate=hyphenate, condense=condense, direction=inner, color=color,
-            outline_color=outline_color, large=large, floor=floor))
+            outline_color=outline_color, large=large, floor=floor, hyphen_first=hyphen_first))
     script = script_of(text, language)
     parts = None
     least = floor
@@ -2425,7 +2583,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
             least = emphasis.base_floor(letter_text(
                 None, region, text, font_path, min_size, max_size, line_spacing, uppercase, background, bold_variation,
                 language, outline, fmt, hyphenate=hyphenate, condense=condense, direction=direction, color=color,
-                outline_color=outline_color).size, floor)
+                outline_color=outline_color, hyphen_first=hyphen_first).size, floor)
     if uppercase and script == "lgc":  # a capital the font lacks is drawn as `fonts.drawable` draws it, as a small one was
         path = font_path.path if isinstance(font_path, Lettering) else font_path
         text = drawable(path, text.upper())
@@ -2452,12 +2610,12 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
         return Lettered(size, (NO_FIT,) if overflow and fmt is not None else (), "stacked")
     if fmt is not None:
         fit = layout_formatted(region.mask, text, font_path, fmt, min_size, max_size, line_spacing, bold_variation,
-                               script, on_page, anchor, language)
+                               script, on_page, anchor, language, hyphenate, condense, hyphen_first)
         if image is None:
             return Lettered(fit.size, (NO_FIT,) if fit.overflow else (), fit.won)
         return _draw_fit(image, region, fit, script, color, outline, outline_color)
     fit = layout_text(region.mask, text, font_path, min_size, max_size, line_spacing, bold_variation, script,
-                      on_page, anchor, hyphenate, condense, language)
+                      on_page, anchor, hyphenate, condense, language, hyphen_first)
     if image is None:
         return Lettered(fit.size, (), fit.won)
     font, placed, size = fit

@@ -1,5 +1,6 @@
 """How to use TASlation: Menu > Help > How to use... (`HelpWindow`: short topics, one string per paragraph, in the
-window's language; texts in `locales/features/help_guide.py` and `locales/features/one_mode.py`), and the "?" button
+window's language; texts in `locales/features/help_guide.py`, `locales/features/one_mode.py` and, for the turned
+line, `locales/features/fitting.py`), and the "?" button
 that opens one explanation in a box of its own (`explain_button`, `ExplainBox`). Neither holds anything up: TASlation
 goes on reading behind them."""
 
@@ -36,6 +37,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "Click a box's number to type its place in the reading order, then press Enter: the numbers follow, and the lines after it are translated again. Menu > Undo takes it all back.",
         "Add area in the left pane, or Insert while the viewer is in front, adds a text area in Reader mode too: drag a rectangle over the text, and it is read and translated. A right click, Insert or Add area again gives it up. Insert is the only key TASlation takes (Settings... turns it off).",
         "The numbers' colours: green translated, orange not translated, blue your own region, red worth a look (Review...).",
+        "In a tall, narrow bubble where the lettering across would come out small, the line is turned 90 degrees to read from the top down. Settings..., Fitting lettering into bubbles, says what is tried and in what order; Text direction in the region editor sets one bubble's own.",
         "While editing, the Menu has the editing: Undo and Redo, the page's tools (Reading order, Add a text area, Skip page), and Review..., My corrections..., Lines to review..., Find and replace..., Series sheet... and Book settings... as dialogs of their own.",
     )),
     ("When something goes wrong", (
