@@ -156,8 +156,9 @@ class Readers:
         return self.place()
 
     def gpu_mib(self) -> int:
-        """What the readers that go to the GPU need there, in MiB (`place.CHARSPOT_MIB`, `place.NAR_MIB`)."""
-        return place.CHARSPOT_MIB + (place.NAR_MIB if self._nar is not None else 0)
+        """What the readers that go to the GPU need there, in MiB (`place.CHARSPOT_MIB`, `place.NAR_MIB`), their CUDA
+        graphs with them where they capture them (`place.readers_graphs`)."""
+        return place.CHARSPOT_MIB + (place.NAR_MIB if self._nar is not None else 0) + place.readers_graphs()
 
     def place(self) -> place.Placement:
         """Charspot and nar put where `place.readers_placement` has them (the session's plan, made now where none

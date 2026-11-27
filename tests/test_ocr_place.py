@@ -22,7 +22,8 @@ from taslation.config import ConfigError, Settings
 from taslation.devices import stage_devices
 from taslation.ocr import place, readers
 from taslation.ocr.place import (CHARSPOT_MIB, CONTEXT_MIB, FLOOR_MIB, KNOWN_TRANSLATORS, LAMA_MIB, LAMA_TALL_MIB,
-                                 LAYOUT_MIB, LAMA, LAYOUT, MARGIN_MIB, NAR_MIB, READERS, SWAY_MIB, TRANSLATOR,
+                                 LAYOUT_MIB, LAMA, LAYOUT, MARGIN_MIB, NAR_MIB, READERS, READERS_GRAPHS_MIB, SWAY_MIB,
+                                 TRANSLATOR,
                                  DeviceModels, GpuFacts, Need, Placement, Plan, judge, left_at_peak, short_by)
 
 OCR = CHARSPOT_MIB + NAR_MIB
@@ -44,11 +45,13 @@ def _settings(tmp_path: Path, **kw) -> Settings:
     return Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models", **kw)
 
 
-def _needs(translator=PLAMO_WINDOW, ocr=OCR, lama=LAMA_MIB, layout=LAYOUT_MIB, fixed=()) -> list[Need]:
+def _needs(translator=PLAMO_WINDOW, ocr=OCR, lama=LAMA_MIB, layout=LAYOUT_MIB, fixed=(), graphs=0) -> list[Need]:
     """The default settings' needs on a 6 GB card (PLaMo with the window cache, both readers, LaMa, the layout model);
-    a part given as 0 is not on the GPU; *fixed*: the parts a setting fixes there."""
-    parts = ((TRANSLATOR, translator), (READERS, ocr), (LAMA, lama), (LAYOUT, layout))
-    return [Need(part, mib, part in fixed) for part, mib in parts if mib]
+    a part given as 0 is not on the GPU; *fixed*: the parts a setting fixes there; *graphs*: the readers' CUDA graphs
+    with them (their need's extra; `place.needs` counts `READERS_GRAPHS_MIB`)."""
+    graphs = graphs if ocr else 0
+    parts = ((TRANSLATOR, translator, 0), (READERS, ocr + graphs, graphs), (LAMA, lama, 0), (LAYOUT, layout, 0))
+    return [Need(part, mib, part in fixed, extra) for part, mib, extra in parts if mib]
 
 
 def _card(others: int, total: int = 6144) -> GpuFacts:
@@ -88,6 +91,34 @@ def test_the_default_6_gb_card_is_enough_up_to_1704_mib_of_other_programs():
     plain = _needs(translator=PLAMO)
     assert short_by(_card(1804), plain) == 0 and short_by(_card(1805), plain) == 1
     assert short_by(_card(1704, total=8192), _needs()) == 0 and short_by(_card(3752, total=8192), _needs()) == 0
+
+
+def test_the_readers_cuda_graphs_are_left_off_unasked_where_the_room_is_short_with_them():
+    """On the default 6 GB card the graphs have room up to 1434 MiB of other programs (1704 less their 270); with more,
+    the readers stay on the GPU without them, nothing asked, the rest judged as without graphs: still enough up to
+    1704, short beyond as ever (and asked about, short by what it lacks without them)."""
+    with_graphs = _needs(graphs=READERS_GRAPHS_MIB)
+    assert READERS_GRAPHS_MIB == 270
+    room = judge(_card(1434), with_graphs)
+    assert room.graphs and room.why == place.ROOM and room.left == MARGIN_MIB and READERS in room.gpu
+    bare = judge(_card(1435), with_graphs)
+    assert not bare.graphs and bare.why == place.ROOM and not bare.asks and READERS in bare.gpu
+    assert bare.short == 0 and bare.left == MARGIN_MIB + 1704 - 1435
+    assert judge(_card(1704), with_graphs) == Plan((TRANSLATOR, READERS, LAMA, LAYOUT), (), 0, MARGIN_MIB, place.ROOM,
+                                                   place.TO_PROCESSOR, graphs=False)
+    short = judge(_card(1705), with_graphs)
+    assert short.asks and short.short == 1 and not short.graphs
+    assert judge(_card(1705), _needs()).graphs  # (no graphs counted, none left off: a plan's default)
+
+
+def test_where_parts_go_to_the_processor_the_graphs_stay_if_the_rest_has_room_for_them():
+    moved = judge(_card(1705), _needs(graphs=READERS_GRAPHS_MIB), "processor")
+    assert moved.cpu == (READERS,) and not moved.graphs  # (the readers on the processor: no graphs there)
+    fixed = judge(_card(1705), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
+    assert fixed.cpu == (LAMA,) and READERS in fixed.gpu and fixed.graphs  # (LaMa's room holds them)
+    assert fixed.left == left_at_peak(_card(1705), _needs(lama=0, graphs=READERS_GRAPHS_MIB))
+    tight = judge(_card(1704 + LAMA_MIB), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
+    assert tight.cpu == (LAMA,) and not tight.graphs and tight.left == MARGIN_MIB
 
 
 def test_enough_puts_everything_on_the_gpu_and_asks_nothing():
@@ -158,19 +189,24 @@ def page_models(monkeypatch):
 
 
 def test_the_needs_follow_the_settings(tmp_path, monkeypatch, page_models):
+    from taslation.ocr import graphs
+
     monkeypatch.setattr(readers, "missing_readers", lambda models_dir: [])  # (all three readers installed)
     s = _settings(tmp_path)
-    assert place.needs(s, cuda=True) == _needs()
+    g = READERS_GRAPHS_MIB  # (the readers' CUDA graphs with them, the need's extra)
+    assert place.needs(s, cuda=True) == _needs(graphs=g)
     assert place.needs(_settings(tmp_path, ocr_runs_on="cpu"), cuda=True) == _needs(ocr=0)
-    assert place.needs(_settings(tmp_path, ocr_runs_on="gpu"), cuda=True) == _needs(fixed=(READERS,))
-    assert place.needs(_settings(tmp_path, ollama_num_gpu="0"), cuda=True) == _needs(translator=0)
-    assert place.needs(_settings(tmp_path, ollama_num_gpu="10"), cuda=True) == _needs(fixed=(TRANSLATOR,))
+    assert place.needs(_settings(tmp_path, ocr_runs_on="gpu"), cuda=True) == _needs(fixed=(READERS,), graphs=g)
+    assert place.needs(_settings(tmp_path, ollama_num_gpu="0"), cuda=True) == _needs(translator=0, graphs=g)
+    assert place.needs(_settings(tmp_path, ollama_num_gpu="10"), cuda=True) == _needs(fixed=(TRANSLATOR,), graphs=g)
     assert place.needs(s, cuda=False) == _needs(ocr=0, lama=0, layout=0)  # (torch without CUDA: the model alone)
     monkeypatch.setattr(place, "tall_screen", lambda: True)
-    assert place.needs(s, cuda=True) == _needs(lama=LAMA_TALL_MIB)
+    assert place.needs(s, cuda=True) == _needs(lama=LAMA_TALL_MIB, graphs=g)
     monkeypatch.setattr(place, "tall_screen", lambda: False)
     monkeypatch.setattr(readers, "missing_readers", lambda models_dir: ["nar"])
-    assert place.needs(s, cuda=True) == _needs(ocr=CHARSPOT_MIB)  # (charspot alone)
+    assert place.needs(s, cuda=True) == _needs(ocr=CHARSPOT_MIB, graphs=g)  # (charspot alone: its graphs all of it)
+    monkeypatch.setattr(graphs, "ENABLED", False)
+    assert place.needs(s, cuda=True) == _needs(ocr=CHARSPOT_MIB)  # (no graphs captured, none counted)
 
 
 def test_a_screen_taller_than_1440_px_or_not_known_counts_lama_s_larger_windows(monkeypatch):
@@ -690,7 +726,7 @@ def test_the_readers_are_placed_where_they_load(tmp_path, fake_readers):
     ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
     assert fake_readers.asked == ["auto"] and ocr.placement == Placement("gpu", place.ROOM, 1500)
     assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and ocr._cpt.device == "cpu"  # CPT stays
-    assert ocr.gpu_mib() == OCR and ocr.holds_gpu()
+    assert ocr.gpu_mib() == OCR + READERS_GRAPHS_MIB and ocr.holds_gpu()
 
 
 def test_readers_without_settings_stay_on_the_cpu_and_ask_nothing(tmp_path, fake_readers):

@@ -20,15 +20,19 @@ matching norm epsilons come from its config.json ("reparam.norm_eps"). ``inject`
 training-time parameters. Every tensor made while reading is made on the device of the network's own (its weights),
 and the constants of `NarNet.prepare` are computed once, on the CPU, and copied as they are to the GPU
 (`taslation.ocr.place.device_copy`): the GPU reads with the CPU's numbers. In fp32 there too: autocast to fp16 was
-slower on the GPU measured (64 against 29 ms a crop). Imports torch: `taslation.ocr.readers` imports this file when it
-loads the models.
+slower on the GPU measured (64 against 29 ms a crop). On the GPU the pass and its argmax are one CUDA graph, captured
+with the copy and replayed for every crop, whose inputs always have the same shapes (`_capture`,
+`taslation.ocr.graphs`): the same ids, 18 ms a crop against 25 (GTX 1660 Ti, 2026-11-27, the sample set's 415 crops).
+Imports torch: `taslation.ocr.readers` imports this file when it loads the models.
 """
 
 from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -312,9 +316,27 @@ class NarNet(nn.Module):
         return F.linear(self.final_norms[0](s), self.tok.weight[:6818]) + self.bias
 
 
+def _passed(net: NarNet) -> Callable[..., tuple[Tensor]]:
+    """A read's pass of *net*: the ids of its 65 slots (the argmax of the logits), as a tuple."""
+    return lambda *inputs: (net(*inputs).argmax(-1),)
+
+
+def _capture(into: Any, net: NarNet, device: str) -> None:
+    """The GPU copy's CUDA graph (`graphs.Graphs.capture`): the pass and its argmax, whose shapes are always the
+    same, on synthetic patches over the grid of a crop of 40 x 120 px."""
+    make = torch.Generator().manual_seed(0)
+    _patches, valid, rows, cols, h, w = preprocess(Image.new("RGB", (40, 120), "white"))
+    with torch.inference_mode():
+        inputs = (torch.randn((1, BUDGET, FEAT), generator=make).to(device),
+                  *(torch.from_numpy(a)[None].to(device) for a in (valid, rows, cols)),
+                  torch.tensor([h], device=device), torch.tensor([w], device=device))
+        into.capture(("nar",), _passed(net), inputs)
+
+
 class NarEngine(DeviceModels):
     """The model loaded from *model_dir* (the caller checked that its files are there), on the CPU and, once `to` asks
-    for it, on the GPU too (`DeviceModels`)."""
+    for it, on the GPU too (`DeviceModels`), its pass replayed there as a CUDA graph captured with the copy
+    (`taslation.ocr.graphs`, `_capture`), reading the same bits."""
 
     name = "nar"
 
@@ -332,18 +354,25 @@ class NarEngine(DeviceModels):
         self._cpu_models = (net,)
         self._chars = json.loads((model_dir / VOCAB).read_text(encoding="utf-8"))["characters"]
 
-    def _copy_to(self, device: str) -> tuple[NarNet]:
-        return (device_copy(self._cpu_models[0], device),)
+    def _copy_to(self, device: str) -> tuple[Any, ...]:
+        from . import graphs
+
+        net = device_copy(self._cpu_models[0], device)
+        return net, graphs.made(self.name, device, lambda into: _capture(into, net, device))
 
     def read(self, image: Image.Image) -> str:
         """The line in *image*, as the model spells it."""
+        from . import graphs
+
         patches, valid, rows, cols, h, w = preprocess(image)
 
-        def logits_of(device: str, models: tuple[NarNet, ...]) -> list[int]:
-            with torch.inference_mode():
-                logits = models[0](*(torch.from_numpy(a)[None].to(device) for a in (patches, valid, rows, cols)),
-                                   torch.tensor([h], device=device), torch.tensor([w], device=device))
-                return logits.argmax(-1)[0].tolist()
+        def logits_of(device: str, models: tuple[Any, ...]) -> list[int]:
+            net, *captured = models  # (the GPU's copy has its CUDA graph beside it, or None)
+            with torch.inference_mode(), graphs.held(captured[0] if captured else None) as held:
+                ids, = graphs.run(held, ("nar",), _passed(net),
+                                  *(torch.from_numpy(a)[None].to(device) for a in (patches, valid, rows, cols)),
+                                  torch.tensor([h], device=device), torch.tensor([w], device=device))
+                return ids[0].tolist()
 
         ids = self.run(logits_of)
         end = len(self._chars)  # the id after the last character ends the text

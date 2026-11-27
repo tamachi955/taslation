@@ -209,6 +209,29 @@ def pad_grid(height: int, width: int, budget: int = BUDGET) -> tuple[float, int,
     return lo * CELL / 14, math.ceil(height * lo / 14), math.ceil(width * lo / 14)
 
 
+# The input shapes the GPU's CUDA graphs are captured for (`taslation.ocr.graphs`): the grids of crops at most ASPECT
+# times as tall as wide or as wide as tall (53 grids), and tails of 1 to GRAPH_CHARS characters - 85 graphs, about
+# 260 MiB of the card and 2 s at the start (`place.READERS_GRAPHS_MIB`; 64 characters: 117 graphs, 300 MiB). Of the
+# 959 crops the pipeline cut from the sample set's 54 pages, 956 have a grid among them and 950 at most 32 characters;
+# a crop that has not reads its dense network or its tail by the plain pass.
+ASPECT = 8
+GRAPH_CHARS = 32
+
+
+def graph_grids(budget: int = BUDGET, aspect: float | None = None) -> list[tuple[int, int]]:
+    """The grids (rows, columns) `pad_grid` gives a crop at most *aspect* (`ASPECT`) times as tall as wide or as wide
+    as tall: those whose one more row or one more column would not fit in *budget* cells. (A crop whose sides are in
+    a ratio of small numbers can get a smaller grid, both growing at once at the scale that stops: its read goes by
+    the plain pass.)"""
+    aspect = ASPECT if aspect is None else aspect
+    grids = []
+    for rows in range(1, budget + 1):  # (no more columns fit, or one more row would not: past budget // (rows + 1))
+        for cols in sorted({budget // rows, *range(budget // (rows + 1) + 1, budget // rows + 1)}):
+            if 1 / aspect <= rows / cols <= aspect:
+                grids.append((rows, cols))
+    return grids
+
+
 def preprocess(img: Image.Image) -> tuple[np.ndarray, tuple[float, float]]:
     """-> uint8 [3, H, W] (H and W multiples of 16), and (x, y) factors from input pixels back to crop pixels."""
     s, gh, gw = pad_grid(img.height, img.width)
@@ -489,6 +512,35 @@ def _depthwise_by_unfold(dense: Any) -> Any:
     return dense
 
 
+def _capture(into: Any, dense: Any, tail: Any, device: str) -> None:
+    """The GPU copy's CUDA graphs (`graphs.Graphs.capture`): the dense network for each of `graph_grids`, the tail
+    for 1 to `GRAPH_CHARS` characters, on synthetic inputs (pixels 0..255, embeddings and boxes as the pooling gives
+    them in kind). The graphs of each network share one input tensor, each a view of it at its shape, and the dense
+    network's graphs one tensor their outputs are copied into (the heads at stride 8: 2 x 2 a cell): one read at a
+    time replays them."""
+    import torch
+
+    width = tail.pool.out_features
+    heads = sum(conv.out_channels for conv in (dense.heat, dense.box, dense.ruby, dense.emb))
+    make = torch.Generator().manual_seed(0)
+    with torch.inference_mode():
+        pixels = torch.empty(3 * BUDGET * CELL * CELL, device=device)
+        mapped = torch.empty(heads * BUDGET * 4, device=device)
+        embedded = torch.empty(GRAPH_CHARS * width, device=device)
+        boxes = torch.empty(GRAPH_CHARS * 4, device=device)
+        for rows, cols in graph_grids():
+            shape = (1, 3, rows * CELL, cols * CELL)
+            x = pixels[:math.prod(shape)].view(shape)
+            x.copy_(torch.randint(0, 256, shape, generator=make).float())
+            into.capture(("dense", rows * CELL, cols * CELL), dense, (x,), into=mapped)
+        for n in range(1, GRAPH_CHARS + 1):
+            e = embedded[:n * width].view(1, n, width)
+            e.copy_(torch.randn((1, n, width), generator=make))
+            geo = boxes[:n * 4].view(1, n, 4)
+            geo.copy_(torch.rand((1, n, 4), generator=make) * 8 + 0.5)  # (centres and sizes over the median size)
+            into.capture(("tail", n), tail, (e, geo))
+
+
 class CharspotEngine(DeviceModels):
     """The model loaded from *model_dir*, on the CPU and, once `to` asks for it, on the GPU too (`DeviceModels`: the
     CPU's copy stays, a failure on the GPU reads on the CPU for good). Reads one crop at a time (the crops of a page
@@ -500,7 +552,8 @@ class CharspotEngine(DeviceModels):
     layout, and reads the same too.
 
     On the GPU its depthwise convolutions are done without cuDNN (`_depthwise_by_unfold`), which would ready its
-    kernels anew for each input size, about a second each."""
+    kernels anew for each input size, about a second each; its dense network and its tail are replayed there as CUDA
+    graphs captured with the copy (`taslation.ocr.graphs`, `_capture`), reading the same bits."""
 
     name = "charspot"
 
@@ -527,8 +580,11 @@ class CharspotEngine(DeviceModels):
     def _copy_to(self, device: str) -> tuple[Any, ...]:
         import torch
 
+        from . import graphs
+
         dense, tail = self._cpu_models
-        return _depthwise_by_unfold(device_copy(dense, device, torch.contiguous_format)), device_copy(tail, device)
+        dense, tail = _depthwise_by_unfold(device_copy(dense, device, torch.contiguous_format)), device_copy(tail, device)
+        return dense, tail, graphs.made(self.name, device, lambda into: _capture(into, dense, tail, device))
 
     def read_chars(self, image: Image.Image) -> CharspotReading:
         pixels, (fx, fy) = preprocess(image.convert("RGB"))
@@ -537,20 +593,23 @@ class CharspotEngine(DeviceModels):
     def _read(self, device: str, models: tuple[Any, ...], pixels: np.ndarray, fx: float, fy: float) -> CharspotReading:
         import torch
 
-        dense, tail = models
-        with torch.inference_mode():
+        from . import graphs
+
+        dense, tail, *captured = models  # (the GPU's copy has its CUDA graphs beside it, or None)
+        with torch.inference_mode(), graphs.held(captured[0] if captured else None) as held:
             x = torch.from_numpy(pixels)[None]
             if device == "cpu":
                 x = x.float().contiguous(memory_format=torch.channels_last)
             else:
                 x = x.to(device).float()  # (the bytes go over; 0..255 as floats is exact on either side)
-            heat, box, ruby, emb = dense(x)
+            heat, box, ruby, emb = graphs.run(held, ("dense", *x.shape[2:]), dense, x)
             found = detect(heat[0].cpu().numpy(), box[0].cpu().numpy(), ruby[0].cpu().numpy())
             if found is None:
                 return CharspotReading()
             boxes, scores, geo = found
             e = tail.pooled(emb, torch.from_numpy(boxes)[None].to(device))
-            sure, ids, pair, st, en = tail(e, torch.from_numpy(geo)[None].to(device))
+            sure, ids, pair, st, en = graphs.run(held, ("tail", e.shape[1]), tail, e,
+                                                 torch.from_numpy(geo)[None].to(device))
             order = chain(pair[0].cpu().numpy(), st[0].cpu().numpy(), en[0].cpu().numpy())
             sure, ids = sure[0].tolist(), ids[0].tolist()
         chars = tuple(CharspotChar(self._out_str[int(ids[k])],

@@ -19,7 +19,11 @@ again on this computer") sends it there without asking, and a command or a tool,
 setting that fixes a part (``ocr_runs_on`` "gpu" or "cpu", a number of layers in ``ollama_num_gpu``) is never moved:
 counted where it puts the part. One that forces a part onto the GPU ("gpu", a number of layers) never asks either:
 the person took the GPU into their own hands, the start goes on as the settings say, short, and the System page says
-by how much (with ``gpu_short`` "processor" the parts not fixed go to the processor as ever).
+by how much (with ``gpu_short`` "processor" the parts not fixed go to the processor as ever). The readers' CUDA graphs
+(`taslation.ocr.graphs`: charspot 46 % and nar 29 % less time a crop on the GTX 1660 Ti) are counted with them
+(`READERS_GRAPHS_MIB`) as what they can do without (`Need.extra`): where the start is short with them, they are left
+off first, nothing asked (`Plan.graphs`), and the rest is judged as above without them - the readers stay on the GPU,
+only slower.
 
 What a fuller card does (Windows' driver model; GTX 1660 Ti 6 GB, driver 610.88, Ollama 0.40.16, measured 2026-11-22
 with a process that held dummy memory, step by step, beside the model and the readers): nothing fails. No allocation
@@ -115,6 +119,13 @@ SHORT_VALUES = ("ask", "processor")  # ``gpu_short``: what a start that is short
 # allocator's blocks. Rounded up to 10 MiB: charspot 124, both 410 less charspot's 124.
 CHARSPOT_MIB = 130
 NAR_MIB = 290
+# The readers' CUDA graphs beside them (`taslation.ocr.graphs`), counted with them where they capture them: their
+# one pool, their outputs and inputs, and what the driver holds for them outside torch's memory, captured once as the
+# copies are made and never grown by a replay. Measured on the GTX 1660 Ti (2026-11-27, torch 2.14.1 cu126, the card's
+# used memory as NVML says it, the copies and plain passes of every shape captured on either side): charspot's 85
+# graphs 261-268 MiB (108 of them torch's reserved memory, the rest the driver's), nar's one graph captured into the
+# same pool after them nothing more (both 254-261 MiB; nar's alone, in a pool of its own, 96). Rounded up to 10 MiB.
+READERS_GRAPHS_MIB = 270
 # this process's CUDA context with the libraries the networks load there (Windows' dedicated memory less torch's
 # reserved): 77 MiB bare, 99 with all of them (2026-11-19); 76 bare, 86 with the readers' and the layout model's
 # (2026-11-22). The largest, rounded up to 10 MiB.
@@ -225,11 +236,18 @@ class GpuFacts:
 @dataclass(frozen=True)
 class Need:
     """A part the settings put on the GPU (*part*: `TRANSLATOR`, `READERS`, `LAMA`, `LAYOUT`), its *mib* there at its
-    peak, and whether a setting *fixed* it there (never sent to the processor for the room)."""
+    peak, whether a setting *fixed* it there (never sent to the processor for the room), and the *extra* of *mib* it
+    can do without and stay there (the readers' CUDA graphs: `judge` leaves it off, unasked, where the room is short
+    with it)."""
 
     part: str
     mib: int
     fixed: bool = False
+    extra: int = 0
+
+    def bare(self) -> "Need":
+        """The need without its *extra*."""
+        return Need(self.part, self.mib - self.extra, self.fixed) if self.extra else self
 
 
 @dataclass(frozen=True)
@@ -237,8 +255,10 @@ class Plan:
     """The session's placement: the parts on the GPU (*gpu*), those the room sent to the processor (*cpu*, in
     `TO_PROCESSOR`'s order), the MiB the start was *short* by with every part the settings put on the GPU there (0:
     enough), the MiB *left* at the peak with *gpu* there (None: not measured), *why* (`ROOM`, `SHORT`, `PROCESSOR`,
-    `NO_GPU`), the parts that *could* go to the processor (not fixed by a setting, in that order) and whether a setting
-    *forced* a part onto the GPU (``ocr_runs_on`` "gpu", a number of layers in ``ollama_num_gpu``)."""
+    `NO_GPU`), the parts that *could* go to the processor (not fixed by a setting, in that order), whether a setting
+    *forced* a part onto the GPU (``ocr_runs_on`` "gpu", a number of layers in ``ollama_num_gpu``), and whether the
+    readers on the GPU replay their CUDA *graphs* (`taslation.ocr.graphs`: False where the room was short with them -
+    the needs' *extra* - and everything else was judged without them)."""
 
     gpu: tuple[str, ...] = ()
     cpu: tuple[str, ...] = ()
@@ -247,6 +267,7 @@ class Plan:
     why: str = ROOM
     could: tuple[str, ...] = ()
     forced: bool = False
+    graphs: bool = True
 
     @property
     def asks(self) -> bool:
@@ -273,24 +294,33 @@ def judge(facts: GpuFacts | None, needs: Iterable[Need], choice: str = "ask") ->
     """The plan for *needs* on *facts*: everything on the GPU when it is enough; short, as it is (`SHORT`, which
     `Plan.asks` about where no setting forced a part there) unless *choice* is "processor" - then the parts in
     `TO_PROCESSOR`'s order that are not fixed go to the processor, one by one, until the rest is enough or none is left
-    (`PROCESSOR`). Without facts (no NVIDIA GPU): as the settings say, nothing judged (`NO_GPU`)."""
+    (`PROCESSOR`). Before any of that, short with the needs' *extra* (the readers' CUDA graphs), they are left off,
+    unasked, and the rest judged without them (`Plan.graphs` False): the readers stay on the GPU without their graphs
+    rather than move; where parts went to the processor after all, the graphs are kept if the rest has room for them
+    there. Without facts (no NVIDIA GPU): as the settings say, nothing judged (`NO_GPU`)."""
     needs = list(needs)
     forced = any(n.fixed for n in needs)
     if facts is None:
         return Plan(tuple(n.part for n in needs), why=NO_GPU, forced=forced)
+    full, graphs = needs, True
+    if any(n.extra for n in needs) and short_by(facts, needs):
+        needs, graphs = [n.bare() for n in needs], False
     could = tuple(p for p in TO_PROCESSOR if any(n.part == p and not n.fixed for n in needs))
     short = short_by(facts, needs)
     if not short or choice != "processor" or not could:
         return Plan(tuple(n.part for n in needs), (), short, left_at_peak(facts, needs), SHORT if short else ROOM,
-                    could, forced)
+                    could, forced, graphs)
     moved: list[str] = []
     for part in could:
         needs = [n for n in needs if n.part != part]
         moved.append(part)
         if not short_by(facts, needs):
             break
+    kept = [n for n in full if n.part not in moved]
+    if not graphs and any(n.extra for n in kept) and not short_by(facts, kept):
+        needs, graphs = kept, True
     return Plan(tuple(n.part for n in needs), tuple(moved), short, left_at_peak(facts, needs), PROCESSOR, could,
-                forced)
+                forced, graphs)
 
 
 def make_plan(settings: Any, choice: str = "ask", cuda: bool | None = None,
@@ -315,8 +345,9 @@ def settle(plan: Plan) -> Plan:
     with _plan_lock:
         _plan = plan
     LOG.info("the GPU for this session: %s on the GPU, %s on the processor for the room (%s); short by %s MiB at the "
-             "start, %s MiB left at the peak", ", ".join(plan.gpu) or "nothing", ", ".join(plan.cpu) or "nothing",
-             plan.why, plan.short, "?" if plan.left is None else plan.left)
+             "start, %s MiB left at the peak%s", ", ".join(plan.gpu) or "nothing", ", ".join(plan.cpu) or "nothing",
+             plan.why, plan.short, "?" if plan.left is None else plan.left,
+             "" if plan.graphs or READERS not in plan.gpu else "; the readers without their CUDA graphs for the room")
     return plan
 
 
@@ -373,6 +404,13 @@ def on_gpu(part: str) -> bool:
     return plan is None or plan.why == NO_GPU or part in plan.gpu
 
 
+def graphs_on() -> bool:
+    """Whether the readers' copies on the GPU capture their CUDA graphs (`taslation.ocr.graphs.wanted`): as the
+    session's plan says (`Plan.graphs`); without a plan (a test, a tool's own readers), yes."""
+    plan = _plan
+    return plan is None or plan.graphs
+
+
 def translator_on_processor() -> bool:
     """Whether the session's plan sent the translation model to the processor (`taslation.translate.models`: its
     requests then carry ``num_gpu`` 0)."""
@@ -410,17 +448,27 @@ def readers_placement(settings: Any, cuda: bool | None = None) -> Placement:
 
 # ------------------------------------------------------------------ the needs and the facts
 def readers_need(settings: Any) -> int:
-    """What the readers that go to the GPU need there, in MiB, by the readers installed."""
+    """What the readers that go to the GPU need there, in MiB, by the readers installed, their CUDA graphs with them
+    (`readers_graphs`)."""
     from .readers import missing_readers
 
-    return CHARSPOT_MIB + (0 if missing_readers(settings.models_dir) else NAR_MIB)
+    return CHARSPOT_MIB + (0 if missing_readers(settings.models_dir) else NAR_MIB) + readers_graphs(settings)
+
+
+def readers_graphs(settings: Any = None) -> int:
+    """Of `readers_need`, the MiB of the readers' CUDA graphs (`taslation.ocr.graphs`, `READERS_GRAPHS_MIB`: nar's
+    in charspot's pool take nothing more; 0 where none are captured, ``graphs.ENABLED`` off)."""
+    from . import graphs
+
+    return READERS_GRAPHS_MIB if graphs.ENABLED else 0
 
 
 def needs(settings: Any, cuda: bool | None = None, ask: bool = True) -> list[Need]:
     """What *settings* put on the GPU (`Need`s): the translation model unless ``ollama_num_gpu`` is 0 (fixed with a
     number of layers), and where torch has CUDA (*cuda*: `artwork.has_cuda` when None) the readers unless
-    ``ocr_runs_on`` is "cpu" (fixed with "gpu"), LaMa and the layout model where the pipeline runs them
-    (`page_models_on_gpu`). *ask*: False counts the translation model as not loaded, Ollama not asked."""
+    ``ocr_runs_on`` is "cpu" (fixed with "gpu"; their CUDA graphs the need's *extra*), LaMa and the layout model
+    where the pipeline runs them (`page_models_on_gpu`). *ask*: False counts the translation model as not loaded,
+    Ollama not asked."""
     from ..translate.ollama import num_gpu_value
 
     out: list[Need] = []
@@ -440,7 +488,7 @@ def needs(settings: Any, cuda: bool | None = None, ask: bool = True) -> list[Nee
         return out
     setting = str(getattr(settings, "ocr_runs_on", "auto") or "auto")
     if setting != "cpu":
-        out.append(Need(READERS, readers_need(settings), fixed=setting == "gpu"))
+        out.append(Need(READERS, readers_need(settings), fixed=setting == "gpu", extra=readers_graphs(settings)))
     lama, layout = page_models_on_gpu(settings)
     if lama:
         out.append(Need(LAMA, LAMA_TALL_MIB if tall_screen() else LAMA_MIB))
@@ -757,9 +805,10 @@ def give_back() -> None:
 
 class DeviceModels:
     """A reader's networks: the CPU's (``_cpu_models``, as loaded) and, while `to` has put them there, a copy on the GPU
-    (``_copy_to``, the reader's). `run` reads with the copy in force; a failure on the GPU (out of memory, a CUDA error:
-    any RuntimeError there) drops the GPU's copy, says so to `on_gpu_failure` (the type name) and reads on the CPU, as
-    it does for the rest of the session (``gpu_failed``)."""
+    (``_copy_to``, the reader's, with its CUDA graphs: `taslation.ocr.graphs`, which go with it). `run` reads with the
+    copy in force; a failure on the GPU (out of memory, a CUDA error: any RuntimeError there) drops the GPU's copy,
+    says so to `on_gpu_failure` (the type name) and reads on the CPU, as it does for the rest of the session
+    (``gpu_failed``)."""
 
     name = "reader"
 
