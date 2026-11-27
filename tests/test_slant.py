@@ -402,6 +402,8 @@ def test_a_model_regions_slanted_characters_are_erased_in_their_own_boxes(monkey
                           int(max(p[0] for p in quad)) + 1, int(max(p[1] for p in quad)) + 1)]
     erased: list[np.ndarray] = []
     monkeypatch.setattr(pipeline_module, "erase_region", lambda image, q, *a: (erased.append(q.mask), (255, 255, 255))[1])
+    # (the page's other columns, which this one character leaves out, go with the lettering left out: not this test's)
+    monkeypatch.setattr(Pipeline, "_left_out", staticmethod(lambda *a, **k: None))
     Pipeline._paper_erase(page.copy(), region, "fill")
     painted = erased[0] > 0
     bx0, by0, bx1, by1 = (v - o for v, o in zip(region.char_boxes[0], (region.x0, region.y0, region.x0, region.y0)))

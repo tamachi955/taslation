@@ -5107,7 +5107,9 @@ class Pipeline:
                      dark_threshold: int = 140, dark: bool = False) -> tuple[int, int, int]:
         """`erase_region`; for a model region with no shape of its own (tier 3: its plain box, which holds the drawing
         as much as the lettering) only the lettering is painted out: where its reading found characters (`char_boxes`,
-        a little grown), as lettering set on the page is, never the box. A model bubble with a classical shape also loses
+        a little grown), as lettering set on the page is, never the box; a model bubble's with paper under its lettering
+        (`artwork.on_paper`) also loses the lettering its text box holds that the characters leave out (`_left_out`:
+        ruby beside a column). A model bubble with a classical shape also loses
         the lettering its text box holds that the shape left out (`_left_out`): a large glyph, a line by the outline.
         (Also a model region's text: a classical block may hold only part of it.) A rectangle of the reader's on the
         drawing (`artwork.drawn_on_art`, where LaMa does not fill it in) loses its strokes alone, filled in from the
@@ -5139,6 +5141,15 @@ class Pipeline:
             mask[max(0, y0 - grow - region.y0):max(0, y1 + grow - region.y0),
                  max(0, x0 - grow - region.x0):max(0, x1 + grow - region.x0)] = 255
         q.mask = mask if region.char_boxes else region.mask
+        if region.char_boxes and region.kind in ("bubble", "dark-bubble") and artwork.on_paper(image, region):
+            # a bubble with paper under its lettering after all: the lettering its text box holds that the reading's
+            # characters leave out (ruby beside a column, a mark the reading dropped) goes too, as a shaped bubble's
+            # does (`_left_out`; on paper, so no drawing is taken for it)
+            read = copy.copy(region)
+            read.mask = mask
+            extra = Pipeline._left_out(image, read, dark_threshold, dark)
+            if extra is not None:
+                q.mask = np.where(extra, np.uint8(255), mask)
         return erase_region(image, q, mode, white_threshold, dark_threshold, dark)
 
     @staticmethod

@@ -549,6 +549,29 @@ def test_a_plain_box_is_painted_out_only_where_its_characters_were_read():
     assert (r.mask == 255).all()  # its own mask, where the translation is set, is untouched
 
 
+def test_an_unclosed_bubble_on_paper_loses_the_ruby_its_reading_left_out():
+    """A model bubble the detectors could not close, with paper under its lettering (`artwork.on_paper`): the
+    lettering its text box holds that the reading's characters leave out (ruby beside a column) goes too; the open
+    outline and the drawing beyond the box stay."""
+    page = np.full((300, 300, 3), 255, np.uint8)
+    page[:, :40:3] = 60  # a drawing beyond the box
+    cv2.ellipse(page, (150, 150), (70, 120), 0, 200, 520, (0, 0, 0), 2)  # an outline open at the top left
+    column = [(140, y, 160, y + 20) for y in range(60, 240, 30)]
+    for x0, y0, x1, y1 in column:
+        page[y0 + 3:y1 - 3, x0 + 3:x1 - 3] = 0  # the characters the reading found
+    for y in (95, 104):
+        page[y:y + 6, 128:134] = 0  # ruby beside the second character, which the reading left out
+    r = region(78, 28, 222, 272, "bubble", from_model=True, tier=3, text_box=(124, 58, 164, 242), glyph=20.0)
+    r.char_boxes = column
+    before = page.copy()
+    assert artwork.on_paper(page, r)
+    Pipeline._paper_erase(page, r)
+    assert (page[95:110, 128:134] > 200).all()  # the ruby is gone with the column
+    assert (page[:, :40] == before[:, :40]).all()  # the drawing stays
+    outline = (before[..., 0] == 0) & ~np.pad(np.ones((184, 40), bool), ((58, 58), (124, 136)))
+    assert (page[outline] == 0).all()  # and so does the outline
+
+
 def test_a_shaped_region_is_erased_as_before():
     page = np.full((300, 300, 3), 255, np.uint8)
     page[100:120, 100:120] = 0
