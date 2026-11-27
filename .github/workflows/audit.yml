@@ -1,0 +1,160 @@
+# The lettering audit (tools/audit_render.py) on GitHub's own machines: the OpenMantra pages and the made-up layouts,
+# each at its own size and scaled down as a viewer shows it, detected, read, erased and lettered as the program does
+# (with a made-up translator: no model), and every lettered region measured. Numbers only.
+#
+# It runs for a push to a branch named ci/... whose commit message holds "[audit]", and when started by hand. The
+# models and pip's downloads come from the caches a run of gpu-checks.yml on main makes, as in tests.yml. The OpenMantra
+# pages (CC BY-NC 4.0) are downloaded from their publisher by tools/fetch_openmantra.py in each job and are never kept
+# in a cache or an artifact: the shards' files hold numbers, boxes and reason codes only, and the pictures are of the
+# made-up pages alone.
+name: Audit
+
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SHARDS: 16
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+jobs:
+  render:
+    name: Audit ${{ matrix.shard }}
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[audit]')
+    # No GPU: the CPU build of PyTorch; the layout model and LaMa run on the processor (the tool's default settings
+    # are those of a computer with a GPU and both page models).
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: pip's downloads from main
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/AppData/Local/pip/Cache
+          key: pip-${{ runner.os }}-py3.13-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-${{ runner.os }}-py3.13-
+
+      - name: Install the packages (the CPU build of PyTorch)
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $py = Join-Path $PWD '.venv\Scripts\python.exe'
+          "PY=$py" >> $env:GITHUB_ENV
+          & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -m pip install -e .
+          exit $LASTEXITCODE
+
+      - name: The models from main
+        id: models
+        uses: actions/cache/restore@v5
+        with:
+          path: models
+          key: models-${{ hashFiles('setup_models.py') }}
+
+      - name: Download the models
+        if: steps.models.outputs.cache-hit != 'true'
+        run: |
+          & $env:PY setup_models.py --models-dir models --agreed --brief --font --fonts
+          exit $LASTEXITCODE
+
+      - name: The dataset
+        run: |
+          # (from its publisher, into ~/.taslation/datasets/openmantra on this runner: never cached, never uploaded)
+          & $env:PY tools/fetch_openmantra.py
+          exit $LASTEXITCODE
+
+      - name: 'Run: tools/audit_render.py (shard ${{ matrix.shard }})'
+        timeout-minutes: 80
+        env:
+          TASLATION_MODELS_DIR: ${{ github.workspace }}\models
+          TASLATION_STATE_DIR: ${{ runner.temp }}\taslation-state
+        run: |
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE
+          New-Item -ItemType Directory -Force audit-out | Out-Null
+          $ErrorActionPreference = 'Continue'
+          & $env:PY -u tools/audit_render.py run --shard ${{ matrix.shard }} --of $env:SHARDS --out "audit-out/audit-${{ matrix.shard }}.json" --crops "audit-out/crops-${{ matrix.shard }}" 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "audit-out/console-${{ matrix.shard }}.txt"
+          exit $LASTEXITCODE
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: audit-${{ matrix.shard }}
+          # numbers, boxes and codes; pictures of the made-up pages only
+          path: audit-out/
+          retention-days: 7
+          if-no-files-found: warn
+
+  merge:
+    name: Audit table
+    needs: render
+    if: ${{ !cancelled() && needs.render.result != 'skipped' }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: The shards' numbers
+        uses: actions/download-artifact@v6
+        with:
+          pattern: audit-*
+          path: shards
+
+      - name: One table
+        run: |
+          $files = @(Get-ChildItem -Recurse -Path shards -Filter 'audit-*.json' | ForEach-Object { $_.FullName })
+          Write-Host "$($files.Count) shard files"
+          if ($files.Count -eq 0) { Write-Host '::warning title=Audit::no shard wrote its numbers'; exit 1 }
+          python tools/audit_render.py merge @files --out merged.json --summary summary.md
+          $code = $LASTEXITCODE
+          if (Test-Path summary.md) { Get-Content summary.md -Raw -Encoding utf8 | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 }
+          exit $code
+
+      - name: Keep the table
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: audit-merged
+          path: |
+            merged.json
+            summary.md
+          retention-days: 7
+          if-no-files-found: warn
