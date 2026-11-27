@@ -171,18 +171,18 @@ def test_a_frame_out_of_its_place_becomes_the_page_at_rest_once_it_stayed(ground
     ui.rest_tick(app)  # stayed REST_S: the page at rest now
     assert app._see_ground[1] == (180, 0, 380, 300) and app._see_rest_box == (180, 0, 380, 300)
     assert _note(app, slid)[1] == (180, 0, 380, 300)  # the same box again: at rest at once
-    app.held = True  # a press after the frame: the wait starts again from its release
-    clock.now += 0.01
+    app.held = True  # a press after the frame: the wait starts again from its release - RELEASE_S, the frame noted
+    clock.now += 0.01  # while the button was held (the viewer may answer the release yet)
     _note(app, at_rest)
     clock.now += ui.REST_S * 3
     ui.rest_tick(app)
     app.held = False
-    clock.now += ui.REST_S / 2
+    clock.now += ui.REST_S + 0.01
     ui.rest_tick(app)
     assert app._see_ground[1] == (180, 0, 380, 300)
-    clock.now += ui.REST_S / 2 + 0.01
+    clock.now += ui.RELEASE_S - ui.REST_S
     ui.rest_tick(app)
-    assert app._see_ground[1] == (100, 0, 300, 300)
+    assert app._see_ground[1] == (100, 0, 300, 300)  # (no other picture came: the viewer left it so)
 
 
 def test_a_frame_of_no_page_on_a_flat_ground_hides_the_panes_only_at_rest(ground):
@@ -264,6 +264,80 @@ def test_the_frame_held_last_does_not_become_the_page_at_rest_once_the_next_scre
     clock.now += ui.REST_S + 0.001
     ui.rest_tick(app)
     assert app._see_ground[1] == (120, 0, 320, 300)
+
+
+def test_the_picture_held_captured_again_once_let_go_waits_for_the_viewer_s_answer(ground):
+    """The stand-in's scenario "s" on GitHub's runners (once, after six runs that passed): the right pane alone hid
+    for a quarter of a second, 0.7 s after the release of a slide to the screen's edge. The one picture of the slide
+    that reached the capture showed the page some 200 px to the right, on the ground still; captured again once the
+    button was up, it was taken for the page at rest by being as the frame before (itself), and the page's right edge
+    came over the right pane's place. The next screen reached the capture 0.7 s after the release."""
+    app, clock = ground.app, ground.clock
+    at_rest, slid, _far = _frames()
+    _note(app, at_rest)
+    rest = app._see_ground
+    app.held = True
+    clock.now += 0.1
+    facts = Facts(slid)  # (the one picture of the slide captured: each capture of it shares its facts)
+    ui.note_frame(app, slid, facts)
+    for _n in range(3):  # held at the edge: the capture has that picture still
+        clock.now += 0.4
+        ui.note_frame(app, slid, facts)
+        ui.rest_tick(app)
+        assert app._see_ground is rest
+    app.held = False  # let go: the very picture captured again, the viewer's answer not there yet
+    for _n in range(6):
+        clock.now += 0.1
+        ui.note_frame(app, slid, facts)
+        ui.rest_tick(app)
+        assert app._see_ground is rest
+    turned = Image.fromarray(page(seed=2, ground=0, box=(120, 0, 320, 300)))  # the next screen, 0.7 s after it
+    clock.now += 0.1
+    assert _note(app, turned) is rest  # (a box another than the picture before's)
+    clock.now += ui.REST_S + 0.001
+    ui.rest_tick(app)
+    assert app._see_ground[1] == (120, 0, 320, 300)
+
+
+def _washed():
+    soft = np.zeros((300, 400, 3), np.uint8)
+    soft[:, 120:320] = np.random.default_rng(4).integers(215, 250, (300, 200, 1), dtype=np.uint8)  # pale, no ink
+    return Image.fromarray(soft)
+
+
+def test_a_picture_the_button_was_held_over_is_the_page_at_rest_only_release_s_after_the_release(ground):
+    from taslation.ui import live
+
+    assert ui.RELEASE_S * 1000 == live.RELEASE_ANSWER_MS  # (as the live view waits for the viewer's answer)
+    app, clock = ground.app, ground.clock
+    at_rest, slid, _far = _frames()
+    _note(app, at_rest)
+    rest = app._see_ground
+    app.held = True
+    clock.now += 0.1
+    _note(app, slid)
+    clock.now += 1.0
+    ui.rest_tick(app)
+    app.held = False  # let go, and no capture meanwhile (a busy computer)
+    clock.now += ui.REST_S + 0.01
+    ui.rest_tick(app)
+    assert app._see_ground is rest  # (REST_S after the release it was the slid page's ground)
+    soft = _washed()  # the next screen's preview, a frame to wait out: the picture held is not on show any more
+    assert ui.frame_look(app, soft, Facts(soft)).kind == "washed"
+    assert _note(app, soft) is rest
+    clock.now += ui.RELEASE_S
+    ui.rest_tick(app)
+    assert app._see_ground is rest and app._see_unrested is None  # dropped, the ground left as it is
+    app.held = True  # a page the viewer leaves where it was dragged (no other picture after it) ...
+    clock.now += 0.1
+    _note(app, slid)
+    app.held = False
+    clock.now += ui.RELEASE_S - 0.01
+    ui.rest_tick(app)
+    assert app._see_ground is rest
+    clock.now += 0.02
+    ui.rest_tick(app)
+    assert app._see_ground[1] == (180, 0, 380, 300)  # ... is the page at rest RELEASE_S after the release
 
 
 def test_a_frame_of_another_size_or_viewer_is_at_rest_on_its_own(ground):
