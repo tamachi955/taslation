@@ -1,5 +1,6 @@
 """A fake ``ollama`` command line for the install tests: ``list``, ``create NAME -f MODELFILE``, ``pull NAME`` and
-``rm NAME`` on the models in a JSON file (``FAKE_OLLAMA_STATE``), every call written down there too. The file can
+``rm NAME`` on the models in a JSON file (``FAKE_OLLAMA_STATE``), every call written down there too (``calls``, and
+the ``OLLAMA_HOST`` each one had in ``hosts``). The file can
 make it fail: ``"down": true`` (no server), ``"fail": ["create"]`` (that command ends with exit code 1),
 ``"slow": ["pull"]`` (that command takes a while, saying how far it got). `make` puts it in a folder as ollama.cmd."""
 
@@ -24,6 +25,7 @@ def _state() -> tuple[Path, dict]:
 def main(args: list[str]) -> int:
     path, data = _state()
     data["calls"].append(args)
+    data.setdefault("hosts", []).append(os.environ.get("OLLAMA_HOST", ""))  # (the server each call went to)
     path.write_text(json.dumps(data), "utf-8")
     if data.get("down"):
         print("Error: could not connect to ollama app, is it running?")

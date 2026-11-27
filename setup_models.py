@@ -440,10 +440,15 @@ def pull_ollama(model: str) -> None:
         sys.exit("ollama was not found on PATH. Install it from https://ollama.com and run: ollama pull " + model)
     print(f"Running: ollama pull {model}")
     state_dir, url, _language = _settings_for_translator()
-    # (as `install_translator`; a server started here is for the pull alone: `ollama_start.OllamaStarter`'s
-    # *library_pull*, no OLLAMA_NO_CLOUD, as a pull was never tried with it set)
-    with ollama_start.held(url or Settings.ollama_url, state_dir, library_pull=True):
-        subprocess.run([exe, "pull", model], check=False)
+    served = url or Settings.ollama_url
+    with ollama_start.held(served, state_dir):  # (as `install_translator`, and its pull as Qwen's)
+        try:
+            with ollama_start.pull_server(served, state_dir, on_end=_pull_server_ended) as server:
+                _pull_server_started(server)
+                subprocess.run([exe, "pull", model], check=False,
+                               env=tinstall.ollama_env(server.url) if server.own else None)
+        except ollama_start.PullServerFailed as e:
+            print(f"{e}. Nothing was downloaded.")
 
 
 # ---------------------------------------------------------------- the translator model
@@ -459,6 +464,22 @@ class Cancelled(Exception):
 def _report(phase: str, done: float = 0, total: float = 0, **extra) -> None:
     if _progress:
         print(tinstall.progress_line(phase, done, total, **extra), flush=True)
+
+
+def _pull_server_started(server: ollama_start.PullServer) -> None:
+    """What the console is told when a pull goes to a server of its own (`ollama_start.pull_server`)."""
+    if server.own:
+        print("Ollama was started for the download on a port of its own, without OLLAMA_NO_CLOUD (the server in use "
+              "keeps it); it is stopped after the download.", flush=True)
+
+
+def _pull_server_ended(server: ollama_start.PullServer) -> None:
+    """That server's end, for the installer's log (`tinstall.PULL_SERVER_PHASE`: this process's own log goes
+    nowhere) and the console."""
+    _report(tinstall.PULL_SERVER_PHASE, url=server.url, stopped=server.stopped, seconds=round(server.seconds, 1))
+    if not server.stopped:
+        print("The Ollama started for the download did not stop; it is stopped at the next download or install.",
+              flush=True)
 
 
 def _watch_for_cancel() -> threading.Event:
@@ -583,12 +604,12 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
     code: 0 ready, 1 failed, CANCELLED, NO_ROOM, REFUSED (the server refused the file or no longer has it: running
     this again does not help, `refused_text`). Ollama's server is started first when it does not answer, as TASlation
     starts it (an ``ollama`` command that finds none would start Ollama's tray app, and with it Ollama's start with
-    Windows), and stopped again at the end (`taslation.ollama_start.held`): told not to use Ollama's cloud features
-    (OLLAMA_NO_CLOUD=1) for PLaMo's import, which asks Ollama's library for nothing, and left without it for Qwen's
-    ``ollama pull`` (*library_pull*: a pull was never tried with it set). A server that answers already - the window's,
-    install.ps1's, the person's - is used as it is."""
-    pull = model_for_language(language).ollama_name != PLAMO.ollama_name
-    with ollama_start.held(url or Settings.ollama_url, state_dir, library_pull=pull):
+    Windows), told not to use Ollama's cloud features (OLLAMA_NO_CLOUD=1) as every server TASlation starts, and stopped
+    again at the end (`taslation.ollama_start.held`); a server that answers already - the window's, install.ps1's, the
+    person's - is used as it is. Qwen's ``ollama pull`` goes where `taslation.ollama_start.pull_server` says: to a
+    server of its own, without the variable, for the pull alone, where the one that answers is TASlation's and has it
+    (a pull was never tried with it set); else to that one."""
+    with ollama_start.held(url or Settings.ollama_url, state_dir):
         return _install_translator(language, models_dir, state_dir, url, ollama_exe, agreed, cancel, keep_partial)
 
 
@@ -643,9 +664,18 @@ def _install_translator(language: str, models_dir: Path, state_dir: Path, url: s
                 return tinstall.NO_ROOM
             print(f"Running: ollama pull {needed.ollama_name}", flush=True)
             _report("pull", 0, 1000)
-            watch = _ollama_progress("pull")
-            code = tinstall.run_watched([exe, "pull", needed.ollama_name], cancel, watch, tinstall.ollama_env(url))
-            watch.end()  # type: ignore[attr-defined]
+            try:
+                with ollama_start.pull_server(url or Settings.ollama_url, state_dir, cancel,
+                                              on_end=_pull_server_ended) as server:
+                    _pull_server_started(server)
+                    watch = _ollama_progress("pull")
+                    code = tinstall.run_watched([exe, "pull", needed.ollama_name], cancel, watch,
+                                                tinstall.ollama_env(server.url if server.own else url))
+                    watch.end()  # type: ignore[attr-defined]
+            except ollama_start.PullServerFailed:
+                if cancel.is_set():
+                    raise Cancelled() from None
+                raise
         if code is None:
             raise Cancelled()
         now = tinstall.listed(exe, url)

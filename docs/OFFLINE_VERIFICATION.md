@@ -29,7 +29,9 @@ model on 127.0.0.1; what else Ollama does is not under TASlation's control. The
 server TASlation starts is told not to use Ollama's cloud features
 (`OLLAMA_NO_CLOUD=1`), which keeps it from asking ollama.com by itself (see "Ollama's
 own requests to ollama.com (2026-11-27)" below); a server the person started is
-theirs and runs with its own settings.
+theirs and runs with its own settings. A model download is the one time a server of
+TASlation's runs without the variable: a pull from Ollama's library goes to a server
+started for it alone, on a port of its own, and stopped after it.
 The installer, `setup_models.py` and `check_update.py`, which use the network, run
 without the guard.
 
@@ -5062,25 +5064,36 @@ What TASlation does with it:
 
 - **Every server TASlation itself starts** (`ollama_start`: the window's session, the restart after a request with no
   answer, the banner's restart, the other `taslation` commands, the Installer in the window and in the console, and
-  the tools and the GPU workflow, which use the same starter) gets `OLLAMA_NO_CLOUD=1` on top of the environment it
-  inherits, whatever TASlation's own environment says. The record `ollama-started.json` keeps it (`no_cloud` in its
-  `setup`). A server an earlier version started has no such mark and counts as one without it: the log says so once,
-  `taslation doctor` and the problem report say so too, and it is used as it is, not stopped; the next server
-  TASlation starts (after a request with no answer, or in the next session) gets the variable.
-- **`setup_models.py`**, run by hand with no server answering, starts one for PLaMo's import with the variable, and
-  one without it for a pull from Ollama's library (Qwen's `ollama pull`, `--ollama-model NAME`), as a pull has not been
-  tried with it set.
+  the tools and the GPU workflow, which use the same starter; a pull's own server, below, is the one exception) gets
+  `OLLAMA_NO_CLOUD=1` on top of the environment it inherits, whatever TASlation's own environment says. The record
+  `ollama-started.json` keeps it (`no_cloud` in its `setup`). A server an earlier version started has no such mark and
+  counts as one without it: the log says so once, `taslation doctor` and the problem report say so too, and it is used
+  as it is, not stopped; the next server TASlation starts (after a request with no answer, or in the next session)
+  gets the variable.
+- **A model download is the one time a server of TASlation's runs without the variable.** A pull from Ollama's
+  library has not been tried with it set, so it is not relied on: no pull (Qwen's, for Portuguese (Brazil) and
+  Turkish, from the window's and the console's installer, from `install.ps1` or by hand, and `setup_models.py
+  --ollama-model NAME`) goes to a server TASlation gave the variable. Where the server in use is TASlation's and has
+  it (the window's, a command's, or the one `setup_models.py` starts when none answers), the pull goes to a server of
+  its own (`ollama_start.pull_server`): `ollama serve` with TASlation's environment as it is, on a port of 127.0.0.1
+  free at its start, with the same model folder; nothing else is asked of it and no other TASlation knows its
+  address, the server in use keeps running with its variable, and the pull's server is stopped as the pull ends,
+  done, failed or cancelled. It is written down in the data folder (`ollama-pull.json`), so that one whose process
+  was ended first is stopped by the installer after that process, or by the next pull. The log says once that it was
+  started for the download without the variable and stopped after it. A server that answers and is not TASlation's
+  with the variable (the person's, install.ps1's) gets the pull as it is.
 - **`install.ps1`** starts its server with the variable for PLaMo (`Start-OwnOllama -NoCloud`) and without it for
-  Qwen's pull, setting it in its own environment for that start alone; when it restarts an Ollama that was already
-  there (`Restart-Ollama`), that server keeps its own settings. **`uninstall.ps1`** starts its server, for
-  `ollama rm` alone, with it. **`update.ps1`** starts none of its own (it runs `install.ps1`).
+  Qwen's pull, setting it in its own environment for that start alone, and stops it at its end; when it restarts an
+  Ollama that was already there (`Restart-Ollama`), that server keeps its own settings. **`uninstall.ps1`** starts
+  its server, for `ollama rm` alone, with it. **`update.ps1`** starts none of its own (it runs `install.ps1`).
 - **An Ollama the person started** (or Ollama's own app) is theirs and runs with its own settings: TASlation gives it
   nothing, this variable neither. `taslation doctor` says which kind of server answers.
 - The weekly install check (`.github/workflows/install-check.yml`) checks that the server it holds runs with
   `OLLAMA_NO_CLOUD=1`.
 
-Not shown: a pull from Ollama's library with the variable set - the window's and the console's Installer pull Qwen
-through the session's server, which has it, and the binary's description names no pull; whether Ollama 0.40.17, the
+Not shown: whether a pull from Ollama's library works with the variable set (not relied on, as above); a pull through
+a server of its own beside the session's (two servers on one model folder, the session's server listing the model
+pulled afterwards, the pull's server's own start while the session's model is loaded); whether Ollama 0.40.17, the
 version the GPU workflow pins, knows the variable; the install check's new step, not yet run on the runners. No
-server was started for the code change itself: its tests use fakes (`tests/test_ollama_start.py`,
-`tests/test_install_scripts.py`).
+server was started and nothing was downloaded for the code change itself: its tests use fakes
+(`tests/test_ollama_start.py`, `tests/test_install_scripts.py`).

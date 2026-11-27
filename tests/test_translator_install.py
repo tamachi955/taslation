@@ -9,15 +9,19 @@ import hashlib
 import importlib.util
 import io
 import json
+import logging
+import os
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import fake_ollama_cli
 import pytest
 
+from taslation import ollama_start
 from taslation import translator_install as ti
 from taslation.translate.models import PLAMO, QWEN, model_for_language
 
@@ -403,6 +407,109 @@ def test_a_qwen_the_person_had_is_not_counted_as_taslation_s(tmp_path, hf, ollam
     assert [c[0] for c in ollama.read()["calls"]] == ["list"]
 
 
+PULL_URL = "http://127.0.0.1:51234"
+
+
+@pytest.fixture
+def pull_server_of_its_own(monkeypatch):
+    """The server in use is TASlation's and has OLLAMA_NO_CLOUD (`ollama_start.needs_own_pull_server` says so), so a
+    pull gets a server of its own: started with fakes under it (no Ollama is started), answering at `PULL_URL` unless
+    ``answers`` is off; what was launched and stopped written down."""
+    seen = {"launched": [], "stopped": [], "answers": True, "on_look": None}
+
+    def launch(command, env=None):
+        seen["launched"].append((command, env))
+        return SimpleNamespace(pid=4242)
+
+    def running(url, timeout=1.0):
+        if seen["on_look"] is not None:
+            seen["on_look"]()
+        return seen["answers"] and url == PULL_URL
+
+    monkeypatch.delenv("OLLAMA_NO_CLOUD", raising=False)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    for name, value in (("LLAMA_ARG_CACHE_RAM", "0"), ("OLLAMA_KV_CACHE_TYPE", "q8_0"), ("LLAMA_ARG_SWA_FULL", "0")):
+        monkeypatch.setenv(name, value)  # (set: nothing of the computer's or the saved settings is looked up for them)
+    monkeypatch.setattr(ollama_start, "needs_own_pull_server", lambda url, state_dir: True)
+    monkeypatch.setattr(ollama_start, "find_ollama", lambda: ["C:/fake/ollama.exe", "serve"])
+    monkeypatch.setattr(ollama_start, "_free_port", lambda: 51234)
+    monkeypatch.setattr(ollama_start, "launch", launch)
+    monkeypatch.setattr(ollama_start, "process_info", lambda pid: ollama_start.ProcessInfo(
+        "C:/fake/ollama.exe", 7) if pid == 4242 else ollama_start.ProcessInfo(sys.executable, 1) if pid == os.getpid()
+        else None)
+    monkeypatch.setattr(ollama_start.health, "ollama_running", running)
+    monkeypatch.setattr(ollama_start, "stop_server",
+                        lambda pid, started: seen["stopped"].append((pid, started)) or True)
+    monkeypatch.setattr(ollama_start, "START_WAIT_S", 0.2)
+    monkeypatch.setattr(ollama_start, "POLL_S", 0.01)
+    return seen
+
+
+def _hosts_of(ollama, command: str) -> list[str]:
+    data = ollama.read()
+    return [host for call, host in zip(data["calls"], data["hosts"]) if call[:1] == [command]]
+
+
+def test_qwen_s_pull_goes_to_a_server_of_its_own_where_the_one_in_use_is_taslation_s(
+        tmp_path, hf, ollama, pull_server_of_its_own, monkeypatch, capsys):
+    """The pull, and nothing else, goes to that server (``OLLAMA_HOST``); it is started without OLLAMA_NO_CLOUD, on
+    its own port, and stopped after the pull; its end is a progress line of its own for the installer's log."""
+    monkeypatch.setattr(setup_models, "_progress", True)
+    assert _install(tmp_path, "Turkish") == 0
+    assert _hosts_of(ollama, "pull") == [PULL_URL] and PULL_URL not in _hosts_of(ollama, "list")
+    [(command, env)] = pull_server_of_its_own["launched"]
+    assert command == ["C:/fake/ollama.exe", "serve"]
+    assert env["OLLAMA_HOST"] == "127.0.0.1:51234" and "OLLAMA_NO_CLOUD" not in env
+    assert pull_server_of_its_own["stopped"] == [(4242, 7)]
+    assert not (tmp_path / "state" / ollama_start.PULL_RECORD_FILE).exists()
+    assert ti.installed_by_taslation(tmp_path / "state", QWEN.ollama_name)
+    lines = [ti.parse_progress(line) for line in capsys.readouterr().out.splitlines()]
+    ends = [d for d in lines if d and d["phase"] == ti.PULL_SERVER_PHASE]
+    assert len(ends) == 1 and ends[0]["url"] == PULL_URL and ends[0]["stopped"] is True
+    assert [d["phase"] for d in lines if d][-1] == "done"
+
+
+@pytest.mark.parametrize("end", ["failed", "cancelled"])
+def test_a_failed_or_cancelled_pull_stops_its_server_too(tmp_path, hf, ollama, pull_server_of_its_own, end):
+    cancel = threading.Event()
+    if end == "failed":
+        ollama.set(fail=["pull"])
+    else:
+        ollama.set(slow=["pull"])
+        threading.Timer(0.5, cancel.set).start()
+    assert _install(tmp_path, "Turkish", cancel=cancel) == (1 if end == "failed" else ti.CANCELLED)
+    assert pull_server_of_its_own["stopped"] == [(4242, 7)]
+    assert not (tmp_path / "state" / ollama_start.PULL_RECORD_FILE).exists()
+    assert ollama.read()["models"] == []
+
+
+@pytest.mark.parametrize("how", ["no answer", "cancelled"])
+def test_a_pull_s_server_that_does_not_come_ends_the_install_before_the_pull(
+        tmp_path, hf, ollama, pull_server_of_its_own, capsys, how):
+    cancel = threading.Event()
+    pull_server_of_its_own["answers"] = False
+    if how == "cancelled":
+        pull_server_of_its_own["on_look"] = cancel.set
+    assert _install(tmp_path, "Turkish", cancel=cancel) == (1 if how == "no answer" else ti.CANCELLED)
+    assert _hosts_of(ollama, "pull") == [] and pull_server_of_its_own["stopped"] == [(4242, 7)]
+    if how == "no answer":
+        assert "Ollama could not be started for the download (health.ollama_no_answer)" in capsys.readouterr().out
+
+
+def test_plamo_s_import_starts_no_server_for_a_pull(tmp_path, hf, ollama, monkeypatch):
+    """(it asks Ollama's library for nothing)"""
+    monkeypatch.setattr(ollama_start, "needs_own_pull_server", lambda url, state_dir: pytest.fail("asked for PLaMo"))
+    assert _install(tmp_path) == 0
+
+
+def test_the_person_s_server_gets_qwen_s_pull_as_it_is(tmp_path, hf, ollama, monkeypatch):
+    """Where the server in use is not TASlation's with the variable (here: none is recorded, the person's), the pull
+    goes to it as ever (`ollama_start.launch` fails the test where it is reached: tests/conftest.py)."""
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    assert _install(tmp_path, "Turkish") == 0 and _hosts_of(ollama, "pull") == [""]
+    assert not (tmp_path / "state" / ollama_start.PULL_RECORD_FILE).exists()
+
+
 def test_ollama_down_or_missing_says_so(tmp_path, hf, ollama, monkeypatch, capsys):
     ollama.set(down=True)
     assert _install(tmp_path) == 1 and "does not answer" in capsys.readouterr().out
@@ -528,6 +635,43 @@ def test_a_stopped_installer_cleans_what_its_process_left(tmp_path, ollama, monk
     assert installer.run().state == "cancelled" and time.monotonic() - started < 15
     assert not list(folder.glob("*.part"))
     assert ollama.read()["models"] == []  # not there before: removed
+
+
+def test_the_installer_says_the_pull_s_server_in_its_log_and_shows_it_nowhere(tmp_path, ollama, caplog):
+    """setup_models.py's own log goes nowhere: the end of the server it started for a pull comes as a progress line of
+    its own, which the installer's process logs once and passes on to no dialog."""
+    script = tmp_path / "setup_models.py"
+    end = {"phase": ti.PULL_SERVER_PHASE, "url": PULL_URL, "stopped": True, "seconds": 1.5}
+    script.write_text(
+        "import json\n"
+        f"print({ti.PROGRESS_PREFIX!r} + json.dumps({{'phase': 'pull', 'done': 500, 'total': 1000}}), flush=True)\n"
+        f"print({ti.PROGRESS_PREFIX!r} + json.dumps({end!r}), flush=True)\n"
+        f"print({ti.PROGRESS_PREFIX!r} + json.dumps({{'phase': 'done'}}), flush=True)\n", "utf-8")
+    seen: list[dict] = []
+    installer = ti.Installer("Turkish", tmp_path / "models", tmp_path / "state", on_progress=seen.append, script=script,
+                             python=sys.executable)
+    with caplog.at_level(logging.INFO, logger="taslation.ollama_start"):
+        assert installer.run().state == "done"
+    assert [d["phase"] for d in seen] == ["pull", "done"]
+    assert caplog.text.count("Ollama was started for a download from Ollama's library without OLLAMA_NO_CLOUD") == 1
+    assert "stopped after it (1.5 s)" in caplog.text
+
+
+def test_a_pull_s_server_the_install_s_process_left_is_stopped_once_that_process_has_ended(
+        tmp_path, ollama, pull_server_of_its_own):
+    """(an install that did not stop when told is ended by the installer, before it could stop the pull's server)"""
+    record = tmp_path / "state" / ollama_start.PULL_RECORD_FILE
+    script = tmp_path / "setup_models.py"
+    left = {"pid": 4242, "exe": "C:/fake/ollama.exe", "started": 7, "url": PULL_URL, "owner": {"pid": 1, "started": 1}}
+    script.write_text(
+        "import json\nfrom pathlib import Path\n"
+        f"Path(r'{record.parent}').mkdir(parents=True, exist_ok=True)\n"
+        f"Path(r'{record}').write_text(json.dumps({left!r}), 'utf-8')\n"
+        f"print({ti.PROGRESS_PREFIX!r} + json.dumps({{'phase': 'pull', 'done': 1, 'total': 1000}}), flush=True)\n"
+        "raise SystemExit(1)\n", "utf-8")
+    installer = ti.Installer("Turkish", tmp_path / "models", tmp_path / "state", script=script, python=sys.executable)
+    assert installer.run().state == "failed"
+    assert pull_server_of_its_own["stopped"] == [(4242, 7)] and not record.exists()
 
 
 def test_the_window_runs_setup_models_with_a_console_python(monkeypatch, tmp_path):

@@ -19,9 +19,9 @@ lacks them (`server_setup`, `server_env`; a value of theirs that is set anywhere
   it): Ollama 0.40.18's server asks ollama.com by itself otherwise, at every start (its model recommendations, and a
   "cloud" cache of what it shows of its models) and every 4 hours or so after (the recommendations); with it, its log
   says "Ollama cloud disabled: true", both are skipped, and no connection of its own was seen, while it translated as
-  before (docs/OFFLINE_VERIFICATION.md, "Ollama's own requests to ollama.com"). The one exception is a server started
-  for a pull from Ollama's library and nothing else (`OllamaStarter`'s *library_pull*: setup_models.py's ``ollama
-  pull``, by hand), which is left without it, as a pull was never tried with it set;
+  before (docs/OFFLINE_VERIFICATION.md, "Ollama's own requests to ollama.com"). A pull from Ollama's library was never
+  tried with it set, so a server started for such a pull alone goes without it (`pull_server`, below; install.ps1's
+  for Qwen's pull): a model download is the one time a server of TASlation's runs without it;
 * ``OLLAMA_KV_CACHE_TYPE``, the KV cache's precision: the value Windows keeps for the user or the computer (as a
   process started now would get it), else ``q8_0`` on an NVIDIA GPU of 6 GB or less (`small_gpu`, as install.ps1
   decides from the same number, NVML's, which nvidia-smi gives it), where the model's whole context fits in video
@@ -47,6 +47,19 @@ answers is not started again for it), counts as one without it (`ServerSetup.fro
 report), and the log says so once; the next server TASlation starts gets it.
 
 An Ollama the person runs is theirs, with their settings: TASlation gives it nothing, ``OLLAMA_NO_CLOUD`` neither.
+
+A pull from Ollama's library (`pull_server`: setup_models.py's ``ollama pull``, run by the window's and the console's
+installer, by install.ps1 or by hand) goes to the server that answers when it is not one TASlation started told not to
+use the cloud features - the person's, as it is, or one started without the variable (install.ps1's for Qwen, an
+earlier version's). Where it is one (the window's, a command's, the one setup_models.py started for its own
+``ollama`` commands), it goes to a server of its own instead: ``ollama serve`` started as above but with TASlation's
+environment as it is (`server_env`'s *library_pull*: no ``OLLAMA_NO_CLOUD`` added), on a free port of 127.0.0.1
+(``OLLAMA_HOST``) and with the same model folder, so that the session's server, which keeps running, finds the model
+pulled; nothing but the pull is asked of it, no other TASlation knows its address, and it is stopped as the pull ends,
+done, failed or cancelled (`stop_server`). It is written down in ``<state folder>/ollama-pull.json``
+(`PULL_RECORD_FILE`) with the process that started it, so that one whose process ended first (an install ended because
+it did not stop when told) is stopped by the next look (`end_pull_server`: the installer's, after its process, and the
+next pull's). The log says it once (`say_pull_server`).
 
 Only the address Ollama serves by default is started (`startable`): an Ollama set up elsewhere is the setup of whoever
 set it up, and starting one here would not answer there.
@@ -126,6 +139,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -168,6 +182,7 @@ SWA_FULL_ON = "1"
 TRUE_VALUES = ("1", "true", "on", "enabled")  # what llama.cpp's server takes as true for a flag's variable
 # Ollama's cloud features off ("Disable Ollama cloud features (remote inference and web search)", its own words for
 # the variable): every server TASlation starts gets it (`server_setup`), but one for a pull from Ollama's library
+# (`pull_server`)
 NO_CLOUD_VAR = "OLLAMA_NO_CLOUD"
 NO_CLOUD_ON = "1"
 # what Ollama reads as false for a flag's variable (Go's strconv.ParseBool; empty is unset, any other value true)
@@ -179,6 +194,9 @@ WHY_SET, WHY_SETTING = "set", "setting"
 USER_ENV_KEY = "Environment"
 MACHINE_ENV_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 RECORD_FILE = "ollama-started.json"  # in the state folder: the server TASlation started, and who uses it
+PULL_RECORD_FILE = "ollama-pull.json"  # ... and a server started for a pull from Ollama's library (`pull_server`)
+PULL_HOST = "127.0.0.1"  # where that one listens, on a port free when it is started
+HOST_VAR = "OLLAMA_HOST"
 STOP_WAIT_S = 5.0  # how long the server is given to end when asked (Ollama's tray app gives its server as long)
 KILL_WAIT_S = 2.0  # how long a terminated server is given to be gone
 HELPER_TIMEOUT_S = 3.0  # the helper that asks the server to stop (`ask_to_stop`)
@@ -305,8 +323,8 @@ def _settings_or_saved(settings: Any) -> Any:
 def server_setup(settings: Any = None, library_pull: bool = False) -> ServerSetup:
     """What the Ollama TASlation starts for *settings* (the saved ones when None) is given, the module's docstring's
     variables: ``OLLAMA_NO_CLOUD=1`` always, whatever TASlation's environment says - but for a server started for a
-    pull from Ollama's library (*library_pull*), which gets what TASlation's environment has, as before -; and each of
-    the other three TASlation's environment lacks as this user or the computer has it set (TASlation was started
+    pull from Ollama's library (*library_pull*: `pull_server`'s), which gets what TASlation's environment has -; and
+    each of the other three TASlation's environment lacks as this user or the computer has it set (TASlation was started
     before it was), else as TASlation decides it, a value of theirs that is set anywhere never changed."""
     added: dict[str, str] = {}
     if not library_pull:
@@ -1180,10 +1198,9 @@ def own_models(settings: Any) -> tuple[str, ...]:
 
 # ------------------------------------------------------------------ starting
 def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[], None] | None,
-             path: Path | None, own: Iterable[str], settings: Any = None, library_pull: bool = False) -> Message | None:
-    """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* and
-    *library_pull* (or the server TASlation started and recorded at *path* adopted) and waited for (see the module's
-    docstring). TASlation's end
+             path: Path | None, own: Iterable[str], settings: Any = None) -> Message | None:
+    """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* (or the server
+    TASlation started and recorded at *path* adopted) and waited for (see the module's docstring). TASlation's end
     (`finish_all`) while this is under way: nothing launched after it, and what was adopted or launched meanwhile given
     up at once (a server left running by a window closed during its start, else)."""
     began = _ends
@@ -1198,7 +1215,7 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
         elif _ends != began:
             return Message("health.ollama_down", url=url)  # (TASlation ended meanwhile: nothing launched)
         else:
-            failed = _launch(url, on_starting, path, own, settings, library_pull=library_pull)
+            failed = _launch(url, on_starting, path, own, settings)
             if failed is not None:
                 return failed
     if _ends != began:  # (it ended while this was launched or adopted: given up as its end gives up the others)
@@ -1214,18 +1231,18 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
 
 
 def _launch(url: str, on_starting: Callable[[], None] | None, path: Path | None, own: Iterable[str],
-            settings: Any = None, users: Iterable[dict[str, Any]] = (), library_pull: bool = False) -> Message | None:
-    """``ollama serve`` started for *url* with what `server_setup` gives it for *settings* and *library_pull*
-    (``OLLAMA_NO_CLOUD=1`` but for a library pull's server), and recorded at *path* with this process and *users* (the
-    TASlation processes that used the server it replaces) as its users. Under the record's lock. The one place a
-    server is launched (`OllamaStarter.start`, `OllamaStarter.restart`). None when it was started; else what stands in
-    the way."""
+            settings: Any = None, users: Iterable[dict[str, Any]] = ()) -> Message | None:
+    """``ollama serve`` started for *url* with what `server_setup` gives it for *settings* (``OLLAMA_NO_CLOUD=1``
+    among it), and recorded at *path* with this process and *users* (the TASlation processes that used the server it
+    replaces) as its users. Under the record's lock. The one place the server at the address the settings name is
+    launched (`OllamaStarter.start`, `OllamaStarter.restart`; a pull's own server is `pull_server`'s). None when it
+    was started; else what stands in the way."""
     command = find_ollama()
     if command is None:
         return Message("health.ollama_not_installed")
     if on_starting is not None:
         on_starting()
-    setup = server_setup(settings, library_pull)
+    setup = server_setup(settings)
     try:
         proc = launch(command, server_env(setup=setup))
     except OSError:
@@ -1262,18 +1279,15 @@ class OllamaStarter:
     TASlation's to stop at the end (`finish_all`); None records nothing (a server started then is never stopped).
     *own*: the names of models that count as TASlation's own at the end besides `MODELS` (`own_models`). *settings*:
     those a server started is given its window cache by (`server_setup`; the saved ones when None), read at each
-    start. *library_pull*: a server this starter starts is for a pull from Ollama's library and nothing else
-    (setup_models.py's ``ollama pull``), and is not told OLLAMA_NO_CLOUD (`server_setup`); never the window's or a
-    command's, whose server serves the whole session."""
+    start."""
 
     def __init__(self, url: str, on_starting: Callable[[], None] | None = None, state_dir: Path | str | None = None,
-                 own: Iterable[str] = (), settings: Any = None, library_pull: bool = False):
+                 own: Iterable[str] = (), settings: Any = None):
         self.url = url
         self.on_starting = on_starting
         self.record = record_path(state_dir)
         self.own = tuple(own)
         self.settings = settings
-        self.library_pull = library_pull
         self._last: float | None = None  # when the last try began
         self._lock = threading.Lock()
         self._restarted: float | None = None  # when the last restart began (`restart`)
@@ -1291,7 +1305,7 @@ class OllamaStarter:
             if self._last is not None and now - self._last < RETRY_GAP_S:
                 return Message("health.ollama_down", url=self.url)
             self._last = now
-        return _started(self.url, cancel, self.on_starting, self.record, self.own, self.settings, self.library_pull)
+        return _started(self.url, cancel, self.on_starting, self.record, self.own, self.settings)
 
     def _join(self) -> None:
         """The Ollama that answers, when it is the server TASlation started (recorded), used by this process too, so
@@ -1363,7 +1377,7 @@ class OllamaStarter:
                                 "request was cancelled before it was started again", stopped)
                     return False
                 users = [u for u in record["users"] if _alive(u)]
-                failed = _launch(self.url, None, path, self.own, self.settings, users, self.library_pull)
+                failed = _launch(self.url, None, path, self.own, self.settings, users)
             if failed is not None:
                 LOG.warning("no answer: the translation program TASlation started was stopped (%.1f s) and could not "
                             "be started again (%s)", stopped, failed.code)
@@ -1377,11 +1391,154 @@ class OllamaStarter:
 
 @contextlib.contextmanager
 def held(url: str, state_dir: Path | str | None, own: Iterable[str] = (),
-         settings: Any = None, library_pull: bool = False) -> Iterator[Message | None]:
-    """Ollama at *url* made to answer for a block (`OllamaStarter.start`, with *settings* and *library_pull*), and what
-    this process started or used of it given up at the block's end (`finish_all`). What stands in the way, None when
-    it answers."""
+         settings: Any = None) -> Iterator[Message | None]:
+    """Ollama at *url* made to answer for a block (`OllamaStarter.start`, with *settings*), and what this process
+    started or used of it given up at the block's end (`finish_all`). What stands in the way, None when it answers."""
     try:
-        yield OllamaStarter(url, state_dir=state_dir, own=own, settings=settings, library_pull=library_pull).start()
+        yield OllamaStarter(url, state_dir=state_dir, own=own, settings=settings).start()
     finally:
         finish_all()
+
+
+# ------------------------------------------------------------------ a pull from Ollama's library (see the top)
+@dataclass
+class PullServer:
+    """Where a pull from Ollama's library goes (`pull_server`): its address *url*; whether that is a server of its own,
+    started for the pull (*own*); once the pull has ended, whether that one stopped (*stopped*) and how long it ran
+    (*seconds*)."""
+
+    url: str
+    own: bool = False
+    stopped: bool = False
+    seconds: float = 0.0
+
+
+class PullServerFailed(OSError):
+    """The server of its own for a pull did not start or did not answer; *message*: what stood in the way, as
+    `OllamaStarter.start` says it (``health.ollama_down`` when the pull was cancelled meanwhile)."""
+
+    def __init__(self, message: Message):
+        super().__init__(f"Ollama could not be started for the download ({message.code})")
+        self.message = message
+
+
+def pull_record_path(state_dir: Path | str | None) -> Path | None:
+    """Where a server started for a pull is written down for *state_dir* (None: nowhere)."""
+    return Path(state_dir) / PULL_RECORD_FILE if state_dir else None
+
+
+def _free_port() -> int:
+    """A port of `PULL_HOST` free at this moment, as the system picks one (nothing is connected to)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((PULL_HOST, 0))
+        return int(probe.getsockname()[1])
+
+
+def needs_own_pull_server(url: str, state_dir: Path | str | None) -> bool:
+    """Whether a pull from Ollama's library at *url* goes to a server of its own (`pull_server`): the one that answers
+    there is TASlation's and was told not to use Ollama's cloud features (`setup_of`)."""
+    setup = setup_of(url, state_dir)
+    return setup is not None and setup.no_cloud and health.ollama_running(url)
+
+
+def say_pull_server(server: PullServer) -> None:
+    """The log's one line on a server started for a pull from Ollama's library, once the pull has ended (numbers only;
+    the installer says it for setup_models.py, whose own log goes nowhere: `translator_install.Installer`)."""
+    if server.stopped:
+        LOG.info("Ollama was started for a download from Ollama's library without OLLAMA_NO_CLOUD (a server of its own "
+                 "on a port of its own; the server in use keeps the variable) and stopped after it (%.1f s)",
+                 server.seconds)
+    else:
+        LOG.warning("Ollama was started for a download from Ollama's library without OLLAMA_NO_CLOUD (a server of its "
+                    "own on a port of its own) and did not stop after it (%.1f s); the next look stops it (the end of "
+                    "the install, or the next download)", server.seconds)
+
+
+def _stop_pull(proc: Any, info: ProcessInfo | None, path: Path | None) -> bool:
+    """The server *proc* (*info*: as Windows knew it at its start) started for a pull stopped as the end stops the
+    server TASlation started (`stop_server`), and its record (*path*) dropped once it is gone. Whether it is."""
+    if info is not None:
+        gone = stop_server(proc.pid, info.started)
+    else:  # (not known as a process: it ended at once)
+        try:
+            proc.kill()
+            proc.wait(KILL_WAIT_S)
+            gone = True
+        except (OSError, AttributeError, subprocess.SubprocessError):
+            gone = False
+    if gone and path is not None:
+        _drop(path)
+    return gone
+
+
+def end_pull_server(state_dir: Path | str | None) -> bool:
+    """A server `pull_server` started that is still running though its pull's process has ended (that process was
+    ended before it could stop it) stopped (`stop_server`) and its record dropped; one whose pull is still under way
+    in another process is left. Whether one was stopped. Never touches a server it did not start."""
+    path = pull_record_path(state_dir)
+    if path is None or not path.is_file():
+        return False
+    record = _read(path)
+    if record is None or not _server_alive(record):
+        _drop(path)
+        return False
+    owner = record.get("owner")
+    if isinstance(owner, dict) and not _is(owner, this_process()) and _alive(owner):
+        return False
+    if stop_server(record["pid"], record["started"]):
+        _drop(path)
+        LOG.info("the Ollama server TASlation started for a download from Ollama's library, left running by the "
+                 "download's process, was stopped")
+        return True
+    LOG.warning("the Ollama server TASlation started for a download from Ollama's library did not stop; the next look "
+                "stops it")
+    return False
+
+
+@contextlib.contextmanager
+def pull_server(url: str, state_dir: Path | str | None, cancel: threading.Event | None = None,
+                on_end: Callable[[PullServer], Any] | None = None) -> Iterator[PullServer]:
+    """Where a pull from Ollama's library (``ollama pull``) is to go for a block, as the module's docstring says: *url*
+    itself, unless the server that answers there is TASlation's and was told not to use Ollama's cloud features
+    (`needs_own_pull_server`); then a server of its own, without ``OLLAMA_NO_CLOUD`` (`server_env`'s *library_pull*),
+    on a free port of `PULL_HOST`, written down in *state_dir* (`PULL_RECORD_FILE`), waited for `START_WAIT_S` and
+    stopped at the block's end - the pull done, failed or cancelled -, the log's line said (`say_pull_server`) and
+    *on_end* told. Raises `PullServerFailed` when that one does not start or answer, or *cancel* is set meanwhile."""
+    if not needs_own_pull_server(url, state_dir):
+        yield PullServer(url)
+        return
+    if cancel is not None and cancel.is_set():
+        raise PullServerFailed(Message("health.ollama_down", url=url))
+    end_pull_server(state_dir)  # (one an earlier pull's process left)
+    command = find_ollama()
+    if command is None:
+        raise PullServerFailed(Message("health.ollama_not_installed"))
+    host = f"{PULL_HOST}:{_free_port()}"
+    server = PullServer(f"http://{host}", own=True)
+    env = server_env(library_pull=True)
+    env[HOST_VAR] = host
+    began = time.monotonic()
+    try:
+        proc = launch(command, env)
+    except OSError:
+        raise PullServerFailed(Message("health.ollama_no_answer")) from None
+    info = process_info(proc.pid)
+    path = pull_record_path(state_dir)
+    if path is not None and info is not None:
+        _write(path, {"what": "an Ollama server TASlation started for a pull from Ollama's library alone; it is "
+                              "stopped when the pull ends", "pid": proc.pid, "exe": info.exe, "started": info.started,
+                      "url": server.url, "owner": this_process()})
+    try:
+        failed = _wait_answer(server.url, cancel)
+        if failed is not None:
+            raise PullServerFailed(failed)
+        yield server
+    finally:
+        server.stopped = _stop_pull(proc, info, path)
+        server.seconds = time.monotonic() - began
+        say_pull_server(server)
+        if on_end is not None:
+            try:
+                on_end(server)
+            except Exception:  # noqa: BLE001 - whoever is told must not keep the pull's end from coming
+                LOG.exception("telling of the end of the download's server failed")

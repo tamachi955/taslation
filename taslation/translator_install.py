@@ -88,6 +88,9 @@ The full licence, in English and in Japanese:
 
 RECORD_FILE = "translator_models.json"
 PROGRESS_PREFIX = "@taslation "  # a line of setup_models.py --progress: this, then one JSON object
+# ... whose phase is this one: the server started for a pull from Ollama's library has ended (``url``, ``stopped``,
+# ``seconds``: `taslation.ollama_start.pull_server`), for the installer's log, never shown
+PULL_SERVER_PHASE = "pull_server"
 CANCELLED = 3  # setup_models.py's exit code for an install that was stopped (nothing left behind)
 NO_ROOM = 4  # ... for too little disk space (nothing downloaded)
 # ... for a download the server refused or no longer has (HTTP `REFUSED_HTTP`): trying again does not help, a newer
@@ -454,7 +457,10 @@ class Installer:
     to its licence before), each of its progress lines to *on_progress* (in the thread that calls `run`). `cancel`
     stops it from any thread: the script removes what it began, and if it does not end within CANCEL_WAIT_S, its
     process is ended and what it left is removed here (`remove_leftovers`; a model that came into Ollama meanwhile and
-    was not there before is removed too)."""
+    was not there before is removed too). Qwen's pull goes to a server of its own when the one in use is TASlation's
+    (`taslation.ollama_start.pull_server`): its end is said in this process's log (`PULL_SERVER_PHASE`, not passed
+    on), and one the script's process left running is stopped once that process has ended
+    (`taslation.ollama_start.end_pull_server`)."""
 
     def __init__(self, language: str, models_dir: Path | str, state_dir: Path | str, url: str | None = None,
                  on_progress: Callable[[dict[str, Any]], None] | None = None, python: str | None = None,
@@ -493,11 +499,11 @@ class Installer:
     def run(self) -> Outcome:
         if not Path(self.script).is_file():
             return Outcome("failed", "setup_models.py is not there")
+        from . import ollama_start
+
         if self.url:  # Ollama's server first, started as TASlation starts it: an ``ollama`` command that finds none
             # would start Ollama's tray app instead, and with it Ollama's start with Windows
-            from .ollama_start import OllamaStarter
-
-            OllamaStarter(self.url, state_dir=self.state_dir, settings=self.settings).start()
+            ollama_start.OllamaStarter(self.url, state_dir=self.state_dir, settings=self.settings).start()
         exe = find_ollama()
         before = listed(exe, self.url) if exe else None
         env = ollama_env(self.url)
@@ -516,10 +522,14 @@ class Installer:
         assert self._proc.stdout is not None
         for line in self._proc.stdout:
             data = parse_progress(line.rstrip("\n"))
-            if data is not None:
+            if data is not None and data["phase"] == PULL_SERVER_PHASE:
+                ollama_start.say_pull_server(ollama_start.PullServer(
+                    str(data.get("url") or ""), True, data.get("stopped") is True, float(data.get("seconds") or 0)))
+            elif data is not None:
                 self.last = data
                 self.on_progress(data)
         code = self._proc.wait()
+        ollama_start.end_pull_server(self.state_dir)  # (one its process left: ended before it could stop it)
         if code == 0 and not self._cancel.is_set():
             return Outcome("done")
         if self._cancel.is_set() or code == CANCELLED:

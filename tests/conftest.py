@@ -173,6 +173,7 @@ def nothing_starts_ollama(monkeypatch):
     monkeypatch.setattr(ollama_start, "stop_server", refused("stop"))
     monkeypatch.setattr(ollama_start, "set_priority_class", refused("change of priority"))
     monkeypatch.setattr(ollama_start, "_yielded", {})
+    monkeypatch.setattr(ollama_start, "_setups", {})  # (nor what a server a test started got: `setup_of`)
     yield
     ollama_start._claims.clear()
 
