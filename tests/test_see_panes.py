@@ -517,6 +517,164 @@ def test_panes_tick_keeps_the_panes_still_from_spreads_to_a_single_page_and_star
     assert boxes(SPREAD, (0, wider[0]), wider)[0][0] == pn.GAP  # (another frame size: afresh)
 
 
+# ------------------------------------------------------------------ never on the page on show (test_see_book_walk)
+def on_show(app, box, since=-1e9):
+    """The frame on show's page box as `ui.seethrough.note_frame` notes it (None: it has none), stood since *since*."""
+    app._see_box_now = (FRAME, box, since, None)
+    app._see_held_at = 0.0
+
+
+def shown(app):
+    left, right = app._see_through.handed[-1]
+    return (left[1] if left else None), (right[1] if right else None)
+
+
+def test_a_ground_kept_from_an_older_page_never_puts_a_pane_on_the_page_on_show(tmp_path):
+    # (the owner's window: the cover's box kept while the spreads were shown, the panes 300 px from it, on the pages)
+    app = fake_app(tmp_path, _see_ground=(FRAME, COVER, BAND, (20, 20, 20), (0, FRAME[0])))
+    ui.panes_tick(app)
+    assert from_page(shown(app), COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)  # (by the cover, while it is on show)
+    on_show(app, SPREAD)  # a spread on show (its box stood REST_S), the ground still the cover's
+    ui.panes_tick(app)
+    assert from_page(shown(app), SPREAD) == (pn.GAP, pn.GAP)  # out beside it, only as far as they must
+    assert app._see_pane_places[1] == (SPREAD[0], SPREAD[2])  # (the widest seen: still from there on)
+    on_show(app, COVER)
+    ui.panes_tick(app)
+    assert from_page(shown(app), SPREAD) == (pn.GAP, pn.GAP)
+    on_show(app, (100, 0, FRAME[0] - 100, FRAME[1]))  # a page wider than any room: hidden, never over it
+    ui.panes_tick(app)
+    assert shown(app) == (None, None) and not any(app._see_pane_over.values())  # (no room: as ever)
+
+
+def test_the_frame_on_show_with_no_page_box_hides_the_panes_but_on_the_made_up_ground(tmp_path, caplog):
+    from taslation.ui import report
+
+    app = fake_app(tmp_path)
+    on_show(app, None)  # (another page, no page box of its own: what the ground says is an older page's)
+    with caplog.at_level("INFO", logger="taslation.ui.seethrough"):
+        ui.panes_tick(app)
+        ui.panes_tick(app)
+    assert shown(app) == (None, None) and app._see_pane_over == {"left": ui.NO_BOX, "right": ui.NO_BOX}
+    assert sum("hidden" in r.getMessage() for r in caplog.records) == 2  # (once a side, not once a tick)
+    facts = {"panes": {}, "pane_wanted": {"left": True, "right": True}}
+    assert report._pane(app, facts, "left") == f"hidden: {ui.NO_BOX}"
+    on_show(app, SPREAD)
+    ui.panes_tick(app)
+    assert None not in shown(app) and app._see_pane_over == {"left": "", "right": ""}
+    # a tab with no page, the panes on the made-up ground in the viewer's window: no page box is the rule there
+    made = fake_app(tmp_path, _see_ground=None, _see_frame_seen=(FRAME, (0, 0, FRAME[0], FRAME[1])),
+                    _pick_trial={"since": 0.0}, _pick_nothing=True)
+    on_show(made, None)
+    ui.panes_tick(made)
+    assert None not in shown(made)
+
+
+def test_a_slide_s_frames_are_set_aside_the_panes_checked_by_the_page_once_it_rests(tmp_path, monkeypatch):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(ui.time, "monotonic", lambda: clock.now)
+    app = fake_app(tmp_path)
+    ui.panes_tick(app)
+    placed = shown(app)
+    slid = (SPREAD[0] + 400, 0, FRAME[0], FRAME[1])  # (the page dragged along with the pointer, over the right pane)
+    app.held = True
+    app._held_in_viewer = lambda: app.held
+    app._see_box_now = (FRAME, slid, clock.now - 5, None)
+    ui.panes_tick(app)
+    assert shown(app) == placed  # held: set aside, the panes as they were
+    app.held, app._see_held_at = False, clock.now  # let go
+    clock.now += ui.RELEASE_S / 2
+    ui.panes_tick(app)
+    assert shown(app) == placed  # (within RELEASE_S of the release: the viewer has not answered it yet)
+    clock.now += ui.RELEASE_S
+    ui.panes_tick(app)  # it rests where it was let go: the right pane would lie on it - it goes out, or hides
+    right = shown(app)[1]
+    assert right is None or pn.overlap(right, slid) == 0
+
+
+def test_with_an_area_set_by_hand_the_panes_stand_outside_it_where_it_leaves_them_room(tmp_path):
+    def placed(margins, page=COVER):
+        first, last = margins[0], FRAME[0] - margins[2]
+        app = fake_app(tmp_path, _manual_area=True, _hand_set=lambda: margins,
+                       _see_ground=(FRAME, page, BAND, (20, 20, 20), (first, last)))
+        ui.panes_tick(app)
+        return shown(app), first, last
+
+    (left, right), first, last = placed((300, 0, 300, 0))  # room beyond it at both sides
+    assert left[2] <= first - pn.GAP and right[0] >= last + pn.GAP  # outside it, whatever page is in it
+    assert first - left[2] <= pn.MAX_FROM_PAGE and right[0] - last <= pn.MAX_FROM_PAGE  # (the cap from the area)
+    assert left[0] >= pn.GAP and right[2] <= FRAME[0] - pn.GAP
+    (left, right), first, last = placed((40, 0, 40, 0))  # no room beyond it: inside it beside the page, as ever
+    assert left[0] >= first + pn.GAP and right[2] <= last - pn.GAP
+    assert from_page((left, right), COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
+    (left, right), first, last = placed((40, 0, 300, 0))  # room at the right alone
+    assert left[0] >= first + pn.GAP and left[2] <= COVER[0] - pn.GAP and right[0] >= last + pn.GAP
+    (left, right), _first, _last = placed((0, 85, 0, 0))  # one that trims only the browser's bar: as with none
+    assert from_page((left, right), COVER) == (pn.MAX_FROM_PAGE, pn.MAX_FROM_PAGE)
+
+
+def test_the_check_hides_a_pane_inside_an_area_set_by_hand_or_over_the_page_and_says_why_once(tmp_path, caplog):
+    app = fake_app(tmp_path)
+    pane = (300, 150, 424, 450)
+    with caplog.at_level("INFO", logger="taslation.ui.seethrough"):
+        assert ui._clear_of_page(app, None, (pane, None), book=(320, None)) == (None, None)
+        assert ui._clear_of_page(app, None, (pane, None), book=(320, None)) == (None, None)
+        assert ui._clear_of_page(app, ((420, 0, 900, 946), None), (pane, None)) == (None, None)
+        assert ui._clear_of_page(app, ((424, 0, 900, 946), None), (pane, None)) == (pane, None)  # (touching)
+        assert ui._clear_of_page(app, None, (None, pane), book=(None, 400)) == (None, None)
+    said = [r.getMessage() for r in caplog.records if "hidden" in r.getMessage()]
+    assert len(said) == 3 and ui.IN_AREA in said[0] and ui.OVER_PAGE in said[1] and ui.IN_AREA in said[2]
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_whatever_page_comes_a_pane_shown_never_lies_on_the_page_on_show_nor_inside_an_area_set_by_hand(
+        tmp_path, seed):
+    # a property over walks of pages - single pages and spreads, centred or not, wider than any seen before or not,
+    # a frame now and then with no page box, a press held now and then -, the ground left an older page's at times
+    # (as bars that never went left it), in frames of several sizes and DPIs, with and without an area set by hand
+    import random
+
+    rng = random.Random(seed)
+    size = rng.choice([FRAME, (1920, 1032), (1366, 705), (2560, 1377), (3440, 1392)])
+    dpi = rng.choice([96, 120, 144])
+    width, height = size
+    kind = rng.choice(["none", "room", "no room", "bar only"])
+    margins = {"none": None, "room": (rng.randint(150, 420), 60, rng.randint(150, 420), 0),
+               "no room": (rng.randint(0, 60), 60, rng.randint(0, 60), 0), "bar only": (0, 85, 0, 0)}[kind]
+    first, last = (margins[0], width - margins[2]) if margins else (0, width)
+    app = fake_app(tmp_path, _see_dpi=dpi, _manual_area=margins is not None, _hand_set=lambda: margins)
+    app.held = False
+    app._held_in_viewer = lambda: app.held
+    band = (int(height * 0.15), int(height * 0.88))
+    pages = []
+    for _step in range(30):
+        span = last - first
+        wide = rng.random() < 0.5
+        w = int(span * rng.uniform(0.6, 1.0)) if wide else int(span * rng.uniform(0.25, 0.55))
+        x = first + (span - w) // 2 + rng.randint(-60, 60)
+        x = max(first, min(last - w, x))
+        page = (x, 0, x + w, height)
+        if pages and rng.random() < 0.25:  # (farther out than any before, at one side or both)
+            widest = (min(p[0] for p in pages), max(p[2] for p in pages))
+            page = (max(first, widest[0] - rng.randint(1, 200)), 0, min(last, widest[1] + rng.randint(1, 200)), height)
+        pages.append(page)
+        ground_page = page if rng.random() < 0.5 else rng.choice(pages)  # (or an older page's, kept)
+        app._see_ground = (size, ground_page, band, (20, 20, 20), (first, last))
+        box = None if rng.random() < 0.1 else page
+        app._see_box_now = (size, box, -1e9, None)
+        app.held = rng.random() < 0.1
+        app._see_held_at = 0.0
+        ui.panes_tick(app)
+        book = ui._book_columns(app, size, dpi, (first, last))[0]
+        for k, pane in enumerate(shown(app)):
+            if pane is None:
+                continue
+            assert 0 <= pane[0] < pane[2] <= width and band[0] <= pane[1] < pane[3] <= band[1]
+            if book is not None and book[k] is not None:  # (outside the area set by hand, where it leaves room)
+                assert (pane[2] <= book[0] - pn.GAP) if k == 0 else (pane[0] >= book[1] + pn.GAP), (seed, pane)
+            if not app.held:  # (a press held: the slide's frames set aside)
+                assert box is not None and pn.overlap(pane, box) == 0, (seed, kind, pane, box, ground_page)
+
+
 def test_a_click_on_a_control_acts_on_it_and_one_between_them_on_nothing(tmp_path):
     app = fake_app(tmp_path)
     ui.panes_tick(app)

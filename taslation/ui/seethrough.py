@@ -814,6 +814,9 @@ def start(app: Any) -> bool:
     app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
     app._see_newest = None  # the facts' memo of the newest frame noted, whatever it was (`note_frame`, `rest_tick`)
     app._see_frame_seen = None  # (its size, its capture area's box) (`note_frame`, `_pick_ground`)
+    app._see_box_now = None  # (frame size, page box, since when it stands, the frame's facts) of the newest frame
+    # noted (`_note_box`: what the panes are checked against, `_settled`)
+    app._see_pane_over = {}  # side -> why it is hidden though placed ("": it is not) (`_clear_of_page`)
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_held_memo = None  # the facts' memo of the newest frame noted while it was (`_at_rest`)
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
@@ -1274,13 +1277,15 @@ def panes_tick(app: Any) -> None:
     page, beside the page at the last rest - placed by the widest the page has been in frames of this size
     (`pn.reaches`) and where they were (`pn.place`'s *before*, both in `_see_pane_places`), so that they stand still
     from spreads to a single page -, or hidden (no page on a flat ground yet, no room, the right one switched off).
-    While a browser window picked shows no page of a book in its tab and no page on a flat ground (a page of text, a
-    blank tab: `viewers.ViewerMixin._pick_nothing`) they stand in the viewer's window all the same (`_pick_ground`),
-    the right one saying so - nothing else would. The right
-    one is a column as high as the band (`pn.column_height`): the bubble's block and the changing rows from its top
-    down, its foot at the bottom, the foot's rows where they stay (`right_rows`); the bubble's block only where it
-    fits with the foot, else the indicators alone; its plates' boxes go with it (the window lets it take a click there
-    alone)."""
+    The page they go by reaches at the least to the page box of the frame on show once it has stood (`_settled`) and,
+    with a capture area set by hand that leaves them room beyond it, to the area's edges: they stand outside it then
+    (`_book_columns`); after the placement no pane shown lies over the frame on show's page or in that area
+    (`_clear_of_page`). While a browser window picked shows no page of a book in its tab and no page on a flat
+    ground (a page of text, a blank tab: `viewers.ViewerMixin._pick_nothing`) they stand in the viewer's window all
+    the same (`_pick_ground`), the right one saying so - nothing else would. The right one is a column as high as
+    the band (`pn.column_height`): the bubble's block and the changing rows from its top down, its foot at the
+    bottom, the foot's rows where they stay (`right_rows`); the bubble's block only where it fits with the foot, else
+    the indicators alone; its plates' boxes go with it (the window lets it take a click there alone)."""
     over = getattr(app, "_see_through", None)
     if over is None:
         return
@@ -1300,6 +1305,14 @@ def panes_tick(app: Any) -> None:
         return
     size, page, band, colour, columns = ground
     dpi = getattr(app, "_see_dpi", st.BASE_DPI)
+    book, columns = _book_columns(app, size, dpi, columns)  # (outside an area set by hand, where it leaves room)
+    settled = _settled(app, size)
+    if settled is not None and settled[0] is not None:  # (the page of the frame on show, whatever the ground's was)
+        now = settled[0]
+        page = (min(page[0], now[0]), page[1], max(page[2], now[2]), page[3])
+    if book is not None:  # (the capture area set by hand: the least the page reaches to)
+        page = (page[0] if book[0] is None else min(page[0], book[0]), page[1],
+                page[2] if book[1] is None else max(page[2], book[1]), page[3])
     language = ui_language()
     scheme = pn.colours(colour)
     rows = left_rows(app)
@@ -1333,6 +1346,7 @@ def panes_tick(app: Any) -> None:
                                        before=before)
     if not made_up:
         app._see_pane_places = (key, pn.seen_after(reach, seen), pn.edges((box_left, box_right), before))
+    box_left, box_right = _clear_of_page(app, settled, (box_left, box_right), book, made_up)
     app._see_right_used = used
     origin = over.client_origin() if callable(getattr(over, "client_origin", None)) else None
     box_left, box_right = pane_on_screen(box_left, origin), pane_on_screen(box_right, origin)
@@ -2081,36 +2095,48 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     was: a page that a viewer drags along with the pointer, out of its place and
     over the panes' places, hid the panes while it was held there, and the frame of a page taken while it moved, or
     found on no flat ground, set the panes by it until the next frame at rest. A frame with bars over the page leaves
-    the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`)."""
+    the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`) -, and
+    once the bars have stayed BAR_WAIT_S it is a frame as any other (`_bars_last`). Before, bars that never went kept
+    the ground of the first frame for good: on a viewer whose area set by hand began 3 px above the browser's own bar's
+    foot, every frame had a band across the area's top (the browser's bar, 4 px on every fourth row), and the book's
+    cover, a single page in the middle, placed the panes for 688 s and the spreads after it, 300 px from the cover's
+    box, on both pages. The page box is the look's, or where it finds none, the capture area set by hand when the
+    ground beyond it is flat (`_box_of`)."""
     app._see_newest = getattr(facts, "memo", None)  # (the newest picture noted, whatever it is: `rest_tick`)
     app._see_frame_seen = (image.size, _area_of(app, image))  # (the newest frame's size and area: `_pick_ground`)
     found = frame_look(app, image, facts)
     if found.kind is not None:
         note_state(app, found.kind)
         return
-    if not found.bands:
+    box, colour = _box_of(app, image, facts, found)
+    _note_box(app, image, box, facts)
+    if found.bands:
+        note_state(app, "bars")
+        if app._see_bars_since is None:
+            app._see_bars_since = time.monotonic()
+            try:
+                app.after(int(BAR_WAIT_S * 1000) + 30, lambda: _bars_due(app))
+            except Exception:  # noqa: BLE001 - no Tk loop (a test)
+                pass
+        if not _bars_last(app):
+            _ground_under_bars(app, image, facts, box, colour)
+            return
+    else:
         if app._see_bars_since is not None:  # the bars have gone: a page read under them is read once more
             try:
                 app.after(GONE_LOOK_MS, lambda: _bars_due(app, gone=True))
             except Exception:  # noqa: BLE001 - no Tk loop (a test)
                 pass
         app._see_bars_since = None
-        ground = _ground_of(app, image, facts, found)
-        if _at_rest(app, image, found.box, facts) and not _keeps_ground(app, image, found.box):
+    ground = _ground_of(app, image, facts, box, colour)
+    if _at_rest(app, image, box, facts) and not _keeps_ground(app, image, box):
+        if not found.bands:
             note_state(app, "rest")
-            _rest(app, found.box, ground, image.size)
-        else:
+        _rest(app, box, ground, image.size)
+    else:
+        if not found.bands:
             note_state(app, "held" if held(app) else "moving")
-            _aside(app, found.box, ground, image.size, facts)
-        return
-    note_state(app, "bars")
-    if app._see_bars_since is None:
-        app._see_bars_since = time.monotonic()
-        try:
-            app.after(int(BAR_WAIT_S * 1000) + 30, lambda: _bars_due(app))
-        except Exception:  # noqa: BLE001 - no Tk loop (a test)
-            pass
-    _ground_under_bars(app, image, facts, found)
+        _aside(app, box, ground, image.size, facts)
 
 
 FRAME_STATES_KEPT = 64  # (`note_state`) the newest frames' states kept, for a report
@@ -2129,32 +2155,189 @@ def note_state(app: Any, state: str) -> None:
     kept.append((time.monotonic(), str(state)))
 
 
-def _ground_of(app: Any, image: Image.Image, facts: Any, found: st.Look) -> Any:
-    """The side panes' ground in the frame *image* whose look is *found*: (its size, the page box, the steady band's
-    rows, the ground's colour, the capture area's columns); None when no page on a flat ground was found."""
-    if found.box is None:
+def _ground_of(app: Any, image: Image.Image, facts: Any, box: Any, colour: Any) -> Any:
+    """The side panes' ground in the frame *image* whose page box is *box* (`_box_of`) on a ground of *colour*: (its
+    size, the page box, the steady band's rows, the ground's colour, the capture area's columns); None when no page on
+    a flat ground was found."""
+    if box is None:
         return None
     _rgb, area = area_rgb(app, image, facts)
     steady = st.steady_box(image.size, area)
-    return image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2])
+    return image.size, box, (steady[1], steady[3]), colour, (area[0], area[2])
 
 
-def _ground_under_bars(app: Any, image: Image.Image, facts: Any, found: st.Look) -> None:
-    """A frame with bars over the page (`note_frame`) while no ground of a frame of its size is had: the side panes'
-    ground taken from it, at rest as any frame is (`_at_rest`, `rest_tick`). What the panes are placed by is there
-    with the bars as without them - the page's columns (`seethrough.ground_box` leaves the bars' rows out) and the
-    steady band, where bars never come -, and a viewer that came into sight with its bars up and keeps them (the
-    pointer resting on them, a click that holds them: a viewer brought to the front from behind other windows) gave
-    no frame without them before: the panes would stay hidden until the bars went, page turn after page turn. With a
-    ground of the frame's size had, the frames with bars leave it as it is (as ever)."""
+def _bars_last(app: Any) -> bool:
+    """Whether the bars over the page have stayed BAR_WAIT_S (`note_frame`): no viewer's bars sliding in and out but
+    a state - a viewer that keeps them while it is not in front, a browser's bar under an area set by hand -, whose
+    frames are the page at rest or not as any other frame is (`_at_rest`)."""
+    since = getattr(app, "_see_bars_since", None)
+    return since is not None and time.monotonic() - float(since) >= BAR_WAIT_S
+
+
+def _ground_under_bars(app: Any, image: Image.Image, facts: Any, box: Any, colour: Any) -> None:
+    """A frame with bars over the page that have not stayed BAR_WAIT_S yet (`note_frame`) while no ground of a frame
+    of its size is had: the side panes' ground taken from it, at rest as any frame is (`_at_rest`, `rest_tick`). What
+    the panes are placed by is there with the bars as without them - the page's columns (`seethrough.ground_box`
+    leaves the bars' rows out) and the steady band, where bars never come -, and a viewer that came into sight with its
+    bars up and keeps them (the pointer resting on them, a click that holds them: a viewer brought to the front from
+    behind other windows) gave no frame without them before: the panes would stay hidden until the bars went, page turn
+    after page turn. With a ground of the frame's size had, the frames with new bars leave it as it is."""
     ground = getattr(app, "_see_ground", None)
-    if found.box is None or (ground is not None and ground[0] == image.size):
+    if box is None or (ground is not None and ground[0] == image.size):
         return
-    under = _ground_of(app, image, facts, found)
-    if _at_rest(app, image, found.box, facts):
-        _rest(app, found.box, under, image.size)
+    under = _ground_of(app, image, facts, box, colour)
+    if _at_rest(app, image, box, facts):
+        _rest(app, box, under, image.size)
     else:
-        _aside(app, found.box, under, image.size, facts)
+        _aside(app, box, under, image.size, facts)
+
+
+BEYOND_PX = 24  # (`_beyond`) px of the frame beyond each side of a capture area set by hand looked at (at 96 DPI)
+
+
+def _box_of(app: Any, image: Image.Image, facts: Any, found: st.Look) -> tuple[Any, Any]:
+    """The page box the frame *image* gives the side panes (frame pixels) and the ground's colour: the look's
+    (*found*); where it finds none, the capture area the reader set by hand when the ground beyond it is flat
+    (`_beyond`) - a page that fills the area set about it leaves no ground inside it, and neither do a spread of colour
+    pictures, a dark page beside a black one, a page running off the window's foot: the area stands in for the page
+    box (the panes go outside it, `_book_columns`), where it leaves a pane room beyond it: one that does not would hide
+    the panes it holds (a slide's frames, the page half out, would be a page at rest). (None, the look's colour) where
+    there is neither."""
+    if found.box is not None or not getattr(app, "_manual_area", False):
+        return found.box, found.ground
+    if _book_columns(app, image.size, getattr(app, "_see_dpi", st.BASE_DPI), None)[0] is None:
+        return None, found.ground
+
+    def make() -> Any:
+        _rgb, area = area_rgb(app, image, facts)
+        colour = _beyond(facts.rgb(), area, px(app, BEYOND_PX), px(app, st.LOOK_STEP))
+        return None if colour is None else (tuple(int(v) for v in area), colour)
+
+    try:
+        got = facts.get(("see_stand_in",), make)
+    except Exception:  # noqa: BLE001 - not known: no page box
+        got = None
+    return (None, found.ground) if got is None else got
+
+
+def _beyond(rgb: np.ndarray, area: Any, width: int, step: int) -> tuple[int, int, int] | None:
+    """The ground's colour beyond the capture area *area* in the frame *rgb*: the frame's *width* px beyond each of its
+    sides that has any (the area's steady rows, every *step*-th pixel), when each is one colour (GROUND_SHARE within
+    GROUND_TOL of its median) and the two are alike; None where they are not, or the area has no side with frame
+    beyond it."""
+    height, full = rgb.shape[:2]
+    left, top, right, bottom = (int(v) for v in area)
+    _l, t, _r, b = st.steady_box((full, height), (left, top, right, bottom))
+    step = max(1, int(step))
+    strips = []
+    if left >= step:
+        strips.append(rgb[t:b:step, max(0, left - width):left:step])
+    if full - right >= step:
+        strips.append(rgb[t:b:step, right:min(full, right + width):step])
+    colours = []
+    for strip in strips:
+        pixels = strip.reshape(-1, strip.shape[-1])[:, :3].astype(np.int16)
+        if not pixels.size:
+            continue
+        colour = np.median(pixels, axis=0)
+        if float(np.all(np.abs(pixels - colour) <= st.GROUND_TOL, axis=1).mean()) < st.GROUND_SHARE:
+            return None
+        colours.append(colour)
+    if not colours or (len(colours) == 2 and bool(np.any(np.abs(colours[0] - colours[1]) > st.GROUND_TOL))):
+        return None
+    return tuple(int(round(float(v))) for v in colours[0])  # type: ignore[return-value]
+
+
+def _note_box(app: Any, image: Image.Image, box: Any, facts: Any) -> None:
+    """(each frame noted that is not one to wait out, bars or none) The newest frame's page box (`_box_of`; None:
+    none found) and since when it has stood - the box the frame before had, within LOOK_STEP, in frames of this size -,
+    with the frame's facts: what the side panes are checked against, whatever became of the ground (`_settled`). A
+    frame the button was held over (or the very picture noted then, captured again once it is up) stands from no
+    time."""
+    now = time.monotonic()
+    memo = getattr(facts, "memo", None)
+    was = getattr(app, "_see_box_now", None)
+    same = was is not None and was[0] == image.size and _same_box(was[1], box, px(app, st.LOOK_STEP))
+    pressed = held(app) or (memo is not None and memo is getattr(app, "_see_held_memo", None))
+    app._see_box_now = (image.size, box, was[2] if same and not pressed else now, facts)
+
+
+def _settled(app: Any, size: Any) -> tuple[Any, Any] | None:
+    """The newest frame noted (`_note_box`), of *size*, once its page box - or that it has none - has stood REST_S, no
+    button held in the viewer and RELEASE_S past the last release (a slide's frames and the page let go: set aside, as
+    `note_frame` sets them aside): (its page box or None, its facts); else None (nothing to check the panes by)."""
+    now_box = getattr(app, "_see_box_now", None)
+    if now_box is None or tuple(now_box[0]) != tuple(size) or held(app):
+        return None
+    now = time.monotonic()
+    if now - now_box[2] < REST_S or now - float(getattr(app, "_see_held_at", 0.0) or 0.0) < RELEASE_S:
+        return None
+    return now_box[1], now_box[3]
+
+
+def _book_columns(app: Any, size: Any, dpi: Any, columns: Any) -> tuple[Any, Any]:
+    """With a capture area the reader set by hand (they said where the book is), the side panes never lie inside its
+    columns where it leaves a pane room beyond it: per such side the area's edge is the least the page reaches to (the
+    page the panes go by is widened to it, MAX_FROM_PAGE measured from the farther out of the two: `panes_tick`) and
+    the frame's edge bounds the pane. A side where the area leaves no room beyond it (an area that trims only a
+    browser's bars) bounds the pane as before - between the area's edge and the page. (per side the area's edge or
+    None, the columns the panes are placed within); (None, *columns*) with no area set by hand."""
+    if not getattr(app, "_manual_area", False) or not callable(getattr(app, "_hand_set", None)):
+        return None, columns
+    from . import area
+
+    try:
+        hand = area.margins_to_box(app._hand_set(), tuple(size))
+    except Exception:  # noqa: BLE001 - not known: as with none
+        return None, columns
+    width = int(size[0])
+    if hand[2] <= hand[0]:
+        return None, columns
+    least = st.scaled(pn.MIN_W + 2 * pn.GAP, dpi)
+    room_left, room_right = hand[0] >= least, width - hand[2] >= least
+    if not (room_left or room_right):
+        return None, columns
+    first, last = columns if columns is not None else (0, width)
+    return ((hand[0] if room_left else None, hand[2] if room_right else None),
+            (0 if room_left else first, width if room_right else last))
+
+
+OVER_PAGE = "its place lay over the page box of the frame on show"  # (`_clear_of_page`: why a pane is hidden)
+IN_AREA = "its place lay inside the capture area set by hand"
+NO_BOX = "the frame on show has no page box, and its place came from an older page's"
+
+
+def _clear_of_page(app: Any, settled: tuple[Any, Any] | None, boxes: tuple[Any, Any], book: Any = None,
+                   made_up: bool = False) -> tuple[Any, Any]:
+    """The rule `panes_tick` keeps after every placement: a pane shown never lies inside the columns of a capture area
+    set by hand that it is kept out of (*book*, `_book_columns`), nor - once the frame on show has stood (`_settled`;
+    while none has, a slide's frames among them, as placed) - over that frame's page box (`_box_of`), nor anywhere
+    when that frame has none (its place came from an older page's; but the made-up ground of a tab with no page,
+    *made_up*, where none is the rule: `_pick_ground`). A pane that would is hidden, and the log says so once (until
+    it is clear again). Before, a page box kept from the book's cover, a single page in the middle, placed the panes
+    on the spreads after it for 688 s (`note_frame`)."""
+    out: list[Any] = []
+    said = getattr(app, "_see_pane_over", None)
+    if said is None:
+        said = app._see_pane_over = {}
+    for k, (side, box) in enumerate(zip(("left", "right"), boxes)):
+        why = ""
+        edge = book[k] if book is not None else None
+        page = settled[0] if settled is not None else None
+        if box is None:
+            pass
+        elif edge is not None and (box[2] > edge if k == 0 else box[0] < edge):
+            why = IN_AREA
+        elif page is not None and pn.overlap(box, page) > 0:
+            why = OVER_PAGE
+        elif settled is not None and page is None and not made_up:
+            why = NO_BOX
+        if why and said.get(side) != why:
+            log.info("see-through: the %s pane at %s hidden: %s (%s)", side, tuple(int(v) for v in box), why,
+                     "no page box" if page is None else f"page box {tuple(int(v) for v in page)}")
+        said[side] = why
+        out.append(None if why else box)
+    return out[0], out[1]
 
 
 def _keeps_ground(app: Any, image: Image.Image, box: Any) -> bool:

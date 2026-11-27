@@ -459,6 +459,43 @@ def test_the_side_panes_stay_inside_the_viewer_s_window(name: str, place: Place,
                 assert near is None or (near >= gap and wide is not None and gap <= wide <= far), (aspects, step)
 
 
+@pytest.mark.parametrize("name, place", CASES)
+def test_the_real_tick_never_puts_a_pane_on_the_page_on_show_though_the_ground_is_an_older_page_s(
+        name: str, place: Place, screen: Screen, tmp_path: Any) -> None:
+    # (`ui.seethrough.panes_tick` itself, through the walks and a spread wider than any after them, its ground kept
+    # from the first page all the while - as bars that never went kept the cover's on the owner's window -, with no
+    # area set and with one set by hand about the widest spread where it leaves room beyond it)
+    from test_see_panes import FakeOver, fake_app
+
+    client = place.client
+    size = (client[2] - client[0], client[3] - client[1])
+    dpi = screen.of_rect(place.rect).dpi
+    band = (0, size[1])
+    over = FakeOver()
+    over.client_origin = lambda: (client[0], client[1])  # type: ignore[attr-defined]
+    widest = _page(size, 1.6)
+    hand = (widest[0], 0, size[0] - widest[2], 0)
+    for margins in (None, hand):
+        app = fake_app(tmp_path, _see_through=over, _see_dpi=dpi, _manual_area=margins is not None,
+                       _hand_set=lambda margins=margins: margins)
+        columns = (0, size[0]) if margins is None else (widest[0], widest[2])
+        book = ui._book_columns(app, size, dpi, columns)[0]
+        for aspects in WALKS.values():
+            app._see_pane_places = None
+            app._see_ground = (size, _page(size, aspects[0]), band, (20, 20, 20), columns)
+            for aspect in (*aspects, 1.6):
+                page = _page(size, aspect)
+                app._see_box_now, app._see_held_at = (size, page, -1e9, None), 0.0
+                ui.panes_tick(app)
+                for k, handed in enumerate(over.handed[-1]):
+                    if handed is None:
+                        continue
+                    box = handed[1]
+                    assert _inside(box, (0, 0, *size)) and not _meet(box, page), (aspects, aspect, box)
+                    if book is not None and book[k] is not None:
+                        assert (box[2] <= book[0]) if k == 0 else (box[0] >= book[1]), (aspects, aspect, box)
+
+
 def _span(size: tuple[int, int], page: Box, dpi: int) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
     """Where each pane's edge toward the page may be beside *page* (low, high; None: nowhere), worked out here on
     its own: GAP px from the page at the least, MAX_FROM_PAGE px at the most, the pane GAP px inside the frame."""

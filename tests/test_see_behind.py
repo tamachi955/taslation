@@ -78,7 +78,10 @@ def test_page_turns_with_the_bars_held_keep_the_panes(app):
     for seed in (2, 3, 4):  # the pages turned with the keys, the bars up all the while
         app.clock.now += 3.0
         ground = note(app, frame(seed=seed))
-        assert ground is first  # (a ground of the frame's size is had: frames with bars leave it as ever)
+        if app.clock.now - app._see_bars_since < ui.BAR_WAIT_S:
+            assert ground is first  # (a ground of the frame's size is had: frames with new bars leave it as it is)
+        else:  # (bars that stayed: a frame at rest under them gives the ground anew - the same page box here)
+            assert ground == first
 
 
 def test_frames_with_bars_leave_a_ground_of_their_size_as_it_is(app):
@@ -86,6 +89,23 @@ def test_frames_with_bars_leave_a_ground_of_their_size_as_it_is(app):
     assert plain is not None and app._see_bars_since is None
     other = frame(spread=(300, 0, 1600, 946))  # (bars over another box: a page in motion with its bars, say)
     assert note(app, other) is plain and note(app, other) is plain
+
+
+def test_bars_that_stay_are_a_state_and_a_frame_at_rest_under_them_gives_the_ground_anew(app):
+    # (the owner's window: a browser's bar under the area's top made every frame one with bars; the cover, the first
+    # screen, gave the ground, and the spreads after it never did - the panes stood by the cover for 688 s)
+    cover = note(app, frame(spread=(616, 0, 1288, 946)))
+    assert near(cover[1][::2], (616, 1288))
+    app.clock.now += 1.0
+    spread = frame(seed=2)
+    assert note(app, spread) is cover and note(app, spread) is cover  # (new bars: the ground as it is)
+    app.clock.now += ui.BAR_WAIT_S
+    note(app, spread)  # (the bars have stayed: a frame as any other - its box another than the frame before's ...)
+    assert app._see_ground is cover
+    app.clock.now += 0.05
+    note(app, spread)  # (... and the same in the next: at rest)
+    assert near(app._see_ground[1][::2], SPREAD[::2]) and app._see_rest_box == app._see_ground[1]
+    assert app._see_bars_since is not None  # (the bars are there all the while: read with them painted over)
 
 
 def test_a_frame_with_bars_of_another_size_gives_the_panes_their_ground_at_that_size(app):

@@ -479,7 +479,11 @@ def screen_lines(app: Any, result: Any) -> list[str]:
     image = getattr(result, "original", None) if result is not None else None
     if image is not None and callable(getattr(app, "_margins_of", None)):
         margins = _get(lambda: app._margins_of(image))
-        lines.add("capture_area", f"margins {_box(margins)} ({'set by hand' if getattr(app, '_manual_area', False) else 'found'})")
+        hand = _get(app._hand_set) if getattr(app, "_manual_area", False) and callable(
+            getattr(app, "_hand_set", None)) else None
+        how = "found" if hand is None else "set by hand" if tuple(hand) == tuple(margins or ()) else \
+            f"the page found inside the area set by hand, margins {_box(hand)}"
+        lines.add("capture_area", f"margins {_box(margins)} ({how})")
     rest = getattr(app, "_see_rest_box", None)
     size = getattr(app, "_see_rest_size", None)
     lines.add("page_at_rest", "none" if rest is None else
@@ -509,6 +513,9 @@ def _pane(app: Any, facts: dict[str, Any], side: str) -> str:
         return "hidden: the viewer's window being sized"
     if facts.get("moving"):
         return "hidden: the viewer's window moved or sized a moment ago (back at rest)"
+    over = (getattr(app, "_see_pane_over", None) or {}).get(side)
+    if over:  # (`seethrough._clear_of_page`)
+        return f"hidden: {over}"
     if not (facts.get("pane_wanted") or {}).get(side):
         return "hidden: no room beside the page, or off the monitors"
     if facts.get("covers"):

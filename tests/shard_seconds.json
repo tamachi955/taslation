@@ -93,6 +93,7 @@
  "test_report.py": 3.0,
  "test_rooms.py": 0.7,
  "test_save_after_showing.py": 7.2,
+ "test_see_book_walk.py": 2.6,
  "test_settings_dialog.py": 0.8,
  "test_shortcuts.py": 1.1,
  "test_shown_again.py": 3.6,
