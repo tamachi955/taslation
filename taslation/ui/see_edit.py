@@ -162,7 +162,8 @@ def _probe(app: Any, original: Any, box: st.Box, size: tuple[int, int], dpi: int
     if kept.get("frame") != id(original):
         kept.clear()
         kept["frame"] = id(original)
-    near = st.grow(box, st.scaled(st.MARGIN, dpi), size)
+    within, off_rows = seethrough.compared_by(original)  # (the page's own pixels alone, as a patch's: `compare_box`)
+    near = st.compare_box(box, st.scaled(st.MARGIN, dpi), size, within, off_rows)
     found = kept.get(near)
     if found is None and near[2] > near[0] and near[3] > near[1]:
         try:

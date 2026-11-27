@@ -13,7 +13,8 @@ part of a release.
                                 [--standin-full-screen] [--no-viewer-s S] [--book-asked]
                                 [--start-behind cover|part|max|front|minimised] [--behind-s S] [--behind-before-s S]
                                 [--behind-end close|raise] [--chooser] [--standin-bars-held MS]
-                                [--standin-start-tab plain|japanese]
+                                [--standin-start-tab plain|japanese] [--pages PNG[,PNG...]]
+                                [--see-margin-as-before]
 
 What runs, all on this computer:
 
@@ -22,7 +23,11 @@ What runs, all on this computer:
   ground, spreads right to left, every turn soft first and sharp a while later, black for a while now and then, a
   spinner. Its pages are the OpenMantra dataset's (``~/.taslation/datasets/openmantra``, read in place by file URL:
   the series chosen by its place in the sorted list, *--series*, never by name; no picture is copied), or with
-  *--synthetic* (or no dataset) the repository's two test pages, turned and flipped. The page TURNS BY ITSELF from a
+  *--synthetic* (or no dataset) the repository's two test pages, turned and flipped, with *--pages* made-up pages of
+  the developer's (`make_sample_page.py --layout edges`: a case reproduced on pages made for it;
+  *--see-margin-as-before* compares the same run with the patches' margins as they were before they kept to the
+  page's own pixels). The page
+  TURNS BY ITSELF from a
   script in its URL, released part by part through a control file in the scratch folder: no key, no click, nothing
   is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here);
 * TASlation in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: its one mode, see-through -
@@ -4693,8 +4698,15 @@ def run(args: argparse.Namespace) -> int:
                               "soft_first": "on" if soft_first else "off"}
     if x_out:
         report["x_left_out"] = x_out
-    pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
-    report["pages"] = "dataset" if pictures else "synthetic"
+    given = [Path(p) for p in (getattr(args, "pages", "") or "").split(",") if p.strip()]
+    for path in given:
+        if not path.is_file():
+            raise SystemExit(f"--pages: no such picture: {path.name}")
+    pictures: list[Any] | None = (None if args.synthetic or given else
+                                  dataset_pages(args.series, args.first, count))
+    report["pages"] = "dataset" if pictures else "given" if given else "synthetic"
+    if given:
+        pictures = [(given[k % len(given)], "") for k in range(count)]
     if not pictures:
         pictures = synthetic_pages(count)
     cancel_first = None
@@ -4942,6 +4954,11 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     info = viewer_info()
     edit = bool(getattr(args, "see_edit", False))
     editing = edit or bool(getattr(args, "editing", False))  # (--editing: the role alone, nothing done on the page)
+    if getattr(args, "see_margin_as_before", False):  # (a comparison: the patches' margins as they were before)
+        from taslation.ui import seethrough as see_ui
+
+        see_ui.compared_by = lambda _original: (None, ())  # (the stamp is made and reported, not used)
+        report["see_margin"] = "as before"
     remember_role(state, BOOK, "translator" if editing else "reader")  # (editing: the left pane's Reader mode off)
     report["role_kept"] = "translator" if editing else "reader"
     profiles = Profiles(state / "profiles.json")
@@ -6097,6 +6114,12 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--series", type=int, default=1, help="the dataset's series, by its place in the sorted list")
     ap.add_argument("--first", type=int, default=1, help="its first page (from 1)")
     ap.add_argument("--synthetic", action="store_true", help="the repository's test pages, not the dataset")
+    ap.add_argument("--see-margin-as-before", action="store_true",
+                    help="the patches' margins as they were before they kept to the page's own pixels "
+                         "(`ui.seethrough.compared_by` gives nothing): the same run compared with the rule before")
+    ap.add_argument("--pages", default="", metavar="PNG[,PNG...]",
+                    help="made-up pages of the developer's (`tools/make_sample_page.py --layout ...`) in place of the "
+                         "dataset's, again and again in this order: a case reproduced on pages made for it")
     ap.add_argument("--front-for-order", default="as-is", choices=("as-is", "own"),
                     help="own: the window keeps the viewer under its own as with it in front (`ui.order`), whoever is "
                          "in front (nothing is brought to the front); with --cover, as if the cover's program were in "

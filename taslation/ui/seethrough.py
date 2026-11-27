@@ -133,7 +133,13 @@ PAINTED_INFO = "taslation.see_painted"  # (the picture's info) the rows painted 
 GONE_LOOK_MS = 150  # once the bars have gone, the viewer is looked at so soon (a page read under them: read_under_bars)
 REST_S = 0.3  # a frame not at rest (`note_frame`) is the page at rest once it has stayed so long, no press held
 CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`read_under_bars`)
-# (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
+COMPARE_INFO = "taslation.see_compare"  # (the picture's info) what the patches of a page read from it are compared
+# by beyond their own place (`compare_within`); kept when the bars' mark (PAINTED_INFO) goes
+EDGE_PX = 2  # a patch's margin keeps so far inside the page box and the capture area (`compare_within`)
+# (CUT_PX, EDGE_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
+UNSHOWN_EVERY_S = 1.0  # the page on show's translated regions whose lettering shows not looked at more often
+UNSHOWN_SETTLE_S = 0.5  # ... and only once the viewer's frame looked at has been its newest so long
+UNSHOWN_LOGGED = 3  # lines a page gives the log of them at the most (`unshown_tick`)
 
 
 QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
@@ -919,6 +925,7 @@ def tick(app: Any) -> None:
     if set_add_key is not None:  # (the Insert key: Add area while the viewer is in front, `see_edit`)
         set_add_key(hidden(app) and bool(getattr(getattr(app, "settings", None), "add_area_key", True)))
     present(app)
+    unshown_tick(app)
     if hidden(app):
         from . import see_edit
 
@@ -1708,9 +1715,185 @@ class Patcher:
 
     def _make(self, key: int, original: Image.Image, lettered: Image.Image, final: bool, margin: int,
               gap: int) -> None:
-        patches = st.make_patches(self._frame_pixels(original), _rgb(lettered), margin=margin, gap=gap)
+        within, off_rows = compared_by(original)
+        patches = st.make_patches(self._frame_pixels(original), _rgb(lettered), margin=margin, gap=gap,
+                                  within=within, off_rows=off_rows)
         self.over.present(key, original.size, patches, final)
         self.made += 1
+
+
+def _meets_box(a: Any, b: Any) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _differs_where(where: dict[str, Any], limit: float) -> str:
+    """The part of a patch's compared pixels that keeps it hidden (`seethrough.where_differs`): "box" when its own
+    place is another, else the margin's side with the largest share of other pixels ("top", ...); "size" for a frame
+    that does not hold the place."""
+    if "size" in where:
+        return "size"
+    if where.get("box", (0.0, 0))[0] > limit:
+        return "box"
+    sides = [(v[0], k) for k, v in where.items() if k != "box"]
+    return max(sides)[1] if sides else "box"
+
+
+def unshown(app: Any) -> dict[str, Any] | None:
+    """The page on show's regions lettered or erased (`pipeline.erases`) whose patch does not show now, and why, from
+    the see-through window's last look (`SeeThrough.why_not_shown`): numbers and kinds only, no text. None while the
+    page on show is not the last translated page (one filling in, another page in the viewer) or nothing is known.
+
+    Each region not shown: (its index among the page's regions, the kind, facts): "no patch" (its lettering changed
+    no pixel there), "covered" (a window over the viewer), "hover" (the pointer rests on it), "original" (the editor
+    shows its original), "left out" (editing: its box takes nothing), "hidden:WHY" (the lettering hidden: off, away,
+    no viewer...), "no match" (no patch of the page matches the frame), or "differs:PART" - its pixels compared are
+    other than when it was read (`_differs_where`: "box", "top", "bottom", "left", "right", "size"), with the share
+    and the limit."""
+    over = getattr(app, "_see_through", None)
+    result = getattr(app, "last_result", None)
+    original = getattr(result, "original", None)
+    why_of = getattr(over, "why_not_shown", None)
+    if original is None or not callable(why_of):
+        return None
+    try:
+        on_show = bool(app._result_on_show())
+    except Exception:  # noqa: BLE001 - (a page going)
+        on_show = False
+    why = why_of() or {}
+    key = id(original)
+    if not on_show or (why.get("key") not in (None, key)):
+        return None
+    if not why.get("hidden") and time.monotonic() - float(why.get("frame_at", 0.0)) < UNSHOWN_SETTLE_S:
+        return None  # (a frame the viewer may be drawing over: a turn's first frames)
+    from ..pipeline import erases
+
+    regions = [(i, r) for i, r in enumerate(result.regions) if erases(r)]
+    out: list[tuple[int, str, dict[str, Any]]] = []
+    hidden = why.get("hidden")
+    if hidden:
+        out = [(i, f"hidden:{hidden}", {}) for i, _r in regions]
+    elif why.get("key") is None:
+        known = key in why.get("sets", ())
+        out = [(i, "no match", {"set_known": int(known)}) for i, _r in regions]
+    else:
+        boxes, drawn = why.get("boxes", ()), set(why.get("drawn", ()))
+        covered, held, bare = set(why.get("covered", ())), set(why.get("held", ())), set(why.get("bare", ()))
+        valid, where, shares = set(why.get("valid", ())), why.get("where", {}), why.get("shares", ())
+        limit = float(why.get("share_limit", st.CHANGED_SHARE))
+        left_out_boxes = {tuple(b) for k, b in enumerate(why.get("region_boxes", ())) if k in set(why.get(
+            "left_out", ()))}
+        for i, r in regions:
+            bbox = tuple(int(v) for v in r.bbox)
+            own = [k for k, b in enumerate(boxes) if _meets_box(b, bbox)]
+            if any(k in drawn for k in own):
+                continue
+            if not own:
+                out.append((i, "no patch", {}))
+                continue
+            facts: dict[str, Any] = {"patches": len(own)}
+            if any(k in covered for k in own):
+                kind = "covered"
+            elif why.get("hover") in own:
+                kind = "hover"
+            elif any(k in bare for k in own):
+                kind = "original"
+            elif all(k in valid for k in own) and bbox in left_out_boxes:
+                kind = "left out"
+            else:
+                bad = [k for k in own if k not in valid]
+                worst = max(bad or own, key=lambda k: shares[k] if k < len(shares) else 0.0)
+                part = _differs_where(where.get(worst, {}), limit)
+                kind = f"differs:{part}"
+                facts.update(share=shares[worst] if worst < len(shares) else None, limit=limit,
+                             where={k: v[0] for k, v in where.get(worst, {}).items()},
+                             box=tuple(boxes[worst]), near=tuple(why.get("near", ())[worst]) if worst < len(
+                                 why.get("near", ())) else None, held=int(worst in held))
+            out.append((i, kind, facts))
+    from collections import Counter
+
+    within, off_rows = (getattr(original, "info", {}).get(COMPARE_INFO) or (None, ()))
+    return {"key": key, "regions": len(regions), "not_shown": out, "kinds": dict(Counter(k for _i, k, _f in out)),
+            "editing": bool(why.get("editing")), "final": bool(why.get("final", True)),
+            "boxes": [(i, tuple(int(v) for v in r.bbox)) for i, r in regions], "within": within,
+            "off_rows": tuple(off_rows), "size": tuple(original.size)}
+
+
+def unshown_tick(app: Any, now: float | None = None) -> None:
+    """(`tick`, every UNSHOWN_EVERY_S) The page on show's lettered regions not shown (`unshown`), kept for the tools
+    and the report (``_see_unshown``: the page's frame key -> {"last": the last look's, "looks": how many looks,
+    "kinds_seen": the kinds summed over them}) and one line in the log per page - and again when its count changes,
+    UNSHOWN_LOGGED lines a page at the most: how many regions, how many not shown, the kinds (numbers and kinds
+    only)."""
+    now = time.monotonic() if now is None else now
+    if now - float(getattr(app, "_see_unshown_at", 0.0)) < UNSHOWN_EVERY_S:
+        return
+    app._see_unshown_at = now
+    try:
+        found = unshown(app)
+    except Exception:  # noqa: BLE001 - a look less
+        log.debug("see-through mode: the regions not shown could not be counted", exc_info=True)
+        return
+    if found is None:
+        return
+    kept: dict[int, Any] = app.__dict__.setdefault("_see_unshown", {})
+    logged: dict[int, Any] = app.__dict__.setdefault("_see_unshown_logged", {})
+    key = found["key"]
+    entry = kept.pop(key, None) or {"looks": 0, "kinds_seen": {}}
+    entry["last"], entry["looks"] = found, entry["looks"] + 1
+    for kind, n in found["kinds"].items():
+        entry["kinds_seen"][kind] = entry["kinds_seen"].get(kind, 0) + n
+    kept[key] = entry
+    if len(kept) > 64:
+        for old in list(kept)[:-64]:
+            kept.pop(old, None)
+    said = (len(found["not_shown"]), tuple(sorted(found["kinds"].items())))
+    lines, last = logged.get(key, (0, None))
+    if said != last and lines < UNSHOWN_LOGGED:
+        logged[key] = (lines + 1, said)
+        kinds = ", ".join(f"{k} {n}" for k, n in sorted(found["kinds"].items())) or "none"
+        log.info("see-through: page %s: %d of %d lettered regions not shown (%s)%s", f"{key & 0xFFFF:04x}",
+                 said[0], found["regions"], kinds, " editing" if found["editing"] else "")
+    if len(logged) > 256:
+        for old in list(logged)[:-256]:
+            logged.pop(old, None)
+
+
+def compared_by(original: Any) -> tuple[Any, tuple[tuple[int, int], ...]]:
+    """(within, off_rows) of `seethrough.compare_box` for the patches of a page read from the frame *original*: what
+    `compare_within` stamped on it at its capture; (None, ()) for a frame that has none (a test's, an older one)."""
+    given = getattr(original, "info", {}).get(COMPARE_INFO)
+    if not given:
+        return None, ()
+    within, off_rows = given
+    return within, tuple(off_rows)
+
+
+def compare_within(app: Any, image: Image.Image, facts: Any) -> None:
+    """(each frame captured in see-through mode, `LiveViewMixin._capture_frame`) What the patches of a page read from
+    *image* (the frame as it is read: `reading_frame`'s) are compared by beyond their own place, stamped on it
+    (COMPARE_INFO, which its copies carry): the capture area and the page box found in it (`frame_look`; none found:
+    the area alone), each EDGE_PX inside its edges, and the rows painted over in it (PAINTED_INFO) with CUT_PX about
+    them. A margin outside those took in pixels that change while the page does not - the viewer's ground and the
+    browser's band beside a page's edge, the page's border row, the painted rows once the bars had gone (the page is
+    there then) -, and the lettering of a bubble touching the page's edge stayed hidden."""
+    try:
+        _rgb_area, area = area_rgb(app, image, facts)
+        found = frame_look(app, image, facts)
+        edge = px(app, EDGE_PX)
+        box = area
+        if found.box is not None:
+            page = found.box
+            box = (max(area[0], page[0]), max(area[1], page[1]), min(area[2], page[2]), min(area[3], page[3]))
+            if box[2] <= box[0] or box[3] <= box[1]:
+                box = area
+        within = (box[0] + edge, box[1] + edge, box[2] - edge, box[3] - edge)
+        if within[2] <= within[0] or within[3] <= within[1]:
+            within = box
+        cut = px(app, CUT_PX)
+        rows = tuple((max(0, int(a) - cut), int(b) + cut) for a, b in getattr(image, "info", {}).get(PAINTED_INFO, ()))
+        image.info[COMPARE_INFO] = (tuple(int(v) for v in within), rows)
+    except Exception:  # noqa: BLE001 - (no stamp: the patches are compared as before, the box grown alone)
+        log.debug("see-through mode: what the patches are compared by could not be stamped", exc_info=True)
 
 
 def pairs(app: Any) -> list[tuple[Image.Image, Image.Image, bool, tuple[Any, ...]]]:
@@ -1751,8 +1934,10 @@ def present(app: Any) -> None:
             patcher.put(original, lettered.copy() if fill is not None and lettered is fill.page else lettered, final,
                         margin, gap)
         else:
+            within, off_rows = compared_by(original)
             over.present(id(original), original.size, st.make_patches(_rgb(original), _rgb(lettered), margin=margin,
-                                                                      gap=gap), final)
+                                                                      gap=gap, within=within, off_rows=off_rows),
+                         final)
         memo[:] = [(original, state), *[(img, s) for img, s in memo if img is not original]][:MEMO_KEPT]
 
 

@@ -537,3 +537,182 @@ def test_after_the_bars_the_page_is_read_again_only_when_bubbles_were_left_out_a
     assert not ui.after_bars(app_with((1, 0)), plain)  # carried over whole: nothing to ask
     assert ui.after_bars(app_with((0, 0)), plain)  # nothing carried and a bubble cut: read anew
     assert not ui.after_bars(app_with((1, 1), busy=True), plain) and len(calls) == 3  # (a job runs: later)
+
+
+# ------------------------------------------------------------------ a patch at the page's edge: the page's pixels alone
+def test_a_patch_s_margin_keeps_to_the_page_s_own_pixels_never_inside_its_box():
+    size = (W, H)
+    assert st.compare_box((120, 20, 170, 60), 6, size) == (114, 14, 176, 66)  # (as before: grown, within the frame)
+    # the capture area and the page box at rest (`ui.seethrough.compare_within`): the margin stops at them
+    assert st.compare_box((120, 2, 170, 60), 6, size, within=(102, 4, 298, 296)) == (114, 2, 176, 66)
+    assert st.compare_box((100, 100, 140, 296), 6, size, within=(102, 4, 298, 296)) == (100, 94, 146, 296)
+    # rows painted over in the frame read, wholly above or below the box: left out; a band across the box is left
+    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((0, 47),)) == (114, 47, 176, 96)
+    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((93, 120),)) == (114, 44, 176, 93)
+    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((40, 60),)) == (114, 44, 176, 96)
+
+
+def test_a_bubble_touching_the_page_s_top_shows_though_the_browser_s_band_over_the_page_changes():
+    # the owner's case: a bubble at the very top of the page (its box from row 41, the page from row 40), the rows above
+    # the page the browser's own band - one shade in the frame read, another later (the page itself as it was)
+    frame = page(box=(100, 40, 300, 300))
+    frame[:40] = 60
+    done = lettered(frame, [(120, 41, 170, 80)])
+    later = frame.copy()
+    later[36:40] = 160  # (the band's last rows: a line drawn otherwise)
+    old = st.make_patches(frame, done)[0]
+    assert not st.patch_matches(old, bgra(later))  # the margin took the band in: hidden while the page was there
+    where = st.where_differs(old, bgra(later))
+    assert where["top"][0] > 0.3 and where["box"][0] == 0.0 and where["left"][0] == 0.0
+    new = st.make_patches(frame, done, within=(102, 42, 298, 298))[0]
+    assert new.near[1] == 41 and new.box == old.box
+    assert st.patch_matches(new, bgra(later))  # ... the page's own pixels alone: shown
+    turned = page(seed=2, box=(100, 40, 300, 300))
+    assert not st.patch_matches(new, bgra(turned))  # (another page under it still hides it)
+
+
+def test_a_bubble_just_below_rows_painted_over_shows_once_the_bars_have_gone():
+    frame = page()
+    painted = frame.copy()
+    painted[0:30] = 0  # (read with a bar's rows painted in the ground's colour)
+    done = lettered(painted, [(120, 33, 170, 70)])  # (3 px below them: not cut, its margin in them)
+    old = st.make_patches(painted, done)[0]
+    assert not st.patch_matches(old, bgra(frame))  # once the bars had gone, never shown again
+    new = st.make_patches(painted, done, off_rows=((0, 30 + 3),))[0]
+    assert new.near[1] == 33 and st.patch_matches(new, bgra(frame))
+    assert not st.patch_matches(new, bgra(page(seed=2)))
+
+
+def test_where_a_patch_s_pixels_differ_is_told_by_part():
+    frame = page()
+    patch = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60)]))[0]
+    assert set(st.where_differs(patch, bgra(frame))) == {"box", "top", "bottom", "left", "right"}
+    assert all(v[0] == 0.0 for v in st.where_differs(patch, bgra(frame)).values())
+    right = frame.copy()
+    right[20:60, 172:176] = 255 - right[20:60, 172:176]
+    got = st.where_differs(patch, bgra(right))
+    assert got["right"][0] > 0.5 and got["box"][0] == got["top"][0] == got["bottom"][0] == got["left"][0] == 0.0
+    assert st.where_differs(patch, bgra(frame[:50])) == {"size": (1.0, 0)}
+    edge = st.make_patches(frame, lettered(frame, [(0, 0, 40, 30)]))[0]  # (at the frame's corner: no top, no left)
+    assert set(st.where_differs(edge, bgra(frame))) == {"box", "bottom", "right"}
+
+
+def test_the_frame_read_is_stamped_with_the_page_s_own_pixels_and_its_patches_keep_to_them(monkeypatch):
+    from PIL import Image
+
+    from taslation.ui import seethrough as ui
+
+    app = SimpleNamespace(_see_dpi=144)  # (a viewer at 150 %: EDGE_PX 2 -> 3, CUT_PX 3 -> 5)
+    monkeypatch.setattr(ui, "area_rgb", lambda app, image, facts: (None, (0, 40, W, H)))
+    monkeypatch.setattr(ui, "frame_look", lambda app, image, facts: st.Look((100, 30, 300, 300), (), None, (0, 0, 0)))
+    image = Image.new("RGB", (W, H))
+    image.info[ui.PAINTED_INFO] = ((40, 60),)
+    ui.compare_within(app, image, None)
+    assert ui.compared_by(image) == ((103, 43, 297, 297), ((35, 65),))
+    assert ui.compared_by(image.copy()) == ui.compared_by(image)  # (the frame read's copies carry it: the result's)
+    image.info.pop(ui.PAINTED_INFO)  # (`after_bars` takes the bars' mark: the stamp stays)
+    assert ui.compared_by(image)[1] == ((35, 65),)
+    assert ui.compared_by(Image.new("RGB", (W, H))) == (None, ())  # (a frame with none: as before)
+    monkeypatch.setattr(ui, "frame_look", lambda app, image, facts: st.Look(None, (), None, None))
+    plain = Image.new("RGB", (W, H))
+    ui.compare_within(app, plain, None)
+    assert ui.compared_by(plain) == ((3, 43, W - 3, H - 3), ())  # (no page box found: the capture area alone)
+    # the patch thread makes the patches of a page by it
+    frame, made = page(box=(100, 40, 300, 300)), []
+    shown = Image.fromarray(frame)
+    shown.info[ui.COMPARE_INFO] = ((102, 42, 298, 298), ())
+    over = SimpleNamespace(present=lambda key, size, patches, final: made.append(patches))
+    ui.Patcher(over, run=False)._make(1, shown, Image.fromarray(lettered(frame, [(120, 41, 170, 80)])), True, 6, 9)
+    assert made[0][0].near == (114, 41, 176, 86)
+
+
+def _unshown_app(why, regions, on_show=True):
+    from PIL import Image
+
+    original = Image.new("RGB", (W, H))
+    result = SimpleNamespace(original=original, regions=regions)
+    over = SimpleNamespace(why_not_shown=lambda: {"key": id(original), **why} if "key" not in why else why)
+    return SimpleNamespace(_see_through=over, last_result=result, _result_on_show=lambda: on_show), original
+
+
+def _region(box, status="translated"):
+    return SimpleNamespace(bbox=box, status=status, translated_text="Line." if status == "translated" else "")
+
+
+def test_the_lettered_regions_not_shown_are_told_with_why_numbers_and_kinds_only(monkeypatch):
+    from taslation.ui import seethrough as ui
+
+    regions = [_region((120, 41, 170, 80)), _region((200, 100, 250, 140)), _region((10, 10, 20, 20)),
+               _region((260, 200, 290, 240)), _region((300, 250, 330, 280), status="untranslated")]
+    why = {"boxes": ((120, 41, 170, 80), (200, 100, 250, 140), (260, 200, 290, 240)),
+           "near": ((114, 35, 176, 86), (194, 94, 256, 146), (254, 194, 296, 246)),
+           "valid": (1, 2), "covered": (2,), "drawn": (1,), "hover": None, "shares": (0.0192, 0.0, 0.0),
+           "share_limit": 0.01, "where": {0: {"box": (0.0, 300), "top": (0.3333, 30), "left": (0.0, 20)}},
+           "frame_at": 0.0, "final": True}
+    app, original = _unshown_app(why, regions)
+    found = ui.unshown(app)
+    assert found["regions"] == 4  # (the one not translated is no lettered region)
+    kinds = {i: kind for i, kind, _facts in found["not_shown"]}
+    assert kinds == {0: "differs:top", 2: "no patch", 3: "covered"}
+    facts = next(f for i, _k, f in found["not_shown"] if i == 0)
+    assert facts["share"] == 0.0192 and facts["limit"] == 0.01 and facts["where"]["top"] == 0.3333
+    assert facts["box"] == (120, 41, 170, 80) and facts["near"] == (114, 35, 176, 86)
+    assert found["kinds"] == {"differs:top": 1, "no patch": 1, "covered": 1}
+    words = repr(found)
+    assert "Line." not in words  # (no text of the page)
+    # the pointer resting on one, the original shown in the editor, the lettering hidden, no set matching
+    assert ui.unshown(_unshown_app({**why, "valid": (0, 1, 2), "covered": (), "hover": 0}, regions[:1])[0]
+                      )["kinds"] == {"hover": 1}
+    assert ui.unshown(_unshown_app({**why, "valid": (0, 1, 2), "covered": (), "bare": (0,), "editing": True},
+                                   regions[:1])[0])["kinds"] == {"original": 1}
+    assert ui.unshown(_unshown_app({"key": None, "hidden": "off"}, regions[:2])[0])["kinds"] == {"hidden:off": 2}
+    assert ui.unshown(_unshown_app({"key": None, "sets": (), "frame_at": 0.0}, regions[:2])[0]
+                      )["kinds"] == {"no match": 2}
+    # not the page on show, another page's set chosen, a frame the viewer has just drawn: nothing told
+    assert ui.unshown(_unshown_app(why, regions, on_show=False)[0]) is None
+    assert ui.unshown(_unshown_app({**why, "key": 1}, regions)[0]) is None
+    import time as _time
+
+    assert ui.unshown(_unshown_app({**why, "frame_at": _time.monotonic()}, regions)[0]) is None
+
+
+def test_a_page_gives_the_log_one_line_of_its_regions_not_shown_and_the_tools_their_kinds(monkeypatch, caplog):
+    import logging
+
+    from taslation.ui import seethrough as ui
+
+    regions = [_region((120, 41, 170, 80))]
+    why = {"boxes": ((120, 41, 170, 80),), "near": ((114, 35, 176, 86),), "valid": (), "covered": (), "drawn": (),
+           "shares": (0.02,), "where": {0: {"top": (0.5, 10)}}, "frame_at": 0.0}
+    app, original = _unshown_app(why, regions)
+    caplog.set_level(logging.INFO, logger=ui.log.name)
+    for k in range(5):
+        ui.unshown_tick(app, now=100.0 + k * ui.UNSHOWN_EVERY_S)
+    ui.unshown_tick(app, now=104.5)  # (sooner than UNSHOWN_EVERY_S: no look)
+    entry = app._see_unshown[id(original)]
+    assert entry["looks"] == 5 and entry["kinds_seen"] == {"differs:top": 5}
+    lines = [r.getMessage() for r in caplog.records if "lettered regions not shown" in r.getMessage()]
+    assert lines == [f"see-through: page {id(original) & 0xFFFF:04x}: 1 of 1 lettered regions not shown "
+                     "(differs:top 1)"]
+    app._see_through.why_not_shown = lambda: {"key": id(original), **why, "drawn": (0,)}
+    ui.unshown_tick(app, now=110.0)
+    said = [r for r in caplog.records if "lettered regions not shown" in r.getMessage()]
+    assert len(said) == 2  # (its count changed)
+    assert "0 of 1 lettered regions not shown (none)" in caplog.records[-1].getMessage()
+
+
+def test_the_window_keeps_where_each_patch_of_the_set_it_chose_differs():
+    from taslation.capture import seethrough as window
+
+    frame = page()
+    patches = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60), (220, 200, 280, 240)]))
+    chosen = st.PatchSet(key=7, size=(W, H), patches=patches, serial=3, final=True)
+    later = frame.copy()
+    later[62:66, 120:170] = 255 - later[62:66, 120:170]  # (just below the first)
+    view = bgra(later)
+    _set, valid, shares = st.visible([chosen], view)
+    facts = window.SeeThrough._facts_of(chosen, valid, valid, shares, [chosen], view, (W, H), 5.0)
+    assert facts["key"] == 7 and facts["valid"] == (1,) and facts["boxes"][0] == (120, 20, 170, 60)
+    assert set(facts["where"]) == {0} and facts["where"][0]["bottom"][0] > 0.3 and facts["where"][0]["box"][0] == 0.0
+    assert window.SeeThrough._facts_of(None, (), (), [], [chosen], view, (W, H), 5.0) == {"key": None, "sets": (7,),
+                                                                                         "at": 5.0}

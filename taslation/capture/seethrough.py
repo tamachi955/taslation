@@ -148,6 +148,7 @@ COVER_S = 0.1  # the windows over the viewer are looked for at most this often
 SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it too (`on_sizing_border`, px at 96 DPI)
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
+WHERE_KEPT = 64  # (`why_not_shown`) the patches of the set chosen whose differing pixels a look places, at the most
 START_S = 2.0  # how long `start` waits for the window to be made
 
 if IS_WINDOWS:
@@ -662,6 +663,11 @@ class SeeThrough:
         self._hover_wait: tuple[st.Box, float] | None = None  # (the patch the pointer came to, since when)
         self._hovered: tuple[int, st.Box] | None = None  # (its set's key, its box) of the patch left out, for Tk
         self._look_key: int | None = None  # the key of the set the last look chose (None: none), for Tk
+        # (`why_not_shown`) what the last full look found of each patch of the set it chose, and what the last drawing
+        # left out and why: a new dict each time, never changed after (read by the Tk thread as it is)
+        self._look_facts: dict[str, Any] = {}
+        self._why: dict[str, Any] = {}
+        self._frame_since: tuple[int, float] = (-1, 0.0)  # (the frame count the last full look had, since when)
         self._right_takes = False  # the right pane takes clicks now (the pointer on one of its plates)
         self._dpi = st.BASE_DPI  # the viewer's (`viewer_dpi`), at each change of its place or size
         self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, shares, frame, ms)
@@ -780,6 +786,17 @@ class SeeThrough:
     def look_key(self) -> int | None:
         """The key of the set the last look chose (the page whose patches match the viewer's frame); None for none."""
         return self._look_key
+
+    def why_not_shown(self) -> dict[str, Any]:
+        """What the last look and drawing made of the patches (numbers only, for the report and the log: `ui.seethrough.
+        unshown`): "key" the set chosen (None: none matched - "sets" the keys of those of the frame's size), "boxes" its
+        patches' boxes, "valid" those whose pixels match (`seethrough.patch_matches`), "where" for each other one where
+        its compared pixels differ (`seethrough.where_differs`), "covered" those a window over the viewer meets,
+        "drawn" those on show, "hover" the one left out under the pointer, "held" those kept whatever the frame says
+        (the region in the editor, one being pressed), "bare" those of the region whose original is shown, "editing",
+        "hidden" (why nothing shows: off, away, no viewer...), "at" (monotonic s), "frame_at" (since when the viewer's
+        frame looked at was its newest: a frame at rest so long). Empty before the first look."""
+        return self._why
 
     def set_panes(self, left: tuple[Any, ...] | None, right: tuple[Any, ...] | None) -> None:
         """The side panes as they are to be: each (its picture - premultiplied BGRA (H, W, 4), not changed after -,
@@ -1070,6 +1087,7 @@ class SeeThrough:
             self._last_look = None  # panes as they are)
             self._unhover()
             self._marks_live = None
+            self._why = {"hidden": "away" if away else "off", "at": now}
             self._hide("away" if away else "off")
             return
         self._new_frame = new_frame
@@ -1080,11 +1098,37 @@ class SeeThrough:
         chosen, shown, shares = st.visible(sets, view)
         compare_ms = (time.perf_counter() - started) * 1000
         self.counts["compare_ms"] += compare_ms
+        valid = shown
         if chosen is not None:
             shown = tuple(i for i in shown if not st.covered(chosen.patches[i].box, origin, self._covers))
+        if self._frame_since[0] != frame.seq:
+            self._frame_since = (frame.seq, now)
+        self._look_facts = {**self._facts_of(chosen, valid, shown, shares, sets, view, size, now),
+                            "frame_at": self._frame_since[1]}
         self._probes_failed = self._failed_probes(chosen, view)
         self._last_look = (chosen, shown, shares, frame.seq, compare_ms, origin, size, bool(sets))
         self._show_look(*self._last_look)
+
+    @staticmethod
+    def _facts_of(chosen: st.PatchSet | None, valid: tuple[int, ...], shown: tuple[int, ...], shares: list[float],
+                  sets: list[st.PatchSet], view: Any, size: tuple[int, int], now: float) -> dict[str, Any]:
+        """(a full look) The facts `why_not_shown` gives of the set *chosen*: where the pixels of each patch whose
+        pixels do not match differ (WHERE_KEPT patches at the most: a look of a page that matches has few)."""
+        if chosen is None:
+            return {"key": None, "sets": tuple(s.key for s in sets if s.size == size), "at": now}
+        where = {}
+        for i, patch in enumerate(chosen.patches):
+            if i not in valid and len(where) < WHERE_KEPT:
+                where[i] = st.where_differs(patch, view)
+        return {"key": chosen.key, "serial": chosen.serial, "final": chosen.final,
+                "boxes": tuple(p.box for p in chosen.patches), "near": tuple(p.near for p in chosen.patches),
+                "valid": valid, "covered": tuple(i for i in valid if i not in shown),
+                "shares": tuple(round(v, 4) for v in shares), "share_limit": st.CHANGED_SHARE, "where": where,
+                "at": now}
+
+    def _drew(self, drawn: tuple[int, ...], **more: Any) -> None:
+        """What the drawing after the last full look left out (`why_not_shown`)."""
+        self._why = {**self._look_facts, "drawn": tuple(drawn), "hidden": "", **more}
 
     def _show_look(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], any_sets: bool) -> None:
@@ -1102,6 +1146,7 @@ class SeeThrough:
         if chosen is None or not shown:
             why = "covered" if chosen is not None else ("no match" if any_sets else "no patches")
             self._unhover()
+            self._drew((), editing=False, hover=None)
             if ground:
                 self._show_ground(chosen, (), shares, seq, compare_ms, origin, size)
                 return
@@ -1110,6 +1155,8 @@ class SeeThrough:
         under = self._under_pointer(chosen, shown, origin)
         if under is not None:
             shown = tuple(i for i in shown if i != under)
+        self._drew(shown, editing=False, hover=under)
+        if under is not None:
             if not shown and not ground:
                 self._hide("hover", seq, compare_ms, shares)
                 return
@@ -1302,6 +1349,10 @@ class SeeThrough:
         self._hover_wait = None
         self._set_hover(marks.boxes[hover] if hover is not None else None, marks.key)
         indices = tuple(sorted(keep))
+        self._drew(indices, editing=True, hover=None,
+                   held=tuple(i for i, p in enumerate(patches) if any(meets(p.box, b) for b in held_boxes)),
+                   bare=tuple(i for i, p in enumerate(patches) if bare is not None and meets(p.box, bare)),
+                   left_out=tuple(sorted(left_out)), region_boxes=marks.boxes)
         holes = self._holes(origin)
         edit = (marks, hover, moved, left_out_set, drawing, ghosts, holes)
         key = (marks.serial, hover, None if moved is None else tuple(sorted(moved.items())), left_out_set, drawing,
@@ -1540,6 +1591,7 @@ class SeeThrough:
 
     def _nothing(self, why: str) -> None:
         """Nothing to lie over (no viewer, gone, minimised, no frame, no size): the lettering and the panes hidden."""
+        self._why = {"hidden": why, "at": time.monotonic()}
         self._hide(why)
         self._panes_hide(why)
         self._look_key = None

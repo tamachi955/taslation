@@ -65,7 +65,7 @@ PROFILES = ("dark", "light")
 PROFILE_OPTIONS = ("ground", "cover", "bars", "bar_top", "bar_bottom", "bar_style", "bar_fade_ms", "bar_hide_ms",
                    "bar_key_hide", "arrows", "arrow_show", "arrow_hide_ms", "arrow_inset", "page_clicks",
                    "ground_clicks", "jump", "jump_ms", "jump_half", "half_ms", "preview", "preview_ms", "resize",
-                   "resize_ms", "focus_black", "counter")
+                   "resize_ms", "focus_black", "counter", "band_line_ms")
 OPTION_VALUE = re.compile(r"[A-Za-z0-9_.\-]*")
 DARK = 16  # a frame no brighter than this at every point looked at is black
 

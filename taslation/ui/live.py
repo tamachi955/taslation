@@ -1161,6 +1161,7 @@ class LiveViewMixin(BlackViewerMixin):
             facts = _facts(self, image)
             seethrough.note_frame(self, image, facts)
             image = seethrough.reading_frame(self, image, facts)
+            seethrough.compare_within(self, image, facts)  # (its patches' margins: the page's own pixels alone)
         if seq is not None:
             self._captured = (hwnd, seq, image)
         return image

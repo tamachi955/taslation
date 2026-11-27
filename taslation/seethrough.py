@@ -4,10 +4,12 @@ are those it was made from.
 
 * A patch is a piece of the translated page: where the lettered page differs from the frame it was read from (the
   erased ground and the lettering), grouped into one piece per bubble (`make_patches`). It keeps the frame's pixels
-  round it (its box and MARGIN px about it, every STEP-th pixel), and it may show only while the viewer's latest frame
-  has those pixels there (`patch_matches`): a turn, a jump's black, a half-drawn spread, a washed-out preview, bars
-  laid over it or a sharper picture of the page change them, and the patch goes at that frame; it comes back as soon
-  as they are as they were. Nothing else decides it: not the page job, not the follow.
+  round it (its box and MARGIN px about it, every STEP-th pixel - the margin of the page's own pixels alone:
+  `compare_box`), and it may show only while the viewer's latest frame has those pixels there (`patch_matches`): a
+  turn, a jump's black, a half-drawn spread, a washed-out preview, bars laid over it or a sharper picture of the page
+  change them, and the patch goes at that frame; it comes back as soon as they are as they were. Nothing else decides
+  it: not the page job, not the follow. Where a patch's compared pixels differ, part by part, is told for the report
+  (`where_differs`).
 * What the overlay shows (`visible`): the patches of the newest set whose pixels match, those that match.
 * The window's picture (`compose`): the frame's size, transparent but for the patches shown (premultiplied BGRA, as
   ``UpdateLayeredWindow`` wants it).
@@ -33,7 +35,8 @@ except ImportError:  # pragma: no cover - cv2 is a dependency of the package
 Box = tuple[int, int, int, int]  # left, top, right, bottom (frame pixels)
 
 # ------------------------------------------------------------------ the patches
-MARGIN = 6  # px of the frame round a patch that must be as they were, too (a bar's edge, a page's edge just beside it)
+MARGIN = 6  # px of the frame round a patch that must be as they were, too (a bar's edge just beside it) - of the page's
+# own pixels: the margin stops at the page box and the capture area, and short of rows painted over (`compare_box`)
 STEP = 2  # every so many pixels of a patch's place (and its margin) is compared, across and down
 PIXEL_TOL = 24  # a pixel compared is another when one of its channels differs by more than this (of 255)
 CHANGED_SHARE = 0.01  # a patch's pixels are another's when more than this share of those compared is another
@@ -130,12 +133,39 @@ def scaled(px: int, dpi: int | float | None) -> int:
     return max(1, int(px * float(dpi or BASE_DPI) / BASE_DPI + 0.5))
 
 
+def compare_box(box: Box, margin: int, size: tuple[int, int], within: Box | None = None,
+                off_rows: tuple[tuple[int, int], ...] | list[tuple[int, int]] = ()) -> Box:
+    """What a patch (or a box with no patch: `probe`) of *box* is compared by (`Patch.near`): *box* grown by *margin*
+    px, within the frame of *size* (width, height) and, given, within *within* - the page's own pixels, the capture
+    area and the page box at rest a little inside their edges (`ui.seethrough.compare_within`) -, and short of the
+    rows *off_rows* ((start, end) pairs: those painted over in the frame read, its bars') that lie wholly above or
+    below *box*. Never smaller than *box* itself (within the frame). The margin is the page's alone: the ground beside
+    a page, the browser's own band over it, a page's border row drawn a shade apart and the painted rows (once the bars
+    have gone, the page is there) change while the page under the patch does not - a patch whose margin took them in
+    stayed hidden (a bubble touching the page's top)."""
+    width, height = size
+    left, top, right, bottom = grow(box, margin, size)
+    if within is not None:
+        left = min(max(left, int(within[0])), max(0, box[0]))
+        top = min(max(top, int(within[1])), max(0, box[1]))
+        right = max(min(right, int(within[2])), min(width, box[2]))
+        bottom = max(min(bottom, int(within[3])), min(height, box[3]))
+    for start, end in off_rows:
+        start, end = int(start), int(end)
+        if end <= box[1] and end > top:
+            top = min(end, max(0, box[1]))
+        elif start >= box[3] and start < bottom:
+            bottom = max(start, min(height, box[3]))
+    return left, top, right, bottom
+
+
 def make_patches(original: np.ndarray, lettered: np.ndarray, margin: int = MARGIN,
-                 step: int = STEP, gap: int = GROUP_PX) -> tuple[Patch, ...]:
+                 step: int = STEP, gap: int = GROUP_PX, within: Box | None = None,
+                 off_rows: tuple[tuple[int, int], ...] | list[tuple[int, int]] = ()) -> tuple[Patch, ...]:
     """The patches of the page *lettered* read from the frame *original* (both RGB, (H, W, 3) uint8): one for every
     group of pixels the lettering changed, pixels up to *gap* apart being of one (`groups`), its picture opaque where
-    it changed, *margin* px round it compared too. The frame's pixels are kept as BGR, as the viewer's frames come
-    (Windows.Graphics.Capture's BGRA)."""
+    it changed, *margin* px round it compared too - of the page's own pixels (*within*, *off_rows*: `compare_box`).
+    The frame's pixels are kept as BGR, as the viewer's frames come (Windows.Graphics.Capture's BGRA)."""
     mask = changed_mask(original, lettered)
     height, width = mask.shape
     out = []
@@ -148,7 +178,7 @@ def make_patches(original: np.ndarray, lettered: np.ndarray, margin: int = MARGI
         bgra[..., :3] = piece[:, :, ::-1]
         bgra[..., 3] = alpha * 255
         bgra[~alpha] = 0  # premultiplied: no colour where it is transparent
-        near = grow(box, margin, (width, height))
+        near = compare_box(box, margin, (width, height), within, off_rows)
         out.append(Patch(box, bgra, near, np.ascontiguousarray(sample(bgr_frame, near, step))))
     return tuple(out)
 
@@ -162,6 +192,31 @@ def changed_share(patch: Patch, frame: np.ndarray, step: int = STEP, tol: int = 
         return 1.0
     diff = np.abs(now.astype(np.int16) - patch.source.astype(np.int16)).max(axis=2)
     return float((diff > tol).mean()) if diff.size else 0.0
+
+
+SIDES = ("box", "top", "bottom", "left", "right")  # (`where_differs`) the parts of what a patch is compared by
+
+
+def where_differs(patch: Patch, frame: np.ndarray, step: int = STEP, tol: int = PIXEL_TOL
+                  ) -> dict[str, tuple[float, int]]:
+    """Where the pixels compared round *patch* (`changed_share`) are other in *frame*: for each part of its `near`
+    that has pixels compared - "box" (the patch's own place), "top" and "bottom" (the margin's rows above and below
+    it), "left" and "right" (its columns beside it) - the share of them that are other and their count. A frame that
+    does not hold the place: {"size": (1.0, 0)}. Numbers only, for the report (`SeeThrough.why_not_shown`)."""
+    now = sample(frame, patch.near, step)
+    if now.shape != patch.source.shape:
+        return {"size": (1.0, 0)}
+    other = np.abs(now.astype(np.int16) - patch.source.astype(np.int16)).max(axis=2) > tol
+    left, top = patch.near[0], patch.near[1]
+    ys = top + np.arange(other.shape[0]) * step
+    xs = left + np.arange(other.shape[1]) * step
+    above, below = ys < patch.box[1], ys >= patch.box[3]
+    rows_in = ~above & ~below
+    before, after = xs < patch.box[0], xs >= patch.box[2]
+    cols_in = ~before & ~after
+    parts = {"box": other[np.ix_(rows_in, cols_in)], "top": other[above], "bottom": other[below],
+             "left": other[np.ix_(rows_in, before)], "right": other[np.ix_(rows_in, after)]}
+    return {name: (round(float(part.mean()), 4), int(part.size)) for name, part in parts.items() if part.size}
 
 
 def patch_matches(patch: Patch, frame: np.ndarray, share: float = CHANGED_SHARE) -> bool:

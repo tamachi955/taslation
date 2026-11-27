@@ -75,7 +75,9 @@ draw. Each part has its own name in the query (`PROFILES` gives both profiles' v
 part takes): ground, cover, bars (none, edge, click, move), bar_top, bar_bottom, bar_style (solid, glass), bar_fade_ms,
 bar_hide_ms, bar_key_hide, arrows (none, edge, inset), arrow_show (move, always), arrow_hide_ms, arrow_inset,
 page_clicks, ground_clicks, jump (plain, spinner), jump_ms (A-B), jump_half, half_ms, preview, preview_ms, resize
-(plain, spinner), resize_ms (A-B), focus_black, counter. With a profile the page also says: ``ev=turn dir= by=key|arrow|
+(plain, spinner), resize_ms (A-B), focus_black, counter, band_line_ms (N > 0: the band's line just over the page drawn
+in another shade every N ms, the page as it is - a browser's own pixels there change so; 0, the default: never). With a
+profile the page also says: ``ev=turn dir= by=key|arrow|
 ground|page|script`` (a click's place, x= y= in the canvas's pixels), ``ev=key``, ``ev=bars on= why= fade=`` and
 ``ev=bars_done on=``, ``ev=arrows on= why=``, ``ev=spinner on=1 why=jump|resize ms=`` and ``on=0`` (the viewer's area
 black with a small spinner: its cells say spinner), ``ev=preview on=1 ms=`` and ``on=0``, ``ev=draw ... kind=half|preview
@@ -95,6 +97,7 @@ nothing else reads it. */
 const CONTROL_MS = 100;
 const CELL = 6, CODE_X = 12, CODE_Y = 12;  // the code's cells, CSS pixels from the content's top left
 const GROUND = "#2b2b2b", BAND = "#3a3d41", BAND_LINE = "#56595e", BAND_PART = "#4a4e53", COUNTER = "#9a9a9a";
+const BAND_LINE_OTHER = "#9aa0a6";  // (band_line_ms) the band's line in its other shade
 
 const query = new URLSearchParams(location.search);
 const hashed = new URLSearchParams(location.hash.slice(1));
@@ -127,13 +130,13 @@ const PROFILES = {
           bar_fade_ms: 200, bar_hide_ms: "", bar_key_hide: 1, arrows: "edge", arrow_show: "move",
           arrow_hide_ms: 3000, arrow_inset: 0, page_clicks: 0, ground_clicks: 1, jump: "spinner", jump_ms: "500-1100",
           jump_half: 0.25, half_ms: 2000, preview: 0, preview_ms: 200, resize: "spinner", resize_ms: "400-500",
-          focus_black: 0, counter: "percent" },
+          focus_black: 0, counter: "percent", band_line_ms: 0 },
   light: { ground: "white", cover: 1, bars: "move", bar_top: 40, bar_bottom: 40, bar_style: "glass",
            bar_fade_ms: 200, bar_hide_ms: "", bar_key_hide: 0, arrows: "inset", arrow_show: "always",
            arrow_hide_ms: 3000, arrow_inset: 180, page_clicks: 1, ground_clicks: 0, jump: "plain", jump_ms: "0",
            jump_half: 0,
            half_ms: 2000, preview: 1, preview_ms: 200, resize: "plain", resize_ms: "0", focus_black: 0,
-           counter: "pages" },
+           counter: "pages", band_line_ms: 0 },
 };
 const PROFILE_CHOICES = { ground: ["black", "white"], bars: ["none", "edge", "click", "move"],
                           bar_style: ["solid", "glass"], arrows: ["none", "edge", "inset"],
@@ -323,10 +326,17 @@ function screenPages() {
   return out;
 }
 
+// (a profile's band_line_ms N > 0) the band's line over the page in another shade every N ms, the page as it is: the
+// browser's own pixels just over a page change while the page does not (a loading line, a hovered button, a window's
+// colours as it is in front or not)
+function bandLine() {
+  return P && P.band_line_ms > 0 && Math.floor(now() / P.band_line_ms) % 2 ? BAND_LINE_OTHER : BAND_LINE;
+}
 function band() {
   const d = dpr(), W = view.width, B = Math.round(cfg.band * d);
   g.fillStyle = BAND; g.fillRect(0, 0, W, B);
-  g.fillStyle = BAND_LINE; g.fillRect(0, B - Math.max(1, Math.round(d)), W, Math.max(1, Math.round(d)));
+  const line = bandLine(), lh = Math.max(1, Math.round((line === BAND_LINE ? 1 : 3) * d));  // (its other shade: 3 px)
+  g.fillStyle = line; g.fillRect(0, B - lh, W, lh);
   g.fillStyle = BAND_PART;  // the reader's own controls: a few buttons on the right, a slider in the middle
   for (let k = 0; k < 4; k++) g.fillRect(W - Math.round((44 + 40 * k) * d), Math.round(12 * d), Math.round(28 * d), Math.round(Math.min(28, cfg.band - 20) * d));
   g.fillRect(Math.round(W * 0.3), Math.round((cfg.band / 2) * d), Math.round(W * 0.35), Math.max(1, Math.round(3 * d)));
@@ -1208,6 +1218,7 @@ addEventListener("keydown", e => {
 });
 addEventListener("focus", () => { say("focus"); if (cfg.focusBlack) flash(cfg.flashMs); });
 addEventListener("blur", () => { if (P) say("blur"); });
+if (P && P.band_line_ms > 0) setInterval(() => { if (!black) compose(); }, P.band_line_ms);  // (its line's shades)
 addEventListener("resize", () => {
   if (!sizeCanvas()) return;
   const was = spread;

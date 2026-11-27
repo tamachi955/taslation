@@ -1926,6 +1926,28 @@ class SeeWatch:
             self.saved.append(f"{path}@{t}")
 
     # the report
+    def unshown_report(self) -> dict[str, Any]:
+        """Per page the window lettered (by the stand-in's screen its frame showed), the lettered regions whose patch
+        did not show at the window's looks (`ui.seethrough.unshown_tick`, once a second while the page was on show):
+        how many looks, the regions, those not shown at the last look and the kinds summed over the looks ("hover"
+        and "original" are the pointer's and the editor's doing, the others are not meant to be); numbers and kinds
+        only. "pages_with_unmeant": the pages where any look found a region not shown for another reason."""
+        kept = dict(getattr(self.app, "_see_unshown", None) or {})
+        pages = []
+        unmeant = 0
+        for key, entry in kept.items():
+            last = entry.get("last") or {}
+            seen = dict(entry.get("kinds_seen") or {})
+            bad = {k: n for k, n in seen.items() if k not in ("hover", "original") and not k.startswith("hidden:")}
+            unmeant += bool(bad)
+            pages.append({"screen": self.screens.get(key), "looks": entry.get("looks", 0),
+                          "regions": last.get("regions"), "not_shown_last": len(last.get("not_shown", ())),
+                          "kinds_seen": seen, "unmeant": bad, "boxes": last.get("boxes"),
+                          "within": last.get("within"), "off_rows": last.get("off_rows"), "size": last.get("size"),
+                          "last": [[i, kind, {k: v for k, v in facts.items() if k != "patches"}]
+                                   for i, kind, facts in last.get("not_shown", ())][:12]})
+        return {"pages": pages, "pages_with_unmeant": unmeant}
+
     def report(self, events: list[dict[str, Any]], offset: float, end_ms: float) -> dict[str, Any]:
         over = self.over()
         notes = list(over.notes) if over is not None else []
@@ -2069,6 +2091,7 @@ class SeeWatch:
                 "panes": self.pane_report(),
                 "edit": self.edit_result if self.edit and not self.add else None,  # (`_edit_measure`: editing)
                 "add": self.add_result if self.add else None,  # (`_add_measure`: text areas added)
+                "unshown": self.unshown_report(),  # (lettered regions of the page on show whose patch did not show)
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
                           "max_ms": max((v for v in late if v is not None), default=None),

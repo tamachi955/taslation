@@ -143,12 +143,66 @@ def make_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[Image.I
     return img, truth
 
 
+EDGE_GAP = 5  # (`make_edge_page`) px between a page's edge and the text of the bubble cut by it
+
+
+def make_edge_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[Image.Image, list[dict]]:
+    """A page whose bubbles are cut by its four edges, their text EDGE_GAP px from the edge (as a bubble running off
+    the page in a book is), and one whole bubble in the middle; panels of scribbles between them. For the lettering of
+    a bubble at the page's edge (`--layout edges`)."""
+    rng = random.Random(seed)
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    inner = (220, 260, width - 220, height - 260)
+    scribble(draw, (inner[0] + 10, inner[1] + 10, inner[2] - 10, inner[3] - 10), rng)
+    draw.rectangle(inner, outline=(0, 0, 0), width=6)
+    lines = list(LINES_A if seed % 2 == 0 else LINES_B)
+    rng.shuffle(lines)
+    size = 34
+    font = find_jp_font(size)
+    truth: list[dict] = []
+
+    def ink(text: str, rows: int) -> Image.Image:  # the text's columns alone, cut to their ink
+        cols = math.ceil(len(text) / rows)
+        sheet = Image.new("RGB", (int(cols * size * 1.15 + 2 * size), int(rows * size * 1.05 + 2 * size)),
+                          (255, 255, 255))
+        draw_vertical_text(ImageDraw.Draw(sheet), text, sheet.width / 2, size, font, size, rows)
+        grey = sheet.convert("L")
+        return grey.crop(Image.eval(grey, lambda v: 255 - v).getbbox())
+
+    def cut_bubble(cx: float, cy: float, rx: float, ry: float, text: str, rows: int, edge: str) -> None:
+        draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+        piece = ink(text, rows)
+        x = {"left": EDGE_GAP, "right": width - EDGE_GAP - piece.width}.get(edge, int(cx - piece.width / 2))
+        y = {"top": EDGE_GAP, "bottom": height - EDGE_GAP - piece.height}.get(edge, int(cy - piece.height / 2))
+        x, y = int(x), int(y)
+        under = img.crop((x, y, x + piece.width, y + piece.height)).convert("L")
+        img.paste(Image.merge("RGB", [Image.composite(piece, under, Image.eval(piece, lambda v: 255 - v))] * 3),
+                  (x, y))
+        box = (max(0, cx - rx), max(0, cy - ry), min(width, cx + rx), min(height, cy + ry))
+        truth.append({"bbox": [int(box[0]), int(box[1]), int(math.ceil(box[2])), int(math.ceil(box[3]))],
+                      "text_box": [x, y, x + piece.width, y + piece.height], "text": text, "shape": "ellipse",
+                      "edge": edge})
+
+    cut_bubble(width * 0.68, -40, 150, 260, lines[0], 5, "top")
+    cut_bubble(width * 0.30, height + 40, 150, 260, lines[1], 5, "bottom")
+    cut_bubble(-60, height * 0.38, 230, 170, lines[2], 4, "left")
+    cut_bubble(width + 60, height * 0.62, 230, 170, lines[3], 4, "right")
+    cut_bubble(width * 0.5, height * 0.5, 120, 170, lines[4], 5, "")
+    return img, truth
+
+
+LAYOUTS = {"panels": make_page, "edges": make_edge_page}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--layout", choices=sorted(LAYOUTS), default="panels",
+                    help="panels: the test pages' (the default); edges: bubbles cut by the page's four edges")
     args = ap.parse_args()
-    img, truth = make_page(args.seed)
+    img, truth = LAYOUTS[args.layout](args.seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     img.save(args.out)
     with open(args.out.with_suffix(".json"), "w", encoding="utf-8") as f:

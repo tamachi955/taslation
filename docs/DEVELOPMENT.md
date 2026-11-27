@@ -104,7 +104,8 @@ rows' languages.
 
 ## Other scripts
 
-* `tools/make_sample_page.py` draws the synthetic test pages in `tests/fixtures/` (no real book is in the repository).
+* `tools/make_sample_page.py` draws the synthetic test pages in `tests/fixtures/` (no real book is in the repository);
+  `--layout edges` a page whose bubbles are cut by its four edges, for a case reproduced on the stand-in (`--pages`).
 * `tools/fake_viewer.py` shows those pages in a window of its own, so the whole flow can be tried without a viewer.
 * `tools/page_area.py` prints what the page-area detector finds in a window, for tuning.
 * `tools/room_eval.py` letters the regions of OpenMantra's pages (or of a book's dev snapshots, `--frames`) with
@@ -422,6 +423,18 @@ rows' languages.
   size, `constant`). `--editing` keeps the role as editing as `--see-edit` does, but does nothing on the page (the
   patch under the pointer measured as in Reader mode): for timing runs of editing against Reader mode (the report's
   `role_kept`).
+  In every run the page on show's lettered regions whose patch did not show are counted once a second
+  (`run.see_through.unshown`, from `ui.seethrough.unshown_tick`): per page the looks, the regions' boxes, the kinds
+  summed over the looks - "differs:top" (the pixels compared above it are other than when it was read), "covered",
+  "no patch", "no match", ... -, those of the last look with the share against the limit and where they differ, the
+  box its margin keeps within and the rows painted over; "hover" and "original" are the pointer's and the editor's
+  doing, `pages_with_unmeant` counts the pages where any other kind was seen (must be 0). `--pages A.png,B.png` shows
+  made-up pages of the developer's instead (`tools/make_sample_page.py --layout edges`: bubbles cut by the page's
+  four edges, their text 5 px from it), `--see-margin-as-before` the patches' margins as before they kept to the
+  page's own pixels (the stamp is made and reported, not used: the same run with the rule before), and
+  `--standin-option band_line_ms=700` (a profile's) has the band's line just over the page drawn in another shade
+  every 700 ms, the page as it is. With `--standin-profile dark` and scenario `f2` on the edge pages, the bubble
+  touching the page's top was "differs:top" on 4 pages before and every region shown after.
   `--see-add` measures adding text areas in place of both (`add`; editing with `--see-edit`, Reader mode without; best with
   scenario `g`, one page held long): once a page is done and on show, the left pane's Add area and the Insert key
   (its WM_HOTKEY POSTED to the lettering's own window: no key of the system's is pressed), each followed by a
