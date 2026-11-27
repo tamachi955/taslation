@@ -273,8 +273,16 @@ rows' languages.
   (`standin_viewer.lock_foreground`: a change is possible only once the person has given no input for a while, and
   then the tool may set the lock; it is lifted as the window is shown, at the close, or by any key or click of the
   person's), its window then shown without activation; should it take the foreground all the same, it is minimised
-  and shown again without activation (Windows hands the foreground to the window behind). The report's
-  `browser_start` says what came (`took_the_foreground`, where, whether the lock was taken). A run thus starts with
+  and shown again without activation (Windows hands the foreground to the window behind). A window that does not
+  come within 20 s (on the runners, now and then) is waited for on, up to 45 s, while the browser still gets on (a
+  process or a window more or less in the last 10 s); then the browser is closed and started once more on a profile
+  of its own, waited for 45 s, before the run gives up. The report's `browser_start` says what came
+  (`took_the_foreground`, where, whether the lock was taken; `window_s`, the seconds from the browser's start to its
+  window, `own_window_s` to its first window titled or not, the processes then and a `timeline` of their changes;
+  `no_window`: what was there when it did not come - processes, its own windows' classes and titles, its log's
+  severities and last error lines, the token and the home folder left out; `started_again`: why, after how long,
+  and the first start's facts; `program`: the browser's version folders and an update pending), and a job's summary
+  says it in a line (a window later than 10 s, or a second start, among the speed notes). A run thus starts with
   the person's window in front: whatever needs the stand-in in front gets it where TASlation gives the viewer the
   foreground (a region editor's closing) or by the tool's guarded steps below. The run's end waits for a scene the
   see-through watch is acting (`SeeWatch.acting`: the pointer on a bubble, editing's clicks and drags, Add area), so that

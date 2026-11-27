@@ -399,6 +399,171 @@ def test_the_book_s_own_window_draws_while_covered_and_its_raise_takes_no_foregr
     state["after"] = (99, 41)
     facts = browser.show_held(99)  # (the book's own window took it)
     assert facts["took_the_foreground"] is True and facts["took_it_at"] == "raised" and facts["in_front"] == "held"
+    assert browser.more_facts["window_s"] >= 0
+
+
+class _Clock:
+    """A clock of its own for the waits: `sleep` moves it on, nothing waits."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def _waiting_browser(monkeypatch, clock, shape, window_at):
+    """A browser of stand-ins started at the clock's time: *shape(t)* its (processes, windows of its own) *t* s after
+    its start, its window of the page's title there from *window_at(t)* on. Nothing real is started or looked at."""
+    import threading
+
+    monkeypatch.setattr(sv.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(sv.time, "sleep", clock.sleep)
+    monkeypatch.setattr(sv.sys, "platform", "win32")
+    browser = object.__new__(sv.StandinBrowser)
+    browser.token, browser.lock, browser.events, browser.hwnd = "t1234", threading.Lock(), [], None
+    browser._locked, browser.start_facts, browser._started_at = False, sv.StandinBrowser._fresh_facts(), clock.now
+    browser.log = {"lines": 3, "by_severity": {"ERROR": 1, "INFO": 2},
+                   "errors": ["ERROR:gpu_init.cc(9) no adapter at C:/x/t1234"]}
+    browser.proc = SimpleNamespace(pid=50, poll=lambda: None)
+    t = lambda: clock.now - browser._started_at  # noqa: E731
+    monkeypatch.setattr(sv, "process_tree", lambda pid: set(range(pid, pid + shape(t())[0])))
+    monkeypatch.setattr(sv, "own_windows", lambda pids: [700 + i for i in range(shape(t())[1])])
+    monkeypatch.setattr(sv, "find_window", lambda pids, token: 99 if window_at(t()) else None)
+    monkeypatch.setattr(sv, "window_class", lambda h: "#32770" if h == 700 else "Chrome_WidgetWin_1")
+    monkeypatch.setattr(sv, "window_text", lambda h: "Stand-in reader t1234")
+    monkeypatch.setattr(sv, "_user32", SimpleNamespace(IsIconic=lambda h: 0), raising=False)
+    monkeypatch.setattr(sv, "lock_foreground", lambda _lock: True)
+    browser._front_look = lambda *a, **k: None
+    browser._show_quietly = lambda hwnd, facts=None: None
+    return browser
+
+
+def test_the_stand_in_s_window_time_and_its_browser_s_way_there_are_kept(monkeypatch):
+    clock = _Clock()
+    browser = _waiting_browser(monkeypatch, clock, lambda t: (2 if t < 1 else 6, 0 if t < 1.5 else 1),
+                               lambda t: t >= 2.0)
+    assert browser.wait_window() == 99 and browser.hwnd == 99
+    facts = browser.start_facts
+    assert 2.0 <= facts["window_s"] < 2.3 and facts["processes_at_window"] == 6
+    assert 1.5 <= facts["own_window_s"] < 1.8 and "waited_on" not in facts and "no_window" not in facts
+    assert [row[1:] for row in facts["timeline"]] == [[2, 0], [6, 0], [6, 1]]
+
+
+def test_a_window_still_on_its_way_after_the_first_stage_is_waited_for_on(monkeypatch):
+    """(a browser that gets on slowly: a process or a window more at least every 10 s) Its window at 31 s comes
+    within the 45 s of the stages, without a second start."""
+    clock = _Clock()
+    browser = _waiting_browser(monkeypatch, clock, lambda t: (2 + int(t // 8), 0 if t < 25 else 1),
+                               lambda t: t >= 31)
+    browser.start_again = lambda why: pytest.fail("started again")
+    assert browser.wait_window() == 99
+    assert browser.start_facts["waited_on"] is True and 31 <= browser.start_facts["window_s"] < 31.5
+
+
+def test_a_browser_stuck_at_its_start_is_started_once_more_and_what_was_there_is_kept(monkeypatch):
+    """(2 processes from its first second and nothing more: on the runners, 6 jobs of 32 on 2026-11-27) At 20 s,
+    nothing moved for over 10 s: what was there is kept, the browser started again and waited for 45 s whatever it
+    does; a second start that never brings its window gives up, the facts of both starts kept."""
+    clock = _Clock()
+    browser = _waiting_browser(monkeypatch, clock, lambda t: (2, 1), lambda t: False)
+    browser._start_args = ("C:/b/chrome.exe", "file:///p.html", (0, 0, 800, 600), False)
+    starts: list[tuple[str, dict]] = []
+
+    def start_again(why):
+        starts.append((why, dict(browser.start_facts)))
+        browser.start_facts = sv.StandinBrowser._fresh_facts()
+        browser.start_facts["started_again"] = {"why": why}
+        browser._started_at = clock.now
+        monkeypatch.setattr(sv, "find_window",
+                            lambda pids, token: 99 if clock.now - browser._started_at >= 40 else None)
+
+    browser.start_again = start_again
+    assert browser.wait_window() == 99
+    (why, first), = starts
+    assert why == "the stand-in browser's window did not come"
+    missed = first["no_window"]
+    assert 20 <= missed["waited_s"] < 20.5 and missed["processes"] == 2 and "waited_on" not in first
+    assert missed["windows"] == [{"class": "#32770", "title": "Stand-in reader <token>", "iconic": False}]
+    assert missed["log"]["by_severity"] == {"ERROR": 1, "INFO": 2} and missed["log"]["lines"] == 3
+    assert missed["log"]["errors"] == ["ERROR:gpu_init.cc(9) no adapter at C:/x/<token>"]
+    assert 40 <= browser.start_facts["window_s"] < 40.5  # (the second start waited past 20 s, nothing moving)
+
+    clock2 = _Clock()
+    stuck = _waiting_browser(monkeypatch, clock2, lambda t: (2, 0), lambda t: False)
+    stuck._start_args = browser._start_args
+    began: list[float] = []
+
+    def again(why):
+        began.append(clock2.now)
+        stuck._started_at = clock2.now
+
+    stuck.start_again = again
+    with pytest.raises(RuntimeError, match="did not come"):
+        stuck.wait_window()
+    assert len(began) == 1 and 44.9 <= clock2.now - began[0] < 45.5  # (one more start, waited 45 s, then no more)
+    assert stuck.start_facts["no_window"]["windows"] == []
+
+
+def test_a_start_again_closes_the_first_browser_and_starts_on_a_profile_of_its_own(monkeypatch, tmp_path):
+    import threading
+
+    clock = _Clock()
+    monkeypatch.setattr(sv.time, "monotonic", clock.monotonic)
+    browser = object.__new__(sv.StandinBrowser)
+    browser.lock, browser.events, browser.hwnd = threading.Lock(), [(1.0, {"ev": "x"})], 5
+    browser.profile, browser._started_at = tmp_path / "profile", clock.now - 20.5
+    browser.start_facts = {"no_window": {"processes": 2}}
+    browser._reader = SimpleNamespace(join=lambda s: None)
+    browser.close = lambda: {"processes_ended": 2, "profile_deleted": True}
+    started: list[tuple[Path, dict]] = []
+    browser._start = lambda profile, facts=None: started.append((profile, facts))
+    browser.start_again("the stand-in browser's window did not come")
+    (profile, facts), = started
+    assert profile == tmp_path / "profile-again" and browser.events == [] and browser.hwnd is None
+    again = facts["started_again"]
+    assert again["why"] == "the stand-in browser's window did not come" and again["after_s"] == 20.5
+    assert again["first"] == {"no_window": {"processes": 2}} and again["first_closed"]["processes_ended"] == 2
+    assert facts["took_the_foreground"] is False  # (the new start's facts begin anew)
+
+
+def test_the_browser_s_log_lines_its_program_s_folder_and_what_a_report_keeps_of_them(monkeypatch, tmp_path):
+    import collections
+    import threading
+
+    assert sv.log_severity("[12:34:1127/142305.123:ERROR:gpu/init.cc(77)] no adapter") == (
+        "ERROR", "gpu/init.cc(77)", "no adapter")
+    assert sv.log_severity('[1:2:3/4.5:INFO:CONSOLE(1)] "STANDIN ev=ready t=1"') is not None
+    assert sv.log_severity("DevTools listening") is None
+    home = str(Path.home())
+    assert sv.masked(f"at {home}\\x and {home.replace(chr(92), '/')}/y, t9876 here", "t9876") == \
+        "at ~\\x and ~/y, <token> here"
+    assert sv.masked("x" * 300, cut=80) == "x" * 80
+    folder = tmp_path / "Application"
+    for name in ("142.0.7444.60", "143.0.7499.4", "SetupMetrics", "Locales"):
+        (folder / name).mkdir(parents=True)
+    (folder / "chrome.exe").write_bytes(b"")
+    assert sv.program_facts(folder / "chrome.exe") == {"versions": ["142.0.7444.60", "143.0.7499.4"],
+                                                       "update_pending": False}
+    (folder / "new_chrome.exe").write_bytes(b"")
+    assert sv.program_facts(folder / "chrome.exe")["update_pending"] is True
+    assert sv.program_facts(tmp_path / "none" / "chrome.exe") == {"versions": [], "update_pending": False}
+
+    browser = object.__new__(sv.StandinBrowser)
+    browser.lock, browser.events = threading.Lock(), []
+    log = {"lines": 0, "by_severity": {}, "errors": collections.deque(maxlen=sv.LOG_KEPT)}
+    lines = ['[1:2:3/4.5:INFO:CONSOLE(1)] "STANDIN ev=ready t=1", source: file:///p.html (1)',
+             "[1:2:3/4.5:ERROR:gpu/init.cc(77)] no adapter", "[1:2:3/4.5:WARNING:x.cc(1)] slow", "plain"]
+    lines += [f"[1:2:3/4.5:ERROR:e.cc({i})] e{i}" for i in range(sv.LOG_KEPT)]
+    browser._read(SimpleNamespace(stderr=iter(lines)), log)
+    assert [said["ev"] for _t, said in browser.events] == ["ready"]
+    assert log["lines"] == 3 + sv.LOG_KEPT and log["by_severity"] == {"ERROR": 1 + sv.LOG_KEPT, "WARNING": 1}
+    assert list(log["errors"])[0] == "ERROR:e.cc(0) e0" and len(log["errors"]) == sv.LOG_KEPT
+    browser._read(SimpleNamespace(stderr=iter(["[1:2:3/4.5:ERROR:a.cc(1)] x"])))  # (the held window's: no count)
+    assert len(browser.events) == 1
 
 
 def test_a_spell_on_another_tab_is_counted_from_the_other_tab_drawn_to_the_book_s_page_drawn_again():

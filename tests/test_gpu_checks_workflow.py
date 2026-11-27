@@ -546,6 +546,53 @@ def _failed(out: dict) -> list[str]:
     return [c["criterion"] for c in out["failed"]]
 
 
+def test_a_stand_in_job_says_how_its_browser_s_window_came_and_a_second_start_is_a_speed_note():
+    """The tool's ``browser_start`` (`standin_viewer.StandinBrowser.wait_window`): the seconds to the window in each
+    job's summary and in the table, a window later than SLOW_WINDOW_S or a second start among the speed notes (never a
+    failure), and what a start had when its window did not come."""
+    s = _summarise()
+    facts = {"run": {"exit_code": 0, "seconds": 320.5}}
+    program = {"versions": ["143.0.7499.4"], "update_pending": False}
+    report = _report()
+    report["browser_start"] = {"window_s": 1.84, "own_window_s": 1.2, "processes_at_window": 6,
+                               "timeline": [[0.0, 1, 0], [1.2, 6, 1]], "program": program}
+    out = s.standin(report, "", facts, "c", 600)
+    assert out["verdict"] == "pass" and out["standin_window"]["starts"] == 1
+    assert not [k for k in out["speed"] if "stand-in's" in k]
+    assert ("* the stand-in's window after 1.84 s (6 processes; a window of its own after 1.2 s); the browser's "
+            "version folders ['143.0.7499.4']\n") in s.standin_md(out)
+    assert s._window_cell(out["standin_window"]) == "1.84" and s._window_cell(None) == "-"
+    assert s.standin_window(_report()) is None  # (an older tool's report)
+
+    first = {"no_window": {"waited_s": 20.1, "processes": 2, "windows": [{"class": "#32770", "title": "x"}],
+                           "log": {"lines": 4, "errors": ["ERROR:a.cc(1) x"]}}}
+    report["browser_start"] = {"window_s": 12.5, "own_window_s": 3.0, "processes_at_window": 6, "waited_on": True,
+                               "program": dict(program, update_pending=True),
+                               "started_again": {"why": "the stand-in browser's window did not come", "after_s": 20.1,
+                                                 "first": first}}
+    out = s.standin(report, "", facts, "c", 600)
+    assert out["verdict"] == "pass"
+    assert out["speed"]["the stand-in's browser started again (its window had not come)"] == 1
+    assert out["speed"]["the stand-in's window came over 10 s after its browser's start"] == 1
+    md = s.standin_md(out)
+    assert "waited on past the first stage" in md and "; an update of it pending" in md
+    assert ("its browser started again after 20.1 s (the stand-in browser's window did not come: 2 processes, windows "
+            "['#32770'], 1 error lines)") in md
+    assert s._window_cell(out["standin_window"]) == "12.5 (2 starts)"
+
+    stopped = _report(failed="RuntimeError in the driver (__init__.py:600 in wait_window < standin_e2e.py:4817 in run)")
+    stopped["browser_start"] = {"timeline": [[0.0, 2, 0]], "program": program,
+                                "no_window": {"waited_s": 45.0, "processes": 2, "windows": [], "log": {"errors": []}},
+                                "started_again": {"why": "the stand-in browser's window did not come", "after_s": 20.0,
+                                                  "first": first}}
+    out = s.standin(stopped, "", facts, "c", 600)
+    assert out["verdict"] == "fail" and out["standin_window"]["window_s"] is None
+    md = s.standin_md(out)
+    assert "* the stand-in's window did not come; its browser started again after 20.0 s" in md
+    assert "; at the end 45.0 s: 2 processes, windows [], 0 error lines" in md
+    assert s._window_cell(out["standin_window"]) == "- (2 starts)"
+
+
 def test_a_stand_in_run_passes_on_its_criteria_of_correctness_with_its_slowness_beside_them(tmp_path):
     s = _summarise()
     facts = {"run": {"exit_code": 0, "seconds": 320.5}, "screen": {"after": "1920x1080 at 32 bit, 60 Hz"}}

@@ -4845,6 +4845,7 @@ def run(args: argparse.Namespace) -> int:
     except Exception as e:  # noqa: BLE001 - said (its type and where, no value), then everything is closed
         traceback.print_exc()
         report["run"] = {"failed": f"{type(e).__name__} in the driver{_where(e)}"}
+        report.setdefault("browser_start", dict(browser.start_facts))  # (a window that came not even started again)
     finally:
         if canned is not None:
             canned.stop()

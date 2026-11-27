@@ -692,14 +692,71 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     return found
 
 
+SLOW_WINDOW_S = 10.0  # the stand-in's window come later than this after its browser's start: a speed note
+
+
+def standin_window(report: dict[str, Any]) -> dict[str, Any] | None:
+    """How the stand-in's browser window came (the tool's ``browser_start``, `standin_viewer.StandinBrowser`): the
+    seconds from its browser's start to its window and to its first window of its own, its processes then, whether it
+    was waited for past the first stage, the starts it took (2: started again - why, after how long, and what the
+    first start had when its window had not come: processes, windows' classes), what the last start had if it never
+    came, and the browser's version folders and a pending update. None without these facts (an older tool)."""
+    b = report.get("browser_start")
+    if not isinstance(b, dict) or not any(k in b for k in ("window_s", "timeline", "started_again", "no_window")):
+        return None
+    again = b.get("started_again") if isinstance(b.get("started_again"), dict) else {}
+    first = again.get("first") if isinstance(again.get("first"), dict) else {}
+
+    def missed(facts: dict[str, Any]) -> dict[str, Any] | None:
+        n = facts.get("no_window") if isinstance(facts.get("no_window"), dict) else None
+        if n is None:
+            return None
+        return {"waited_s": n.get("waited_s"), "processes": n.get("processes"),
+                "windows": [w.get("class") for w in n.get("windows") or [] if isinstance(w, dict)],
+                "log_errors": len((n.get("log") or {}).get("errors") or [])}
+
+    program = b.get("program") if isinstance(b.get("program"), dict) else {}
+    return {"window_s": b.get("window_s"), "own_window_s": b.get("own_window_s"),
+            "processes": b.get("processes_at_window"), "waited_on": bool(b.get("waited_on")),
+            "starts": 2 if again else 1, "why_again": again.get("why"), "again_after_s": again.get("after_s"),
+            "first_missed": missed(first), "missed": missed(b), "versions": program.get("versions"),
+            "update_pending": program.get("update_pending")}
+
+
+def _window_line(w: dict[str, Any]) -> str:
+    """The stand-in's window in one line of a job's summary (`standin_window`)."""
+    came = (f"after {w['window_s']} s ({w.get('processes')} processes; a window of its own after "
+            f"{w.get('own_window_s')} s{'; waited on past the first stage' if w.get('waited_on') else ''})"
+            if w.get("window_s") is not None else "did not come")
+    line = f"the stand-in's window {came}"
+    if w.get("starts", 1) > 1:
+        f = w.get("first_missed") or {}
+        line += (f"; its browser started again after {w.get('again_after_s')} s ({w.get('why_again')}: "
+                 f"{f.get('processes')} processes, windows {f.get('windows')}, {f.get('log_errors')} error lines)")
+    if w.get("window_s") is None and w.get("missed"):
+        m = w["missed"]
+        line += (f"; at the end {m.get('waited_s')} s: {m.get('processes')} processes, windows {m.get('windows')}, "
+                 f"{m.get('log_errors')} error lines")
+    return line + (f"; the browser's version folders {w.get('versions')}"
+                   + ("; an update of it pending" if w.get("update_pending") else ""))
+
+
+def _window_cell(w: dict[str, Any] | None) -> str:
+    if not w:
+        return "-"
+    s = "-" if w.get("window_s") is None else str(w["window_s"])
+    return s + (f" ({w['starts']} starts)" if w.get("starts", 1) > 1 else "")
+
+
 def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, Any]:
     """What depends on the computer's speed, reported and never a failure: rested turns not finished within their rest
     or not translated at its end, holds of --wait-done that reached their cap, spells the window did not follow the
     stand-in, lettering of a page left until the window's next capture showed the change, jobs cancelled as the reader
-    turned away, pages left half done in the cache at the end (their lines kept for later, by design). (*timeout_s*:
-    kept for the callers; no scenario is released before the window is at rest but by --timeout, a correctness
-    criterion.)"""
+    turned away, pages left half done in the cache at the end (their lines kept for later, by design), the stand-in's
+    window late or its browser started again (`standin_window`). (*timeout_s*: kept for the callers; no scenario is
+    released before the window is at rest but by --timeout, a correctness criterion.)"""
     run = report.get("run") or {}
+    window = standin_window(report) or {}
     segments = run.get("segments") or []
     rested = _rested(_turns(run))
     stale = [s for s in (run.get("incidents") or {}).get("stale_overlays") or [] if isinstance(s, dict)]
@@ -731,6 +788,9 @@ def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, A
         "turns with lettering read from a frame not the sharp one, until the window captured the sharp one":
             until_seen or None,
         "empty results read from x's soft frames kept on show (--wait-done)": kept_x or None,
+        f"the stand-in's window came over {SLOW_WINDOW_S:g} s after its browser's start":
+            1 if (window.get("window_s") or 0) > SLOW_WINDOW_S else None,
+        "the stand-in's browser started again (its window had not come)": 1 if window.get("starts", 1) > 1 else None,
     }
     return {k: v for k, v in found.items() if v}
 
@@ -785,7 +845,7 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
     out.update({
         "translator": report.get("translator"), "browser": report.get("browser"), "pages": report.get("pages"),
         "scenarios": report.get("scenarios"), "left_out": report.get("x_left_out"),
-        "seconds": run.get("seconds"), "ready_s": run.get("ready_s"),
+        "seconds": run.get("seconds"), "ready_s": run.get("ready_s"), "standin_window": standin_window(report),
         "captures": captures, "capture_route": run.get("capture_route"),
         "released": {name: {"waited_s": r.get("waited_s"), "timed_out": bool(r.get("timed_out"))}
                      for name, r in (run.get("released") or {}).items() if isinstance(r, dict)},
@@ -840,6 +900,8 @@ def standin_md(s: dict[str, Any]) -> str:
         w = s["wait_done"]
         lines.append(f"* --wait-done {w.get('cap_s')} s: {w.get('holds')} rests held {w.get('holds_by_why')}, held ms "
                      f"{w.get('held_ms')}; {w.get('keeps')} soft frames kept {w.get('keeps_by_why')}")
+    if s.get("standin_window"):
+        lines.append("* " + _window_line(s["standin_window"]))
     lines.append(f"* exit code {s.get('exit_code')}, the run's step {s.get('run_step_s')} s; screen {s.get('screen')}")
     console = s.get("console") or {}
     if console.get("tracebacks"):
@@ -1133,8 +1195,8 @@ def table(artifacts: Path, jobs_file: Path | None, merged: Any, caches_file: Pat
     if stand:
         out += ["## Stand-in viewer (tools/standin_e2e.py)", "",
                 "| group | verdict | criteria failed | the run | capture used | frames sharp/soft/black, spinner, unknown | "
-                "window ready s | run s | rests held (by why) | speed notes |",
-                "|---|---|---|---|---|---|---|---|---|---|"]
+                "window ready s | run s | rests held (by why) | speed notes | stand-in's window s |",
+                "|---|---|---|---|---|---|---|---|---|---|---|"]
         for s in stand:
             c = s.get("captures") or {}
             frames = "/".join(str(c.get(k, 0)) for k in ("sharp", "soft", "black")) + ", " + ", ".join(
@@ -1144,7 +1206,8 @@ def table(artifacts: Path, jobs_file: Path | None, merged: Any, caches_file: Pat
             out.append(f"| {s.get('group')} | {str(s.get('verdict')).upper()} | {len(s.get('failed') or [])} | "
                        f"{s.get('run', '-')}{': ' + str(s['why']) if s.get('why') else ''} | "
                        f"{(s.get('capture_route') or {}).get('used', '-')} | {frames} | {s.get('ready_s', '-')} | "
-                       f"{s.get('seconds', '-')} | {held} | {len(s.get('speed') or {})} |")
+                       f"{s.get('seconds', '-')} | {held} | {len(s.get('speed') or {})} | "
+                       f"{_window_cell(s.get('standin_window'))} |")
         failing = [s for s in stand if s.get("failed")]
         if failing:
             out += ["", "Failed criteria:"]

@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -333,12 +334,51 @@ def parse_line(line: str) -> dict[str, str] | None:
     return out if "ev" in out and "t" in out else None
 
 
+# a line of the browser's own log on standard error: [process:thread:date/time:SEVERITY:source(line)] message
+LOG_LINE = re.compile(r"^\[[^\]:]*:[^\]:]*:[^\]:]*:([A-Z]+):([^\]]*)\]\s?(.*)$")
+LOG_KEPT = 8  # the browser's last error lines kept for a start whose window did not come
+VERSION_FOLDER = re.compile(r"\d+(?:\.\d+){3}")
+# its window waited for past `wait_window`'s first stage while the browser got on so lately (s); the changes of its
+# processes and windows kept for a start (`start_facts`' "timeline")
+PROGRESS_S, TIMELINE_KEPT = 10.0, 40
+
+
+def log_severity(line: str) -> tuple[str, str, str] | None:
+    """(severity, source, message) of a line of the browser's own log, or None for another line."""
+    m = LOG_LINE.match(line.strip())
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def masked(text: str, token: str = "", cut: int = 200) -> str:
+    """*text* (a line of the browser's log, a title of one of its own windows) with the token and this computer's
+    home folder left out (``<token>``, ``~``), cut to *cut* characters: what a report may keep of it."""
+    home = str(Path.home())
+    for old, new in ((token, "<token>"), (home, "~"), (home.replace("\\", "/"), "~")):
+        if old and len(old) > 3:
+            text = text.replace(old, new)
+    return text[:cut]
+
+
+def program_facts(program: Path) -> dict[str, Any]:
+    """What the browser's own folder says of it: its version folders (two while an update of it waits to be put in
+    place) and whether a new program waits beside it (``new_chrome.exe``, ``new_msedge.exe``: the update put in place
+    at the browser's next start). Names only; nothing is read inside them."""
+    folder = Path(program).parent
+    try:
+        versions = sorted((p.name for p in folder.iterdir() if p.is_dir() and VERSION_FOLDER.fullmatch(p.name)),
+                          key=lambda v: tuple(int(n) for n in v.split(".")))
+    except OSError:
+        versions = []
+    return {"versions": versions, "update_pending": (folder / f"new_{Path(program).name}").exists()}
+
+
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     _user32.IsWindowVisible.argtypes = [wintypes.HWND]
     _user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     _user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
@@ -413,6 +453,20 @@ def window_text(hwnd: int) -> str:
     return buffer.value
 
 
+def window_class(hwnd: int) -> str:
+    """The window's class name ("Chrome_WidgetWin_1" a browser window, "#32770" a dialog box); "" off Windows."""
+    if sys.platform != "win32":
+        return ""
+    buffer = ctypes.create_unicode_buffer(256)
+    _user32.GetClassNameW(hwnd, buffer, 256)
+    return buffer.value
+
+
+def own_windows(pids: set[int], windows: Iterable[tuple[int, int]] | None = None) -> list[int]:
+    """The visible top-level windows of the processes in *pids* (the tree the tool started), titled or not."""
+    return [hwnd for hwnd, pid in (windows if windows is not None else top_windows()) if pid in pids]
+
+
 SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE = 7, 4
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
 HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
@@ -479,25 +533,49 @@ class StandinBrowser:
     """The throwaway browser that shows the stand-in page: started on *profile* (a scratch folder made here, its
     offer to translate off, `make_profile`, and deleted at `close`), its log on standard error read line by line into
     `events` (what the page said, with the time it came), its window found by `wait_window`. `close` asks the window
-    to close, then ends what is left of the process tree it started, and of nothing else."""
+    to close, then ends what is left of the process tree it started, and of nothing else. A window that does not come
+    is waited for longer while its browser gets on, then has the browser started once more (`wait_window`'s stages,
+    `start_again`); how long it took, and what was there when it did not come, is kept in `start_facts`."""
 
     def __init__(self, program: Path, url: str, profile: Path, rect: tuple[int, int, int, int], token: str,
                  scale: float = 1.0, draws_covered: bool = False, full_screen: bool = False):
-        self.profile = make_profile(profile)
         self.token = token
         self.scale, self.draws_covered = scale, draws_covered  # (a second window's browser started alike: `open_held`)
+        self._start_args = (program, url, rect, full_screen)  # (`start_again`: the same command, another profile)
+        self.events: list[tuple[float, dict[str, str]]] = []
+        self.lock = threading.Lock()
+        self.hwnd: int | None = None
+        self.more: list[int] = []  # (windows of the book's own it opened since: `open_held`) ...
+        self.more_browsers: list[tuple[subprocess.Popen, Path]] = []  # ... each its browser and profile ...
+        self.more_trees: list[set[int]] = []  # ... and the processes seen under it
+        self.more_facts: dict[str, Any] = {}  # (how the last of them came: as `start_facts`)
+        self._start(profile)
+
+    @staticmethod
+    def _fresh_facts() -> dict[str, Any]:
+        """How the window came (`wait_window`): minimised without activation, then shown without activation, the
+        foreground locked meanwhile (`lock_foreground`); whether the browser took the foreground at any look (it must
+        not: the person's window keeps it), and whether it was then minimised and shown again without activation."""
+        return {"asked": "minimised, not activated", "foreground_locked": False, "came_minimised": None,
+                "shown_without_activation": None, "took_the_foreground": False, "took_it_at": None,
+                "minimised_again": False}
+
+    def _start(self, profile: Path, facts: dict[str, Any] | None = None) -> None:
+        """The browser started on the throwaway *profile* (made here: it must not exist yet), minimised and not
+        activated, the foreground locked until its window is shown (`wait_window`); its log read into `events`.
+        *facts*: what `start_facts` begins with (a new start's, `_fresh_facts`, by default)."""
+        program, url, rect, full_screen = self._start_args
+        self.profile = make_profile(profile)
         self.started_from = foreground()  # (the window in front before: whose it is, `start_facts`)
-        # how the window came (`wait_window`): minimised without activation, then shown without activation, the
-        # foreground locked meanwhile (`lock_foreground`); whether the browser took the foreground at any look (it must
-        # not: the person's window keeps it), and whether it was then minimised and shown again without activation
-        self.start_facts: dict[str, Any] = {"asked": "minimised, not activated", "foreground_locked": False,
-                                            "came_minimised": None, "shown_without_activation": None,
-                                            "took_the_foreground": False, "took_it_at": None,
-                                            "minimised_again": False}
+        self.start_facts: dict[str, Any] = facts if facts is not None else self._fresh_facts()
+        self.start_facts["program"] = program_facts(program)
+        # (the browser's own log lines of this start, counted by severity, its last errors kept: `_no_window_facts`)
+        self.log: dict[str, Any] = {"lines": 0, "by_severity": {}, "errors": deque(maxlen=LOG_KEPT)}
         self._locked = self.start_facts["foreground_locked"] = lock_foreground(True)
+        self._started_at = time.monotonic()
         try:
-            self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered,
-                                                         full_screen),
+            self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, self.scale,
+                                                         self.draws_covered, full_screen),
                                          stdin=subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
                                          encoding="utf-8", errors="replace",
@@ -506,49 +584,127 @@ class StandinBrowser:
         except BaseException:
             self._unlock()
             raise
-        self.events: list[tuple[float, dict[str, str]]] = []
-        self.lock = threading.Lock()
-        self.hwnd: int | None = None
-        self.more: list[int] = []  # (windows of the book's own it opened since: `open_held`) ...
-        self.more_browsers: list[tuple[subprocess.Popen, Path]] = []  # ... each its browser and profile ...
-        self.more_trees: list[set[int]] = []  # ... and the processes seen under it
-        self.more_facts: dict[str, Any] = {}  # (how the last of them came: as `start_facts`)
         self.tree: set[int] = {self.proc.pid}
-        self._reader = threading.Thread(target=self._read, args=(self.proc,), name="standin-log", daemon=True)
+        self._reader = threading.Thread(target=self._read, args=(self.proc, self.log), name="standin-log",
+                                        daemon=True)
         self._reader.start()
 
-    def _read(self, proc: subprocess.Popen) -> None:
+    def start_again(self, why: str) -> None:
+        """The browser closed as `close` closes it (what is left of its process tree ended, its profile deleted) and
+        started once more, as at the start, on a profile of its own beside the first one's ("-again"): its window did
+        not come (*why*: the error that said so). `start_facts` begins anew, with "started_again": why, the seconds
+        since the first start ("after_s"), the first start's facts and how the first browser was closed."""
+        first = dict(self.start_facts)
+        after = round(time.monotonic() - getattr(self, "_started_at", time.monotonic()), 2)
+        closed = self.close()
+        self._reader.join(5.0)  # (its log ended with it: no line of it among the new one's)
+        with self.lock:
+            self.events = []
+        self.hwnd = None
+        facts = self._fresh_facts()
+        facts["started_again"] = {"why": why, "after_s": after, "first": first, "first_closed": closed}
+        self._start(self.profile.parent / f"{self.profile.name}-again", facts)
+
+    def _read(self, proc: subprocess.Popen, log: dict[str, Any] | None = None) -> None:
+        """What the page says (`events`); the browser's other lines counted into *log* (one start's: `_start`)."""
         for line in proc.stderr:  # type: ignore[union-attr]
             said = parse_line(line)
             if said is not None:
                 with self.lock:
                     self.events.append((time.monotonic(), said))
+            elif log is not None:
+                parts = log_severity(line)
+                with self.lock:
+                    log["lines"] += 1
+                    if parts is not None:
+                        log["by_severity"][parts[0]] = log["by_severity"].get(parts[0], 0) + 1
+                        if parts[0] in ("ERROR", "FATAL"):
+                            log["errors"].append(f"{parts[0]}:{parts[1]} {parts[2]}")
 
     def said(self, since: int = 0) -> list[tuple[float, dict[str, str]]]:
         with self.lock:
             return self.events[since:]
 
-    def wait_window(self, seconds: float = 20.0) -> int:
+    def wait_window(self, seconds: float = 20.0, again: int = 1, longest: float = 45.0) -> int:
         """The stand-in's window once it is there: the browser was started minimised and not activated
         (`quiet_start`), and its window is now shown in its normal size and place without being activated
         (SW_SHOWNOACTIVATE) - a tool run never takes the foreground from the person's window; the lock on the foreground
-        set at the start is lifted once it is shown (or the wait ends). What came is kept in `start_facts`."""
-        end = time.monotonic() + seconds
+        set at the start is lifted once it is shown (or the wait ends). What came is kept in `start_facts`: the
+        seconds from the browser's start to its window ("window_s"), to the first window of its own, titled or not
+        ("own_window_s"), its processes then, and each change of their number and of its windows' ("timeline").
+        The stages: a window not there in *seconds* is waited for on, up to *longest* in all, while the browser got
+        on in the last PROGRESS_S (a process or a window more or less: "waited_on"); one that has not come then (or a
+        browser that ended at its start) has what was there kept ("no_window": `_no_window_facts`) and the browser
+        started once more on a profile of its own (`start_again`), *again* times at the most, that start waited for
+        *longest* whatever it does, before the wait gives up. (On the runners the window did not come in 20 s in
+        6 stand-in jobs of 32 in four runs of 2026-11-27, d-e-x-f2 three times running, the browser still there
+        with 2 or 5 processes and no window of the page's title - no crash, and its other windows were not looked
+        at then. Those jobs' set-up step of the screen took 10 to 27 s, most others' 5 to 13 s: machines busier
+        than most at their start, it seems.)"""
         try:
-            while time.monotonic() < end:
+            return self._wait_window(seconds, longest)
+        except RuntimeError as e:
+            if again <= 0 or getattr(self, "_start_args", None) is None:
+                raise
+            self.start_again(str(e))
+        return self.wait_window(max(seconds, longest), again - 1, longest)
+
+    def _wait_window(self, seconds: float, longest: float) -> int:
+        facts = getattr(self, "start_facts", None)
+        facts = facts if facts is not None else {}
+        start = time.monotonic()
+        began = getattr(self, "_started_at", None) or start
+        end, last = start + seconds, start + max(seconds, longest)
+        timeline = facts.setdefault("timeline", [])
+        shape: tuple[int, int] | None = None
+        moved = start  # (the last look at which the browser had got on: a process or a window more or less)
+        try:
+            while True:
+                now = time.monotonic()
                 if self.proc.poll() is not None:
+                    facts["ended_s"] = round(now - began, 2)
                     raise RuntimeError("the stand-in browser ended at its start")
                 self.tree = process_tree(self.proc.pid)
+                windows = own_windows(self.tree) if sys.platform == "win32" else []
+                if (len(self.tree), len(windows)) != shape:
+                    shape, moved = (len(self.tree), len(windows)), now
+                    if len(timeline) < TIMELINE_KEPT:
+                        timeline.append([round(now - began, 2), *shape])
+                    if windows and facts.get("own_window_s") is None:
+                        facts["own_window_s"] = round(now - began, 2)
                 self._front_look()
                 hwnd = find_window(self.tree, self.token)
                 if hwnd is not None:
+                    facts["window_s"], facts["processes_at_window"] = round(now - began, 2), len(self.tree)
                     self.hwnd = hwnd
                     self._show_quietly(hwnd)
                     return hwnd
+                if now >= end:
+                    if now < last and now - moved < PROGRESS_S:
+                        end = min(last, now + 0.5)
+                        facts["waited_on"] = True
+                    else:
+                        facts["no_window"] = self._no_window_facts(now - began, windows)
+                        raise RuntimeError("the stand-in browser's window did not come")
                 time.sleep(0.2)
-            raise RuntimeError("the stand-in browser's window did not come")
         finally:
             self._unlock()
+
+    def _no_window_facts(self, waited: float, windows: list[int]) -> dict[str, Any]:
+        """What was there when the window had not come: the seconds waited since the browser's start, its processes,
+        its own windows (class, title with the token and the home folder left out, minimised or not: a dialog box
+        is "#32770") and its log of this start (lines by severity, the last errors, masked as the titles)."""
+        token = getattr(self, "token", "")
+        shown = []
+        for hwnd in windows[:6]:
+            iconic = bool(_user32.IsIconic(hwnd)) if sys.platform == "win32" else False
+            shown.append({"class": window_class(hwnd), "title": masked(window_text(hwnd), token, 80),
+                          "iconic": iconic})
+        log = getattr(self, "log", None) or {}
+        with self.lock:
+            said = {"lines": log.get("lines", 0), "by_severity": dict(log.get("by_severity") or {}),
+                    "errors": [masked(e, token) for e in log.get("errors") or ()]}
+        return {"waited_s": round(waited, 2), "processes": len(self.tree), "windows": shown, "log": said}
 
     def _unlock(self) -> None:
         if getattr(self, "_locked", False):
@@ -628,13 +784,14 @@ class StandinBrowser:
         on the runners (2026-11-27, twice) its page went on only 110 and 360 s after the move, and raised without
         activation (`show_held`) it was still taken so - no frame of it came after TASlation followed it, and the
         animation frames of its next turn never ran. Its log is read into the same `events`; its window found by its
-        own title (`held_title`) in its own process tree. How it came is kept in `more_facts` (as `start_facts`, and
-        "draws_covered"); its handle, also in `more`."""
+        own title (`held_title`) in its own process tree. How it came is kept in `more_facts` (as `start_facts`,
+        "draws_covered", and "window_s": seconds from its browser's start); its handle, also in `more`."""
         profile = make_profile(self.profile.parent / f"{self.profile.name}-{len(self.more_browsers) + 2}")
         self.more_facts = {"asked": "minimised, not activated", "foreground_locked": False, "came_minimised": None,
                            "shown_without_activation": None, "took_the_foreground": False, "took_it_at": None,
                            "minimised_again": False, "draws_covered": True}
         self._locked = self.more_facts["foreground_locked"] = lock_foreground(True)
+        began = time.monotonic()
         try:
             proc = subprocess.Popen(browser_command(program, url, profile, rect, self.scale, draws_covered=True),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -653,6 +810,7 @@ class StandinBrowser:
                 self._front_look("held", self.more_facts)
                 hwnd = find_window(own, held_title(self.token))
                 if hwnd is not None and hwnd != self.hwnd:
+                    self.more_facts["window_s"] = round(time.monotonic() - began, 2)
                     self.more.append(hwnd)
                     self._show_quietly(hwnd, self.more_facts)
                     if sys.platform == "win32":
