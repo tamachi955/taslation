@@ -199,6 +199,9 @@ jobs:
         with:
           path: ~/.ollama/models
           key: ${{ steps.plan.outputs.store_key }}
+          # (taslation/translator_install.py changed on a ci branch: main's newest store of this release serves,
+          # the model it pins being the same; a changed pin shows as the model missing in the jobs)
+          restore-keys: ollama-store-${{ steps.plan.outputs.ollama_tag }}-
           lookup-only: true
 
       - name: Are the models in the cache?
@@ -223,7 +226,7 @@ jobs:
       - name: The caches a run on main makes
         env:
           PROGRAM: ${{ steps.program.outputs.cache-hit }}
-          STORE: ${{ steps.store.outputs.cache-hit }}
+          STORE: ${{ steps.store.outputs.cache-matched-key != '' }}
           MODELS: ${{ steps.models.outputs.cache-matched-key != '' }}
           PIP: ${{ steps.pip.outputs.cache-hit }}
         run: |
@@ -438,6 +441,7 @@ jobs:
         with:
           path: ~/.ollama/models
           key: ${{ needs.prepare.outputs.store_key }}
+          restore-keys: ollama-store-${{ needs.prepare.outputs.ollama_tag }}-
           fail-on-cache-miss: true
 
       - name: 'Set up: the dataset'
@@ -588,6 +592,7 @@ jobs:
         with:
           path: ~/.ollama/models
           key: ${{ needs.prepare.outputs.store_key }}
+          restore-keys: ollama-store-${{ needs.prepare.outputs.ollama_tag }}-
           fail-on-cache-miss: true
 
       - name: 'Set up: the dataset and the title'

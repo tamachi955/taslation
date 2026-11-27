@@ -189,7 +189,8 @@ SCENES: tuple[Scene, ...] = (
                         "While editing, every region of the page on show is outlined over the viewer in its colour, "
                         "with its number in the reading order on a small plate of that colour",
                         "Like shapes in office software, a region is moved by dragging and resized with its corner "
-                        "handles, and it is read again only when the new frame covers a larger area (a right click "
+                        "handles",
+                        "it is read again only when the new frame covers a larger area (a right click "
                         "during a drag gives the drag up).",
                         "After a change, the lettering over the viewer follows a moment later.")),
 )
