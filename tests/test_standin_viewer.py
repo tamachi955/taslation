@@ -183,6 +183,24 @@ def test_the_control_file_is_the_go_alone_without_wait_done(tmp_path):
         standin_e2e.Director.release(me, turns=2)  # (no turn is released by a key of TASlation's: it sends none)
 
 
+def test_with_the_chooser_tab0_begins_once_the_tab_picked_has_been_in_front_as_long_as_the_line_waits(monkeypatch):
+    from taslation.ui.constants import PICK_NOTHING_S
+
+    clock = [1_000_000.0]
+    monkeypatch.setattr(standin_e2e, "now_ms", lambda: clock[0])
+    me = SimpleNamespace(args=SimpleNamespace(chooser=False), chooser_rows=[])
+    assert standin_e2e.Director.pick_waited(me)  # (no chooser: at once)
+    me.args.chooser = True
+    assert not standin_e2e.Director.pick_waited(me)  # (not answered yet)
+    me.chooser_rows.append({"t": clock[0], "answered_t": None})
+    assert not standin_e2e.Director.pick_waited(me)
+    me.chooser_rows[0]["answered_t"] = clock[0]
+    clock[0] += PICK_NOTHING_S * 1000 - 1
+    assert not standin_e2e.Director.pick_waited(me)
+    clock[0] += 1
+    assert standin_e2e.Director.pick_waited(me)
+
+
 def test_wait_done_lets_a_hold_go_when_its_page_is_finished_and_a_soft_frame_when_the_window_asked():
     import threading
 

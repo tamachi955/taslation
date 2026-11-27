@@ -676,7 +676,9 @@ shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as th
 c-a-b-editing, c, a and b again in editing; g-see-edit, editing on the page measured with `--see-edit` on the
 first page done, then g's one page held long; and tab0-pick and tab0-pick-plain, tab0 with the window picked in the
 viewer chooser while the stand-in's other tab is in front - made-up Japanese lines, grey bars -, judged on nothing of
-that tab read or learnt and the right pane's line that it shows no page of a book; each with `--wait-done`, which
+that tab read or learnt and the right pane's line that it shows no page of a book (both tabs are pale pages the window
+waits out as pages still loading, so the line comes after PICK_NOTHING_S, and tab0 begins no sooner after the pick:
+`Director.pick_waited`); each with `--wait-done`, which
 holds no rest of k; seven at a time).
 Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
 TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900

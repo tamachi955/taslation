@@ -142,7 +142,8 @@ back in sight (*--behind-end*: "close", the cover goes; "raise", the stand-in pu
 foreground, as a click on it does - only while the stand-in, the cover or TASlation is in front: over a window the
 person uses meanwhile nothing is raised, the cover only goes). *--chooser* names no viewer: the viewer chooser comes
 and the driver answers it through its own object, first giving it the foreground as a click on it does (only while
-the stand-in or the cover is in front). *--standin-bars-held MS* has a stand-in with a profile come with its bars up,
+the stand-in or the cover is in front); tab0 then begins no sooner than PICK_NOTHING_S after that answer
+(`Director.pick_waited`). *--standin-bars-held MS* has a stand-in with a profile come with its bars up,
 held MS ms (with *--standin-option bar_key_hide=0* its turns leave them up: the pointer resting on them). The side
 panes are looked at every PANE_SAMPLE_S - whether the window wants each shown, has it shown, its window visible,
 topmost and above the stand-in; the panes' ground and the room beside the page; the lettering; the windows over the
@@ -3159,6 +3160,20 @@ class Director:
         dialog.ok()
         row["answered_t"] = now_ms()
 
+    def pick_waited(self) -> bool:
+        """Whether tab0 may begin as far as the pick goes: without --chooser at once; with it once the chooser was
+        answered PICK_NOTHING_S ago (`chooser_step`). The other tab picked so - a page of made-up Japanese lines, grey
+        bars - is a pale page the window waits out as a page still loading (`seethrough.loading_kind` "washed"), never
+        judged (`ui.viewers.ViewerMixin._pick_lets`), and the right pane says that it shows no page of a book only
+        once it has been in front PICK_NOTHING_S (`_pick_wait`); tab0's first wait, begun as the window had rested,
+        brought the book's tab back 4.8 s after the answer on a runner, before the line was due."""
+        if not getattr(self.args, "chooser", False):
+            return True
+        from taslation.ui.constants import PICK_NOTHING_S
+
+        answered = next((r["answered_t"] for r in self.chooser_rows if r.get("answered_t") is not None), None)
+        return answered is not None and now_ms() - answered >= PICK_NOTHING_S * 1000
+
     def chooser_activate(self, dialog: Any) -> bool:
         """The viewer chooser given the foreground before it is answered, as the person's click on it gives it - only
         while the stand-in or the tool's own cover (`Behind`) is in front, never taken from another window. Whether it
@@ -3350,7 +3365,7 @@ class Director:
             if seg.name == "c":
                 go = ready_go and getattr(app, "selected", None) is not None
             elif seg.name == "tab0":  # (a start with another tab on show: no page read before the book's tab is back)
-                go = ready_go and rested
+                go = ready_go and rested and self.pick_waited()
             elif seg.name in NARROW:
                 go = ready_go and rested and self.resized()
             elif seg.name in WINDOW_STEPS and self.mon is not None:
