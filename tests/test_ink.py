@@ -107,9 +107,10 @@ def font_identity() -> tuple[str, int]:
 # made before the ink could be set (on the code of 933328b; the cases made again there when TEXT got its invented
 # name, and those set along a bubble's body made again when its layout was rebuilt: lines planned over the body with
 # a margin of the size; "turned" made again when a quarter turn's picture stopped being a pixel too large,
-# `detect.tilt.Upright`: the same lines half a pixel over, no longer blended into the next pixel), on the font they
-# name: a computer whose automatic font is another file letters other pixels, and checks the old arguments against
-# the new ones only
+# `detect.tilt.Upright`: the same lines half a pixel over, no longer blended into the next pixel; "sample_page" made
+# again when the cut of a large white area down to its text took its pad from the glyphs, `bubbles.FOCUS_PAD`: its six
+# rooms 1-2 px wider each way, one bubble's lettering 46 px where it was 44), on the font they name: a computer whose
+# automatic font is another file letters other pixels, and checks the old arguments against the new ones only
 GOLDEN: dict[str, object] = {
     "font": ("comicbd.ttf", 255972),
     "plain": "ea9a41b93ff6dee4",
@@ -123,7 +124,7 @@ GOLDEN: dict[str, object] = {
     "turned": "51ee325e1d2df7e2",
     "stacked": "305bf8ef17914411",
     "stacked-slanted": "1bc246b71218707a",
-    "sample_page": "e425f860f681ee0b",
+    "sample_page": "1d238ac8c607b524",
     "sample_page2": "461a94c023daec16",
 }
 AUTOMATIC = {"color": None, "outline_color": None}  # the ink's own arguments, automatic
