@@ -330,6 +330,14 @@ def test_a_doubtful_slant_stands_only_where_the_reading_turned_upright_is_surer(
     assert not region.tilt.doubtful and abs(region.angle - 15.0) <= 2.5
 
 
+def test_a_sound_effect_keeps_its_doubtful_slant(settings):
+    page, region = word_page(10.0)
+    region.tag = "sfx"  # (the reader's kind, or a sound word the reading found: `Pipeline._sound_word`)
+    p = Pipeline(settings, ocr=CropOcr("目元", upright_surer=False), translator=None)
+    p._ocr_regions(page, [region], lambda _m: None)
+    assert region.tilt.doubtful and abs(region.angle - 10.0) <= 1.5  # lettered at the slant the art gives it
+
+
 def test_upright_lettering_is_read_as_before_byte_for_byte(settings):
     page, region = slanted_page(0.0)
     ocr = CropOcr()

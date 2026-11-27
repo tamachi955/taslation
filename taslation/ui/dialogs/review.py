@@ -37,6 +37,10 @@ REGION_KIND_WORDS = {"": "(not set)", "speech": "Speech", "thought": "Thought", 
                      ERASE_ONLY: "Erase only"}  # (erase only: the lettering is erased and nothing is set there)
 ERASE_ONLY_TIP = ("Erase only: the lettering is erased and nothing is set in its place; the region is not translated "
                   "and not counted as untranslated.")
+# ... and how a sound effect is lettered, and that the program finds the ones on the drawing (`Pipeline._sound_word`)
+SFX_TIP = ("Sound effect: lettered at the slant the drawing gives it, as large as it fits, in the series sheet's "
+           "lettering for sound effects. The program finds the sound words lettered on the drawing itself: (not set) "
+           "keeps what it found, and another kind turns it off.")
 ASKING = {"again": "Asking the model for a new translation..."}
 # under the hint for the model, when the translation model in use follows a hint only now and then
 # (`translate.base.hint_support` "sometimes": PLaMo, followed in about half of the answers of a test)
@@ -563,7 +567,8 @@ class EditBubbleDialog(tk.Toplevel):
         self.kind_box = ttk.Combobox(grid, textvariable=self.kind_var, values=words, state="readonly")
         fit_combobox(self.kind_box, words, min_chars=8)
         self.kind_box.grid(row=0, column=3, sticky="w", padx=(4, 0))
-        tip(_("What sort of text this is; the lettering follows it.") + " " + _(ERASE_ONLY_TIP), label, self.kind_box)
+        tip(_("What sort of text this is; the lettering follows it.") + " " + _(SFX_TIP) + " " + _(ERASE_ONLY_TIP),
+            label, self.kind_box)
         self.kind_box.bind("<<ComboboxSelected>>", lambda _e: self._changed())  # (erase only: the page shows it)
         self.cont_var = tk.BooleanVar(value=bool(region.continues))
         ttk.Checkbutton(grid, text=_("Sentence continues in the next bubble"), variable=self.cont_var).grid(

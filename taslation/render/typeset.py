@@ -149,7 +149,8 @@ ORPHAN_SLACK = 1.0  # an orphan costs as much as a line this empty: only a worse
 ORPHAN_FIRST_LETTERS = 3  # a first or inner line of one such word ("I", "Je", "Ich") is avoided the same way
 SIZE_CAP: float | None = 1.3  # no lettering above this many times the page's median for its kind (None: no cap)
 STANDS_OUT = 1.5  # lettering this many times its neighbours' in the original was large on purpose
-UNCAPPED_KINDS = frozenset({"shout"})  # meant to be large: as large as they fit
+# meant to be large: as large as they fit (a sound effect at the size the art letters it, not the page's speech)
+UNCAPPED_KINDS = frozenset({"shout", "sfx"})
 _VOWELS = frozenset("aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœāēīōūăĕĭŏŭąęįųőű")
 _ONSETS = frozenset({"bl", "br", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "pl", "pr", "tr", "wr", "kn", "ch", "ph",
                      "sh", "th", "wh", "qu", "sc", "sk", "sl", "sm", "sn", "sp", "st", "sw", "str", "spr", "scr", "spl",

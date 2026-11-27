@@ -357,6 +357,9 @@ red: translated but flagged for review). The right pane's foot says "Editing: tu
 * **Editing a region**: a click on its box opens the region editor beside it. The formatting fields are folded into the "Formatting" button when the region has no formatting of its own. You can change the **speaker** (chosen from the series sheet's names), the **kind** (Speech,
   Thought, Shout, Narration, Sound effect, Handwritten, Erase only), whether the **sentence continues in the next bubble**, the **hint for the model** (a pun, who is addressed),
   and the translation. Enter starts a new line (the lettering keeps that line break too), and Ctrl+Enter saves.
+  A **sound effect** is lettered at the slant the drawing gives it, as large as it fits, in the series sheet's lettering for sound effects.
+  TASlation finds the sound words lettered on the drawing itself (from its own list of Japanese sound words): "(not set)" keeps what it found, and another kind turns it off.
+  Into English, a sound word PLaMo gets wrong is given TASlation's own rendering of it ("Ba-dump" for ドキッ), unless the series sheet has one.
   PLaMo 3 Translate (the model of every target language but Brazilian Portuguese and Turkish, see "Choosing the model") follows a hint only sometimes (about half the time in a test), and the editor says so under it:
   it works best for how a name or a term is read and for who or how many are meant; names and terms that must always come out the same belong in the series sheet. Qwen3.5 4B and a model of your own are given the hint with the bubble.
   A hint can change the wording of its own line even where it does not need to, but it never reaches another line: the request that translates a bubble together with the next one as one sentence carries no hint, and "Ask again" asks the bubble alone, with its hint.

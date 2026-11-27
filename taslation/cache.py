@@ -119,6 +119,11 @@ class CachedBubble:
     # stored outline where the live page shows those pieces (`taslation.pipeline.Pipeline._apply_cached`); written only
     # when so, as ``"joined": true``. Versions before it ignore the key (and leave such a paragraph undrawn)
     joined: bool = False
+    # its kind is "sfx" (`TextRegion.tag`: a sound word the reading found, `Pipeline._sound_word`, or the reader's
+    # kind): a page from the cache letters it as a sound effect, at its slant and the size it fits at, as the page read
+    # did (`Pipeline._apply_cached`), with no reading done again; written only when so, as ``"sfx": true``. Versions
+    # before it ignore the key (and letter it as speech)
+    sfx: bool = False
 
     def to_json(self) -> dict[str, Any]:
         d: dict[str, Any] = {"box": [round(v, 4) for v in self.box], "text": self.text}
@@ -139,6 +144,8 @@ class CachedBubble:
             d["large"] = [[large[0], large[1], round(large[2], 3)]]
         if self.joined:
             d["joined"] = True
+        if self.sfx:
+            d["sfx"] = True
         return d
 
     @classmethod
@@ -159,7 +166,7 @@ class CachedBubble:
         return cls(box=box, text=text, poly=poly, flags=flags,  # type: ignore[arg-type]
                    note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0,
                    reused=d.get("reused") is True, edited=d.get("edited") is True, large=large,
-                   joined=d.get("joined") is True)
+                   joined=d.get("joined") is True, sfx=d.get("sfx") is True)
 
 
 @dataclass

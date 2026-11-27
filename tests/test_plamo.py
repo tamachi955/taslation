@@ -215,6 +215,35 @@ def test_a_line_without_a_hint_goes_as_it_went_and_one_with_a_hint_as_measured(s
     assert generates(server)[-1]["prompt"] == pfml_prompt("光、こっちに来て", "en", hint)
 
 
+def test_a_sound_effect_the_model_gets_wrong_has_its_rendering_as_glossary_and_nothing_else_changes(stub):
+    """A line of the kind "sfx" (a sound word the reading found, or the reader's kind) whose word has a rendering
+    (`soundwords.rendering`) goes into English with that rendering as its glossary entry, after the sheet's; its
+    ``context`` and earlier pairs are what they are without it (docs/OFFLINE_VERIFICATION.md, "Sound effects, the kind
+    of a line and PLaMo"). The same line of another kind, a word without a rendering, another target language and a
+    sheet entry for the same Japanese go as before, byte for byte."""
+    server, url = stub
+    premises = Premises(sheet().format(), sheet())
+    history = [("前", "Before")]
+    PlamoTranslator(url, seed=3).translate_page(["ズガンッ", "ズガンッ", "ドーン"], history, premises,
+                                                meta=[{"kind": "sfx"}, {"kind": "shout"}, {"kind": "sfx"}])
+    sfx, shout, known = generates(server)
+    plain = pfml_prompt("ズガンッ", "en", premises.strip(), history, [])
+    assert sfx["prompt"] == plain.replace(
+        "<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>ズガンッ",
+        "<|plamo:tag|>glossary<|plamo:index|>ズガンッ<|plamo:item|>Blam"
+        "<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>ズガンッ")
+    assert "glossary" not in shout["prompt"] and "glossary" not in known["prompt"]  # (ドーン: the model's Boom)
+    server.requests.clear()
+    PlamoTranslator(url, target_language="French", seed=3).translate_page(["ズガンッ"], meta=[{"kind": "sfx"}])
+    assert "glossary" not in generates(server)[0]["prompt"]
+    server.requests.clear()
+    g = sheet()
+    g.set("ズガンッ", "Ka-blam")
+    PlamoTranslator(url, seed=3).translate_page(["ズガンッ"], meta=[{"kind": "sfx"}], notes=Premises(g.format(), g))
+    p = generates(server)[0]["prompt"]
+    assert "Ka-blam" in p and "<|plamo:item|>Blam" not in p  # the sheet's rendering, not the program's
+
+
 def test_a_joined_run_carries_no_hint_and_a_bubble_asked_by_itself_carries_its_own(stub):
     """Bubbles whose sentence goes on are one request: one bubble's hint would be the reference of the others too, so
     that request has none. When its answer does not split back, each bubble is asked by itself, and only the hinted

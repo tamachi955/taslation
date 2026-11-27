@@ -54,9 +54,20 @@ What the pipeline hands a translator maps to it like this:
   ``glossary``) and now and then a pronoun or a number, never the register or the people addressed; and hints that
   should change nothing changed the words of 5 of 30 answers (a synonym, a full stop added): a hint can change the
   wording of its own line where it need not;
-* a region's kind and its room -> nothing. As a line of ``context`` the kind "shout" gave 3 of 30 answers an
-  exclamation mark (1 without it) and the room in characters brought none of 30 within it; the kind "sfx" made 14 of
-  30 romanised sound effects English ones (Gashan: Crash) and 3 a wrong one.
+* a region's kind and its room -> nothing, but for a sound effect (the kind "sfx": `PROMPT_KINDS`) into English whose
+  word the model gets wrong: its English rendering (`soundwords.rendering`) -> that line's ``glossary``, after the
+  sheet's (`_sound`; the prompt shares its beginning with the lines before it as without it). Measured on 2026-11-28
+  (tools/sfx_eval.py, docs/OFFLINE_VERIFICATION.md, "Sound effects, the kind of a line and PLaMo"): a line of
+  ``context`` saying the text is a manga's lettering, or what kind of line it is, changed no line of dialogue for the
+  better but the case of one narration, made a thought and a narration worse, and the first took 0.34 and 0.07 chrF
+  off the two halves of the benchmark's official arm; the kind "sfx" took the romanised answers of the list's 675
+  sound words into English from 522 to 316 with no earlier pairs, but after ten earlier pairs, as the app asks, the
+  two lines took them from 181 to 169 only, 30 answers better and 22 worse, and the words' meaning there mended about
+  one in nine of those the model gets wrong (45 better, 11 worse of 395), while the rendering as glossary was taken in
+  all 395; into French neither the meaning nor the English rendering helped, into Chinese the meaning mended 13 of
+  the first 149 words and spoiled 3 (not taken on one language and part of the list). Earlier, as a line of
+  ``context``, the kind "shout" gave 3 of 30 answers an exclamation mark (1 without it) and the room in characters
+  brought none of 30 within it.
 
 Translating is all it does, as for the other translator: TASlation has no notes of the model's own, no review pass, no
 shortening and no alternatives (removed 2026-11-06). A line whose reply copied the Japanese or came back empty is asked
@@ -138,6 +149,12 @@ WARM_TIMEOUT = 10.0  # seconds a warming step may take at most
 # requests that computed RATE_LEAST_TOKENS tokens or more
 RATES_KEPT = 8
 RATE_LEAST_TOKENS = 64
+# the kinds of a line (its facts' ``kind``) its request is made otherwise for (`_sound`): a sound effect, whose
+# rendering `soundwords.rendering` gives where the model gets the word wrong
+PROMPT_KINDS = frozenset({"sfx"})
+# the target languages a sound effect's rendering goes to as its ``glossary`` entry, by PLaMo's code: the renderings
+# are English
+SOUND_TARGETS = frozenset({"en"})
 _RESERVED = re.compile(r"<\|plamo:[a-z_]+\|>")
 _NOTE_LINE = re.compile(r"^- (.+?) = (.+?)(?: \(.*\))?$")
 
@@ -231,7 +248,7 @@ class PageSession:
             following = list(follow) if i == last else t._following(lines, facts, lines, i)
             self.requests += 1
             got = t._line(lines[i], self.notes, self.history, str(facts[i].get("speaker", "") or ""), cancel, on_slow,
-                          following, t._hint(facts[i]))
+                          following, t._hint(facts[i]), t._sound(facts[i], lines[i]))
             if got:
                 t._computed(self.history, lines[i], self.computed)
             took_one(i, got)
@@ -529,6 +546,17 @@ class PlamoTranslator(OllamaTranslator):
         the hint alone, on one line ("" for none)."""
         return " ".join(str(facts.get("note", "") or "").split())
 
+    def _sound(self, facts: dict[str, Any], source: str) -> list[tuple[str, str]]:
+        """The ``glossary`` entry of a sound effect (the facts' ``kind`` "sfx") the model gets wrong: (*source*, its
+        English rendering: `soundwords.rendering`) into a language of `SOUND_TARGETS`; nothing for any other line,
+        word or language."""
+        from .. import soundwords
+
+        if facts.get("kind") not in PROMPT_KINDS or self.target_code not in SOUND_TARGETS:
+            return []
+        found = soundwords.rendering(source)
+        return [(source, found[0])] if found is not None else []
+
     def _context(self, notes: str, speaker: str = "", following: Sequence[str] = (), hint: str = "") -> str:
         """The reference text of a line: the premises; for a line the reader gave a speaker, who says it; the
         reader's hint for the model on the line (*hint*: `_hint`, for the request of that line alone); and the
@@ -571,15 +599,19 @@ class PlamoTranslator(OllamaTranslator):
 
     def _line(self, source: str, notes: str, history: Sequence[tuple[str, str]], speaker: str = "",
               cancel: threading.Event | None = None,
-              on_slow: Callable[[float], None] | None = None, following: Sequence[str] = (), hint: str = "") -> str:
+              on_slow: Callable[[float], None] | None = None, following: Sequence[str] = (), hint: str = "",
+              sound: Sequence[tuple[str, str]] = ()) -> str:
         """One line translated (or a joined run of them, a line break between bubbles), after the earlier pairs
         *history*, with the premises *notes*, the reader's *hint* for this line and the Japanese *following* it as
-        reference and the sheet's renderings it names as glossary; another seed when it was asked for before
-        (`_draw`). A single line comes back on one line."""
+        reference and the sheet's renderings it names as glossary, then a sound effect's rendering (*sound*:
+        `_sound`) where the sheet gives the same Japanese none; another seed when it was asked for before (`_draw`).
+        A single line comes back on one line."""
         target = self.target_code
         max_tokens = max(128, 4 * len(source) + 64)
-        prompt = self._fit(source, target, self._context(notes, speaker, following, hint), list(history),
-                           glossary_for(notes, source, speaker), max_tokens)
+        glossary = glossary_for(notes, source, speaker)
+        glossary += [pair for pair in sound if all(pair[0] != ja for ja, _r in glossary)]
+        prompt = self._fit(source, target, self._context(notes, speaker, following, hint), list(history), glossary,
+                           max_tokens)
         self._wrote.text = None
         got = self._generate(prompt, max_tokens, self._draw(source), cancel, on_slow)
         wrote = getattr(self._wrote, "text", None)

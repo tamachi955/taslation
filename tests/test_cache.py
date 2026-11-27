@@ -42,6 +42,18 @@ def test_roundtrip_and_lookup(tmp_path):
     assert loaded.lookup("c" * 80, 0.71, max_distance=10) is None
 
 
+def test_a_sound_effect_s_mark_goes_into_the_file_and_comes_back(tmp_path):
+    cache = CacheStore(tmp_path).open("b", "m")
+    page = _page(FP_A)
+    page.bubbles.append(CachedBubble(box=(0.5, 0.5, 0.6, 0.6), text="Ba-dump", sfx=True))
+    cache.add(page)
+    cache.save()
+    data = store_json(cache.path)
+    assert [b.get("sfx") for b in data["pages"][0]["bubbles"]] == [None, True]  # (written only where it is one)
+    loaded = BookCache.load(cache.path)
+    assert [b.sfx for b in loaded.pages[0].bubbles] == [False, True]
+
+
 def test_near_duplicate_replaces_instead_of_growing(tmp_path):
     cache = CacheStore(tmp_path).open("b", "m")
     cache.add(_page(FP_A))

@@ -157,6 +157,14 @@ What was tried and dropped, on the same pages at full size:
 The audit (`tools/audit_render.py`, version 8) counts per set and scale the sound words found, set right and left as
 drawn, and the damage codes on the sound effects lettered (`sound_lines`).
 
+`soundwords.RENDERINGS_TEXT` holds an English rendering and a short meaning for the 395 base forms PLaMo 3 Translate
+gets wrong as a sound effect into English, written for the program like the list (no dictionary or site copied);
+`tools/sfx_eval.py words` and `renderings` (after earlier pairs, as the app asks) are how they were found, and
+docs/OFFLINE_VERIFICATION.md, "Sound effects, the kind of a line and PLaMo", has the numbers. A base form gets an
+entry only where the model's own answer is wrong: run `words` and `renderings` again for a model or a list that
+changes, judge the answers by eye, and add or drop entries; `rendering` looks a reading up by its `long_form` (the
+lengthening kept: ガン is a clang, ガーン a shock), so two entries must not share one.
+
 ## A setting in the Settings dialog
 
 Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:

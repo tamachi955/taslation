@@ -5097,3 +5097,95 @@ pulled afterwards, the pull's server's own start while the session's model is lo
 version the GPU workflow pins, knows the variable; the install check's new step, not yet run on the runners. No
 server was started and nothing was downloaded for the code change itself: its tests use fakes
 (`tests/test_ollama_start.py`, `tests/test_install_scripts.py`).
+
+## Sound effects, the kind of a line and PLaMo (2026-11-28)
+
+A sound word lettered on the drawing is now found by the reading and given the kind "sfx" (`Pipeline._sound_word`,
+docs/DEVELOPMENT.md, "Sound words"). What PLaMo 3 Translate 2B should be told about it, and about the kind of any
+line, was measured before anything was sent: a **standing line** the same in every request ("The lettering of a manga
+page: short lines.", where the premises go, so that the prompts still share their beginning), and a **line's kind**
+in that line's own ``context`` (speech in a bubble, a thought, narration in a box, a shout, a sound effect drawn on the
+art, a sign in the scenery). Then, for the sound words the model gets wrong, their meaning and fixed renderings.
+
+**How it was measured.** `tools/sfx_eval.py` and the benchmark's official arm (`tools/openmantra_eval.py`: the gold
+text, the detected geometry, a region's kind as detected) on the development machine (GTX 1660 Ti 6 GB), a server of
+the tool's own on another loopback port (Ollama 0.40.18, PLaMo 3 Translate 2B Q4_K_M, the app's options), seed 1 but
+for the made-up lines (seeds 1 to 3). The made-up lines and the earlier pairs are written for the test; the sound
+words are every base form of the program's list (`soundwords.BASES`, 675, lettered as a page letters them: ドキッ,
+ガーン). Answers sorted by the tool as romanised, the Japanese copied, or a word of the target language, which was then
+judged by eye. The same 383 prompts asked in two runs gave the same answers.
+
+**Dialogue: the standing line and the kind, not kept.** On 29 made-up lines of speech, thoughts, narration and
+shouts (three seeds: 87 answers a prompt), the answers that changed against the prompt without either were 17 with
+the standing line, 16 with the kind, 15 with both; by eye, 3 better with each (a narration whose title case became a
+sentence), 1 worse with the standing line and 2 with the kind and with both (a thought that lost "I've seen them", a
+narration that lost "the town"), the rest the same in other words or marks. On the benchmark's official arm, the standing line
+took the chrF of its two halves from 41.52 to 41.18 (647 lines) and from 41.13 to 41.06 (939 lines), and the prompt
+tokens computed up 1.2 % and 1.6 %. The benchmark's regions get no kind but a sound effect's (1 of its 1,586 lines), so
+a line's kind cannot move it; the other kinds come from the reader alone. Neither is sent.
+
+**Sound effects: the kind helps only without earlier pairs.** Told the line is a sound effect drawn on the art, the
+model romanised fewer of the 675 sound words: English 522 to 316 (both lines 309), French 517 to 368 (397); into
+Chinese (Simplified) nearly every answer is in Chinese characters either way, and of the first 360 words by eye about
+150 transliterations or other words without it (癌症 for ガン) and about 60 with both (多贡 for ドゴン). On 24 made-up
+sound effects (three seeds) the answers that said what a rendering written for them says went from 28 of 72 to 43
+with the kind and 51 with both; 8 made-up signs were right under every prompt. But the app asks a line after the
+book's earlier pairs, and after ten made-up English pairs the model romanised 181 of the 675 with nothing said and 169
+with both lines at the front of the ``context``; of the 187 answers that changed, 30 were better and 22 worse. In a
+second ``context`` element after the pairs (where the prompt would share its beginning with the line before) it
+romanised 213. A ``context`` of its own would make the server compute the sound effect's prompt and the next line's
+anew (`PlamoTranslator._context`), for 8 answers of 675 better on balance. Not sent.
+
+**Their meaning, then renderings.** For the 395 base forms the model got wrong in English (romanised, or another word:
+"Cotton" for コトン, "Gun" for ガン) with no earlier pairs or after the ten pairs, a rendering and its meaning were
+written (`soundwords.RENDERINGS_TEXT`; the cries and laughs it romanises as English letters them, Ah, Ahaha, Kyaa,
+left out). After the ten pairs, into English (all 395):
+
+| ``context`` / glossary of the sound word | Romanised | Says the rendering | By eye against nothing |
+|---|---|---|---|
+| nothing (the app's prompt) | 140 (and 1 copied) | 36 | |
+| both lines and the meaning after the kind | 115 | 54 | 45 better, 11 worse |
+| the rendering as the line's glossary entry, nothing in ``context`` | 11 (renderings such as "Hmm") | 395 | all the rendering |
+
+Into French, with ten French pairs (395 words): romanised 154 with nothing, 164 with the meaning, 172 with the English
+rendering in the ``context``; by eye on the first 110, the meaning 4 better and 5 worse, the English rendering 3 better
+and 6 worse. Into Chinese (Simplified), with ten Chinese pairs, every answer of the first 149 words (the run's time
+ran out there) is in Chinese characters under each prompt; by eye, the meaning 13 better and 3 worse (冷眼 for ジロリ,
+where nothing gave a sentence that is not about a look), the English rendering 13 better and 7 worse (嘿咻 for
+ジャー, where nothing gave 哗啦).
+
+**Decision.** PLaMo is told nothing new about a line's kind. A sound effect (the kind "sfx": a sound word the
+reading found, or the reader's kind) going into English whose word has a rendering gets that rendering as its line's
+glossary entry, after the series sheet's, which wins where it names the same Japanese (`PlamoTranslator._sound`,
+`tests/test_plamo.py`). The glossary goes after the earlier pairs, so the prompt shares its beginning with the line
+before as without it. Through the app's own `translate_page` on five made-up lines, the three lines of dialogue
+round two sound effects came out the same with and without the kind; the two came out Blam and Ba-dump into English
+(Thump! twice without it), and into French nothing changed. Other target languages get nothing: the renderings are English; into French neither the
+meaning nor the English rendering in the ``context`` helped, and into Chinese the meaning helped 13 of the 149 words
+measured and spoiled 3, a lead not taken on one language and part of the list (with the two prompts computed anew
+that a ``context`` of its own costs). A line whose rendering the reader corrects is
+remembered for the book's same line and kind by line reuse (`linememo`), as any. The chat translator (Brazilian
+Portuguese, Turkish, a model of the reader's own) has always had a bubble's kind in its request. Asked every third
+of the 675 sound words (226, twenty to a request as one page's bubbles, no earlier bubbles), Qwen3.5 4B romanised
+212 into English without the kind and 210 with "sfx" (by eye, of the 106 answers that changed about as many better as
+worse, most only in case or spelling), and 197 and 205 into Brazilian Portuguese (by eye, of 129 changed, 8 better and
+13 worse, most of the worse ones cries romanised: Kyaatt! for キャアッ where nothing gave Aaaah!). Not changed: the
+kind is the reader's fact there as before, and 13 against 8 is too few to tell from chance; a kind only the reading
+found could be left out of that request.
+
+**Lettering.** A sound effect is lettered in the series sheet's lettering for sound effects (`Pipeline.lettering_for`,
+the kind's entry; none by default), as large as it fits (`typeset.UNCAPPED_KINDS`, as a shout), and at the slant
+the drawing gives it: the rule that stands a doubtful slant upright where the reading turned upright is not surer
+(`Pipeline._doubtful_slant`) leaves a sound effect alone. Of the three hand-lettered sound marks that rule had stood
+upright on the sample set, one is found as a sound word and keeps its slant (-35°, at full size, read on the
+processor); one is in a closed block (``text-on-page``), which `_sound_word` leaves as read, and stands upright as
+before; the third was not slanted in that reading. A page shown from the cache gives the kind back to a region the
+reader gave none (`CachedBubble.sfx`, `Pipeline._apply_cached`). A sentence is not joined into a sound effect nor out
+of one by the rule of `continuation` (the reader's mark still joins). The region editor's Kind list says under it
+how a sound effect is lettered, that the program finds the sound words lettered on the drawing, and that "(not set)"
+keeps what it found and another kind turns it off.
+
+**Not shown here.** Sound effects of real pages through the app (the sample set has one gold line of them), the
+lettering in the live window, more seeds or other wordings of the lines tried, the chat translator after earlier
+bubbles and into Turkish, and PLaMo into target languages beyond the three measured; the renderings were judged by
+the one who wrote them.

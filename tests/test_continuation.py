@@ -60,6 +60,20 @@ def test_facts_of_adds_the_page_and_the_rule_to_the_readers_facts(monkeypatch):
     assert [f.get("continues", False) for f in facts_of(regions, units)] == [False, False, True]
 
 
+def test_the_rule_joins_no_sentence_into_a_sound_effect_nor_out_of_one():
+    def region(text, x, **kw):
+        return SimpleNamespace(source_text=text, bbox=(x, 100, x + 100, 300), **kw)
+
+    units = [(0, UNIT)] * 3
+    facts = facts_of([region("お前もしかして", 100), region("ドンッ", 250, tag="sfx"), region("女か?", 400)], units)
+    assert [f.get("continues", False) for f in facts] == [False, False, False]
+    facts = facts_of([region("ドンと", 100, tag="sfx"), region("女か?", 250)], units[:2])
+    assert not facts[0].get("continues")
+    # ... but the reader's own mark stands
+    facts = facts_of([region("ドンッ", 100, tag="sfx", continues=True), region("女か?", 250)], units[:2])
+    assert facts[0]["continues"] is True and facts[0]["kind"] == "sfx"
+
+
 def test_runs_join_lines_that_go_on_at_most_max_joined():
     meta = [{"continues": True}, {}, {"continues": True}, {"continues": True}, {"continues": True}, {}, {}]
     assert runs(meta, 7) == [[0, 1], [2, 3, 4], [5], [6]]

@@ -319,6 +319,8 @@ def test_the_caps_are_a_multiple_of_the_median_of_the_kind(monkeypatch):
     caps = page_caps([("", 16, 0), ("speech", 20, 0), ("", 64, 0), ("thought", 12, 0), ("shout", 40, 0)])
     assert caps[:3] == [25 - 1, 24, 24]  # 1.25 x 20 = 25: above 24 the sizes tried go by twos
     assert caps[3] == 15 and caps[4] == 0
+    # (a sound effect as large as the art letters it)
+    assert page_caps([("", 16, 0), ("sfx", 90, 0), ("sfx", 30, 0)])[1:] == [0, 0]
     assert page_caps([("", 8, 0), ("", 8, 0), ("", 8, 0)], 11) == [11, 11, 11]
     monkeypatch.setattr(typeset, "SIZE_CAP", None)
     assert page_caps([("", 16, 0)]) == [0]

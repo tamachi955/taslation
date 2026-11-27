@@ -62,8 +62,9 @@ HOLD_FOR_CLASSICAL = True
 ORDER_AS_READ = True
 WAIT_STEP_S = 0.01  # how often a wait of the stream looks at the page's cancel
 # the facts of a line its request is made of (`plamo.PageSession.run`: the speaker, the reader's hint, whether its
-# sentence goes on, its page unit): two runs with the same lines and these are the same request
-REQUEST_FACTS = ("speaker", "note", "continues", "page")
+# sentence goes on, its page unit, and its kind where the prompt says it: `plamo.PROMPT_KINDS`): two runs with the same
+# lines and these are the same request
+REQUEST_FACTS = ("speaker", "note", "continues", "page", "kind")
 _TOKENS = itertools.count(1)
 _LOCAL = threading.local()  # (the sender's: the run whose requests are under way, `current_token`)
 _POOL: list[ThreadPoolExecutor] = []
@@ -85,7 +86,9 @@ def current_token() -> int | None:
 
 
 def _frozen(facts: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
-    return tuple((k, facts[k]) for k in REQUEST_FACTS if k in facts)
+    from .translate.plamo import PROMPT_KINDS
+
+    return tuple((k, facts[k]) for k in REQUEST_FACTS if k in facts and (k != "kind" or facts[k] in PROMPT_KINDS))
 
 
 class RunSpec:
@@ -115,7 +118,8 @@ def why_differs(sent: RunSpec, final: RunSpec | None, lines: set[str]) -> str:
     """Why the run *sent* is not the request's run in its place (*final*; None: the request has fewer runs), for the
     counts (no text): "order" (its lines are all asked, in other runs or another order: the order changed, lines were
     joined or parted), "not asked" (one of its lines is not asked: no text after all, or its answer reused), "facts"
-    (its lines' facts: the speaker, the reader's hint, whether the sentence goes on), "follow" (the Japanese after it)."""
+    (its lines' facts: the speaker, the reader's hint, whether the sentence goes on, a sound effect), "follow" (the
+    Japanese after it)."""
     if final is None or sent.lines != final.lines:
         return "order" if all(line in lines for line in sent.lines) else "not asked"
     return "facts" if sent.facts != final.facts else "follow"

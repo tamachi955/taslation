@@ -61,6 +61,32 @@ def test_what_readers_read_alike_stands_and_only_a_split_is_set_right():
     assert sw.find(["お前は誰だ"]) is None and sw.find([]) is None
 
 
+@pytest.mark.parametrize("reading, form", [
+    ("ガーン", "ガーン"), ("ガァーン！", "ガーン"), ("ガアアン", "ガーン"), ("ガン", "ガン"), ("ガンッ", "ガン"),
+    ("ザァァ", "ザー"), ("ドキドキッ", "ドキドキ"), ("しーん", "シーン"), ("今日は", ""),
+])
+def test_a_reading_s_long_form_keeps_its_lengthening_and_its_repeats(reading, form):
+    assert sw.long_form(reading) == form
+
+
+def test_a_sound_word_s_rendering_is_its_long_form_s_and_another_sound_has_none():
+    assert sw.rendering("ガーン")[0] == "Shock" and sw.rendering("ガンッ")[0] == "Clang"  # (one skeleton, two sounds)
+    assert sw.rendering("ワンワン")[0] == "Woof" and sw.rendering("ドキドキッ")[0] == "Ba-dump"  # (repeats said once)
+    assert sw.rendering("しーん")[0] == "Silence"
+    english, meaning = sw.rendering("ザーッ")
+    assert english and meaning
+    assert sw.rendering("お前は誰だ") is None and sw.rendering("") is None
+    assert sw.rendering("ドカーン") is None  # (one the model renders itself)
+    # every entry: a base form of the list, one line each, its rendering and its meaning
+    lines = sw.RENDERINGS_TEXT.strip().splitlines()
+    assert len(lines) == len(sw.RENDERINGS) and len(lines) >= 300
+    for line in lines:
+        base, rest = line.split(" ", 1)
+        english, meaning = (part.strip() for part in rest.split("|", 1))
+        assert sw.known(base) and english and meaning, line
+    assert "ギリ" in sw.BASES.split() and "ギシ" in sw.BASES.split()
+
+
 def test_readers_agree_when_two_of_them_read_alike():
     assert sw.agree(["ドン", "ドン"]) and sw.agree(["ドン"]) and sw.agree(["ドン", "ドソ", "ドン"])
     assert not sw.agree(["ドン", "ドソ"]) and not sw.agree(["ドン", "ドソ", "トン"])
@@ -139,6 +165,58 @@ def test_without_translate_sfx_a_sound_word_found_is_left_as_drawn():
     s.translate_sfx = False
     (a,) = run([("どきっ", 0.95, ("どきっ",))], settings=s)  # (hiragana: not the short katakana `_judge` leaves)
     assert (a.status, a.tag, a.sound) == ("sfx", "sfx", "read")
+
+
+def test_a_sound_effect_s_kind_is_kept_with_the_page_and_given_back_with_its_translation(settings):
+    from taslation import fingerprint as fp
+    from taslation.cache import CacheStore
+
+    def region(tag="", text="", status="unmatched"):
+        return TextRegion(0, 0, 400, 300, np.full((300, 400), 255, np.uint8), (100, 100, 300, 200), kind="text",
+                          tag=tag, status=status, source_text="ドキッ", translated_text=text)
+
+    p = Pipeline(settings, ocr=None, translator=None, cache=CacheStore(settings.cache_dir).open("Sounds", "fake"))
+    unit = fp.PageUnit((0, 0, 400, 600), "c" * 80, 0)
+    p._store_regions(unit, [region("sfx", "Ba-dump", "translated")])
+    page = CacheStore(settings.cache_dir).open("Sounds", "fake").pages[0]
+    assert page.bubbles[0].sfx
+    rgb = np.full((600, 400, 3), 255, np.uint8)
+    (shown,) = [r for r in p._apply_cached(unit, page, [region()], rgb) if r.status == "translated"]
+    assert (shown.tag, shown.translated_text) == ("sfx", "Ba-dump")  # lettered as a sound effect, unread
+    (told,) = [r for r in p._apply_cached(unit, page, [region("speech")], rgb) if r.status == "translated"]
+    assert told.tag == "speech"  # (the reader's kind stands)
+    p._store_regions(unit, [region("", "Thump", "translated")])
+    assert not CacheStore(settings.cache_dir).open("Sounds", "fake").pages[0].bubbles[0].sfx
+
+
+def test_not_set_in_the_editor_leaves_a_sound_effect_the_program_found_one_and_another_kind_turns_it_off(
+        sample_page, settings):
+    from helpers import EN_TEXTS, FakeOcr
+
+    from taslation.annotations import BookAnnotations
+    from taslation.translate import DictTranslator
+
+    ann = BookAnnotations(settings.state_dir / "annotations" / "Sounds.json", "Sounds")
+    p = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS, default="ok"), annotations=ann)
+    result = p.process(sample_page, complete=True)
+    region = result.regions[0]
+    region.tag = "sfx"  # (as `_sound_word` gives it)
+    assert p.set_region_note(result, region, kind="") and region.tag == "sfx"  # "(not set)": the program's finding
+    p.set_region_note(result, region, kind="speech")
+    assert region.tag == "speech"
+    p.set_region_note(result, region, kind="sfx")
+    p.set_region_note(result, region, kind="")
+    assert region.tag == ""  # (the reader's own kind taken off: left to the reading again)
+
+
+def test_the_editor_s_line_on_sound_effects_is_in_every_language_with_the_kind_list_s_words():
+    from taslation.i18n import CATALOGS
+    from taslation.ui.dialogs import review
+
+    for code, catalog in CATALOGS.items():
+        if code != "en":
+            line = catalog.get(review.SFX_TIP, "")
+            assert line and catalog["(not set)"] in line, code
 
 
 def test_the_audit_counts_the_sound_words_and_the_codes_on_them():

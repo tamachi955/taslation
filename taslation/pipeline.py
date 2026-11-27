@@ -563,7 +563,7 @@ def scanned_bubble(unit: ScannedUnit, region: ScannedRegion, text: str, flags: S
     poly = [pu.normalize((int(x) + x0, int(y) + y0, int(x) + x0, int(y) + y0))[:2] for x, y in region.poly]
     return CachedBubble(box=pu.normalize(region.bbox), text=text, poly=poly, flags=list(flags), angle=region.angle,
                         reused=bool(region.reused_text) and region.reused_text == text,
-                        large=locate_large.checked(text, large), joined=region.joined)
+                        large=locate_large.checked(text, large), joined=region.joined, sfx=region.tag == "sfx")
 
 
 def erases(region: Any) -> bool:
@@ -2087,7 +2087,8 @@ class Pipeline:
 
     def lettering_for(self, text: str = "", kind: str = "") -> Lettering:
         """How a region's text is set: the font the sheet names for its *kind* (the reader's thought, shout,
-        narration, handwritten or sfx), else the sheet's lettering font, where installed and covering *text*;
+        narration, handwritten or sfx, and the sfx of a sound word the reading found: `_sound_word`, kept with the
+        cached page: `CachedBubble.sfx`), else the sheet's lettering font, where installed and covering *text*;
         with the kind's italic and bold (thoughts italic, shouts heavier unless the sheet says otherwise)."""
         s = self.settings
         style = self.glossary.style if self.glossary is not None else StyleGuide()
@@ -3125,7 +3126,8 @@ class Pipeline:
                     for x, y in mask_polygon(r.mask)]
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
                                         note=r.reader_note, angle=r.angle,
-                                        large=locate_large.checked(r.translated_text, r.large), joined=r.joined))
+                                        large=locate_large.checked(r.translated_text, r.large), joined=r.joined,
+                                        sfx=r.tag == "sfx"))
             r.from_cache = not page.incomplete  # (a marked page's are new to the reader)
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
         if work is not None:
@@ -3172,11 +3174,13 @@ class Pipeline:
             best.reused = False
             best.edited = edited
             best.large = large
+            best.sfx = region.tag == "sfx"
         else:
             poly = [unit.normalize((int(x) + region.x0, int(y) + region.y0, int(x) + region.x0, int(y) + region.y0))[:2]
                     for x, y in mask_polygon(region.mask)]
             page.bubbles.append(CachedBubble(box=nbox, text=text, poly=poly, note=region.reader_note, angle=region.angle,
-                                             edited=edited, large=large, joined=region.joined))
+                                             edited=edited, large=large, joined=region.joined,
+                                             sfx=region.tag == "sfx"))
         # a page that enters the cache with this one line alone may lack the others: the next reading sees
         self._save_page(page.fingerprint, page.aspect, page.bubbles, page.incomplete or page.seq < 0)
         region.translated_text = text
@@ -3387,14 +3391,19 @@ class Pipeline:
                         continues: bool = False, note: str = "") -> bool:
         """Record who says the region's text, what kind of text it is, whether it continues, and a remark. A region
         made "erase only" (`ERASE_ONLY`) is erased and nothing set (`_erase_only`); made something else again, it is
-        lettered with its translation, or waits for one."""
+        lettered with its translation, or waits for one. No kind ("(not set)") leaves a sound effect the program found
+        (the kind "sfx" no note of the reader's gave: `_sound_word`, `_apply_cached`) one, as it finds it again."""
         if self.annotations is None or region.unit >= len(result.units):
             return False
         unit = result.units[region.unit]
         page = self.annotations.page(unit.fingerprint, unit.aspect)
-        page.set_note(unit.normalize(region.bbox), speaker, kind, continues, note, self.settings.match_min_iou)
+        nbox = unit.normalize(region.bbox)
+        before = page.note_at(nbox, self.settings.match_min_iou)
+        found = region.tag == "sfx" and (before is None or before.kind != "sfx")
+        page.set_note(nbox, speaker, kind, continues, note, self.settings.match_min_iou)
         self.save_annotations()
-        region.speaker, region.tag, region.continues, region.remark = speaker.strip(), kind, continues, note.strip()
+        region.speaker, region.continues, region.remark = speaker.strip(), continues, note.strip()
+        region.tag = kind or ("sfx" if found else "")
         if kind == ERASE_ONLY:
             self._erase_only([region])
         elif region.status == ERASED:
@@ -3710,7 +3719,8 @@ class Pipeline:
                 bubbles = [b for b in page.bubbles if box_iou(b.box, nbox) < s.match_min_iou]  # type: ignore[arg-type]
                 bubbles.append(CachedBubble(box=nbox, text=region.translated_text, poly=poly, flags=list(region.flags),
                                             note=region.reader_note, angle=region.angle, edited=edited,
-                                            large=locate_large.checked(region.translated_text, region.large)))
+                                            large=locate_large.checked(region.translated_text, region.large),
+                                            sfx=region.tag == "sfx"))
                 self._save_page(page.fingerprint, page.aspect, bubbles, page.incomplete)
                 region.from_cache = True
         self.rerender(result)
@@ -4415,9 +4425,10 @@ class Pipeline:
         cut, and a small bubble's word at 1000 px whose slant the full size does not show); the slanted signs and
         captions keep their slants. Of the slant test's made-up words turned by 5 to 20 degrees, 59 of the 66 whose
         slant the short word's measure finds read surer turned, and 44 of the 50 whose slant the long lines' search
-        finds (a slant missed, set upright, never a wrong one)."""
+        finds (a slant missed, set upright, never a wrong one). A sound effect (the kind "sfx": `_sound_word`, or
+        the reader's) keeps its slant: those three sound marks are lettered at the slant the art gives them."""
         tilt = r.tilt
-        if not r.angle or not isinstance(tilt, Tilt) or not tilt.doubtful:
+        if not r.angle or not isinstance(tilt, Tilt) or not tilt.doubtful or r.tag == "sfx":
             return
         chosen = self._chosen(rgb, r, box, view)
         if chosen is not None and not chosen[2]:
@@ -5155,7 +5166,8 @@ class Pipeline:
                     for x, y in mask_polygon(r.mask)]
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
                                         note=r.reader_note, angle=r.angle, reused=r.reused,
-                                        large=locate_large.checked(r.translated_text, r.large), joined=r.joined))
+                                        large=locate_large.checked(r.translated_text, r.large), joined=r.joined,
+                                        sfx=r.tag == "sfx"))
         page = CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=bubbles, seq=-1,
                           incomplete=any(r.status == "untranslated" for r in regions))
         page = self.cache.add(page)
@@ -5221,6 +5233,8 @@ class Pipeline:
             r.reused_text = cb.text if cb.reused else ""
             r.large = locate_large.checked(cb.text, cb.large)  # (the part set larger as it was: no request for it)
             r.angle, r.tilt = cb.angle, "set"  # (the slant it was lettered at: the cache's, never measured again)
+            if cb.sfx and not r.tag:  # (a sound effect as the reading found it; the reader's kind, when given, stands)
+                r.tag = "sfx"
             regions.append(r)
         known = [r for r in regions if r.status == "translated" and any(q.from_model for q in live)]
         for i, r in enumerate(live):

@@ -311,6 +311,14 @@ def _wanted(stream) -> list[tuple[str, ...]]:
     return [spec.lines for spec, _regions in stream.wanted]
 
 
+def test_a_run_s_spec_holds_a_kind_only_where_the_request_says_it():
+    def spec(kind):
+        return streaming.RunSpec(["ドキッ"], [{"kind": kind, "page": 0} if kind else {"page": 0}], [])
+
+    assert spec("") == spec("shout") == spec("text")  # (the same request: PLaMo is not told those kinds)
+    assert spec("sfx") != spec("") and spec("sfx").dicts() == [{"page": 0, "kind": "sfx"}]
+
+
 def test_a_line_leaves_once_judged_and_an_open_line_waits_for_its_next_one(settings):
     regions = [_region("今日はいい天気だね", 0), _region("どこへ行く時は電車で", 1), _region("駅まで行くんだ", 2)]
     stream = _stream(settings, regions)

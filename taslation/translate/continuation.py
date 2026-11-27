@@ -79,12 +79,16 @@ AUTO = True  # whether the rule marks lines (a reader's mark counts in any case)
 def facts_of(regions: Sequence[Any], units: Sequence[tuple[Any, Box | None]]) -> list[dict[str, Any]]:
     """The facts each of *regions* (in reading order) goes to the translator with: the reader's
     (`regions.region_meta`), the page unit it is on (``page``: *units*, one (unit, its box) per region) and
-    ``continues`` where the rule finds its sentence going on in the next one (`going_on`)."""
+    ``continues`` where the rule finds its sentence going on in the next one (`going_on`), but not into a sound
+    effect nor out of one (the kind "sfx": a sound drawn on the art is no part of a sentence)."""
     from ..regions import region_meta
 
     meta = [dict(region_meta(r), page=unit) for r, (unit, _box) in zip(regions, units)]
     if AUTO:
-        mark(meta, going_on([(r.source_text, r.bbox, unit, box) for r, (unit, box) in zip(regions, units)]))
+        flags = going_on([(r.source_text, r.bbox, unit, box) for r, (unit, box) in zip(regions, units)])
+        sound = [f.get("kind") == "sfx" for f in meta]
+        mark(meta, [flag and not sound[k] and not (k + 1 < len(sound) and sound[k + 1])
+                    for k, flag in enumerate(flags)])
     return meta
 
 
