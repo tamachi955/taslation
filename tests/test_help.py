@@ -47,7 +47,7 @@ STORES = frozenset({
     (11, "35fc7a91b34ab3d5"), (11, "8e7deafed14e4688"), (16, "f709e3a527a31dfb"), (17, "9f16a9917dff0fc9"),
 })
 BROWSERS = ("chrome", "edge")
-TECHNICAL = ("ocr", "ollama", "port ", "json", "pip ", "setup_models", "toml")
+TECHNICAL = ("ocr", "ollama", " port ", "json", "pip ", "setup_models", "toml")  # (" port ": "a report " is no port)
 
 
 def _digest(name: str) -> tuple[int, str]:

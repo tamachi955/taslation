@@ -36,6 +36,7 @@ Around them:
 
 from __future__ import annotations
 
+import collections
 import itertools
 import logging
 import queue
@@ -179,6 +180,36 @@ def _read_in_hold(pipeline: Any, job: Any) -> bool:
         return False
     left = pipeline.kept_open_left() if hasattr(pipeline, "kept_open_left") else None
     return left is not None and left > 0.0
+
+
+JOBS_KEPT = 8  # the newest page jobs' times kept for a report (`job_times`)
+
+
+def job_times(window: Any) -> list[dict[str, Any]]:
+    """The newest page jobs of *window* (JOBS_KEPT, the oldest first), each when it began and its steps came
+    (monotonic s): "start" (`JobsMixin._start_translate`), "first_request" (the first request to the translator),
+    "first_lettered" (the first line on the page), "finished" (its page shown) or "cancelled" with "why" ("page": a
+    new page; "stop"), and "frame" (the id of the frame it read). Numbers only, for a report (`ui.report`)."""
+    return [dict(job) for job in (window.__dict__.get("_job_times") or ())]
+
+
+def _job_began(window: Any, image: Any, early: bool) -> None:
+    jobs = window.__dict__.get("_job_times")
+    if jobs is None:
+        jobs = window.__dict__["_job_times"] = collections.deque(maxlen=JOBS_KEPT)
+    jobs.append({"start": time.monotonic(), "frame": id(image), "early": bool(early)})
+
+
+def _job_mark(window: Any, step: str, **facts: Any) -> None:
+    """The newest page job's *step* (its first time only), unless it has ended."""
+    jobs = window.__dict__.get("_job_times")
+    if not jobs:
+        return
+    job = jobs[-1]
+    if "finished" in job or "cancelled" in job or step in job:
+        return
+    job[step] = time.monotonic()
+    job.update(facts)
 
 
 def job_news(window: Any, data: dict[str, Any]) -> None:
@@ -1066,7 +1097,10 @@ class JobsMixin:
             self._progress = progress = data["text"]
             self._slow_before = None
             self._job_line(lambda: progress_line(progress))
-            if self._fill is not None and asks_model(progress):
+            asking = asks_model(progress)
+            if asking:
+                _job_mark(self, "first_request")
+            if self._fill is not None and asking:
                 self._fill.mark = self._fill.filled  # the badge counts this request's bubbles
             self._busy_shown = self._busy_shown or reads_page(self._progress)
             if self._busy_shown:
@@ -1083,6 +1117,8 @@ class JobsMixin:
             self._busy_shown = True
             self.canvas.set_busy(self._busy_text)
         elif kind in ("regions", "read", "translated", "page"):
+            if kind == "translated":
+                _job_mark(self, "first_lettered")
             fill = self._fill
             page = fill.page if fill is not None else None
             self._on_page_event(kind, data)
@@ -1165,6 +1201,7 @@ class JobsMixin:
             # `LiveViewMixin._tail_gives_way`)
             self._result_shown_of = getattr(self, "_page_cancel", None)
             self._fill = None
+            _job_mark(self, "finished")
             job_news(self, data)
             self._settle_live(data["result"])
             # (its regions are another page's)
@@ -1201,6 +1238,7 @@ class JobsMixin:
             held = getattr(self, "_held_result", None)
             if held is not None and held.get("gate") is data.get("gate"):
                 self._held_result = None  # (its frame was never confirmed: never shown)
+            _job_mark(self, "cancelled", why=self._cancel_why or "stop")
             job_news(self, data)
             if self._cancel_why != "page":
                 self.say("Stopped: this page was not translated, and nothing of it was kept. Translate translates it again.")
@@ -1971,6 +2009,7 @@ class JobsMixin:
         self._job_frame, self._job_thumb, self._job_area = image, thumb, None  # the page fills in on this frame
         self._page_gate = gate if again is None and not replace_edited else None
         self._page_cancel = cancel = threading.Event()
+        _job_began(self, image, self._page_gate is not None)
         self._cancel_why = ""
         self._watch_candidate = None
         self._watch_due = time.monotonic() + self.settings.auto_interval_ms / 1000.0

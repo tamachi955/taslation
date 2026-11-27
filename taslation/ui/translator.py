@@ -1194,7 +1194,9 @@ class TranslatorMixin:
         (`REUSED_NOTE`, under the header). In see-through mode it goes beside the region on the viewer
         (`see_edit.editor_place`), Previous and Next's ones too, and its Show original, held, shows the viewer's
         original under the region (`see_edit.set_bare`); one the reader asked for takes the keys. The same page taken
-        again while it is open - the viewer's window resized, the page completed - takes it over (`_carry_editor`)."""
+        again while it is open - the viewer's window resized, the page completed - takes it over (`_carry_editor`).
+        Its Copy a report of this region puts a report of the page with that region first on the clipboard
+        (`_report_region`)."""
         result = result if result is not None else self.last_result
         if seethrough.hidden(self):
             seethrough.asked(self)
@@ -1247,7 +1249,20 @@ class TranslatorMixin:
                                         font_memory=FontMemory(self.settings.state_dir),
                                         hint_support=hint_support(pipeline.translator) if can_ask else HINT_FOLLOWS,
                                         sizes=bool(getattr(self.settings, "size_emphasis", True)),
-                                        on_original=original)
+                                        on_original=original,
+                                        on_report=lambda with_text: self._report_region(held, with_text))
+
+    def _report_region(self, held: Any, with_text: bool) -> int:
+        """The editor's Copy a report of this region: a report of the page the editor is on with its region first and
+        in full (`report.copy_report`; *with_text*: its reading and translation too), on the clipboard."""
+        from . import report
+
+        editor = getattr(self, "_editor", None)
+        try:
+            widget = editor if editor is not None and editor.winfo_exists() else None
+        except tk.TclError:
+            widget = None
+        return report.copy_report(self, [held.region], with_text, widget=widget, result=held.result)
 
     def _step_editor(self, region: Any, result: Any, preview: LivePreview | None, delta: int,
                      data: dict[str, Any] | None, at: tuple[int, int]) -> None:

@@ -474,7 +474,9 @@ class EditBubbleDialog(tk.Toplevel):
     the region before or after this one; the editor closes without *on_cancel* (the window ends its preview). *at*:
     where the editor opens on the screen (the place the one before it had, or a function of its width and height that
     gives it), else over *master*. *on_original*: Show original under the picture, held, calls it with True (the
-    window shows the original under the region) and let go with False. *note*: a line the
+    window shows the original under the region) and let go with False. *on_report*: Copy a report of this region,
+    with the box With this region's text (unchecked when the editor opens) beside it, calls it with whether that box
+    is checked (the window puts the report on the clipboard: `ui.report`), and the button says Copied. *note*: a line the
     window has to say once (the spellcheck that cannot run), under the header. *hint_support*: how far the translation
     model in use follows the hint for the model (`translate.base.hint_support`); when only sometimes, a line under the
     hint says so (`HINT_SOMETIMES`); for a model that follows it, nothing is said.
@@ -498,9 +500,11 @@ class EditBubbleDialog(tk.Toplevel):
                  on_step: Callable[[int, dict[str, Any] | None, tuple[int, int]], None] | None = None,
                  at: Any = None, note: str = "", clip: Any = None, font_memory: Any = None,
                  hint_support: str = "follows", sizes: bool = True,
-                 on_original: Callable[[bool], None] | None = None):
+                 on_original: Callable[[bool], None] | None = None,
+                 on_report: Callable[[bool], Any] | None = None):
         super().__init__(master)
         self.on_original = on_original
+        self.on_report = on_report
         self.title(_("Edit region"))
         self.transient(master)
         self.region = region
@@ -630,6 +634,19 @@ class EditBubbleDialog(tk.Toplevel):
                 tip(_(STEP_TIPS[delta]), button)
                 self.step_btns[delta] = button
             self._sync_steps()
+        self.report_btn: ttk.Button | None = None
+        self.report_text_var = tk.BooleanVar(self, value=False)  # (the region's text in the report: unchecked first)
+        if on_report is not None:  # a report of this region for the person to paste (`ui.report`), the clipboard alone
+            from ..report import COPY_REGION, REPORT_TIP, WITH_TEXT, WITH_TEXT_TIP
+
+            row = ttk.Frame(frm)
+            row.pack(fill="x", pady=(6, 0))
+            self.report_btn = ttk.Button(row, text=_(COPY_REGION), command=self._report)
+            self.report_btn.pack(side="left")
+            tip(_(REPORT_TIP), self.report_btn)
+            box = ttk.Checkbutton(row, text=_(WITH_TEXT), variable=self.report_text_var)
+            box.pack(side="left", padx=(8, 0))
+            tip(_(WITH_TEXT_TIP), box)
         self.bind("<Escape>", lambda _e: self.close_asked())
         self.protocol("WM_DELETE_WINDOW", self.close_asked)
         self.bind("<Control-Return>", lambda _e: self._save())
@@ -654,6 +671,18 @@ class EditBubbleDialog(tk.Toplevel):
         else:
             place_window(self, master)
         self.grab_set()
+
+    def _report(self) -> None:
+        """Copy a report of this region: *on_report* (with the region's text only while With this region's text is
+        checked) puts it on the clipboard; the button then says Copied."""
+        if self.on_report is None:
+            return
+        self.on_report(bool(self.report_text_var.get()))
+        try:
+            if self.report_btn is not None:
+                self.report_btn.configure(text=_("Copied"))
+        except tk.TclError:  # (the editor closed meanwhile)
+            pass
 
     # ------------------------------------------------------------------ the region as the page has it
     def _build_original(self, parent: tk.Misc, crop: Image.Image | None) -> None:

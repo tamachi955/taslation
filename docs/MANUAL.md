@@ -90,7 +90,7 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
   the oldest lines first and the warnings last. In Reader mode, clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
   the right pane is not shown, and the lines of the setup come in a small dialog of their own while there is something to say.
 * **"Menu"** opens the rest: "Viewer...", "Series and Volume...", "Saved translations...", "Names rendered in more than one way...", "Release the model now",
-  "Language" and "Help" ("How to use...", "Legal notice...", "Check for updates...", "About TASlation"). While editing, the editing comes first (see "Editing: correcting the page").
+  "Copy a report" (see "Reporting a problem"), "Language" and "Help" ("How to use...", "Legal notice...", "Check for updates...", "About TASlation"). While editing, the editing comes first (see "Editing: correcting the page").
   While the setup has something TASlation can fix for you ("Start translator again", "Download model", "Show viewer"), those buttons come first in the Menu.
 
 A pane needs room beside the page: one that would come near the page, or that the viewer's ground is too short for, hides rather than cover the page
@@ -1028,6 +1028,24 @@ and replaces the file names beyond them, and any other place, with `<path>`. Quo
 "Copy details", in "Menu > Help > About TASlation" and on the screens that report an error, puts the same content (environment, changed settings, the last error) on the clipboard,
 with the offline guard's state added (on or off, the address of Ollama on this computer it can reach, and how many connection attempts it blocked).
 Paste it when you report a problem. It sends nothing anywhere. On the screen shown when it could not start, too, "Yes" copies it.
+
+### Reporting a problem
+
+"Menu > Copy a report" puts a report of the page on show on the clipboard, ready to paste where you ask for help (an issue, a message).
+It holds numbers and states only: no text of the page, no title of a book or of the viewer's window, none of your file names and no pictures, and its first line says so.
+Nothing is written to disk and nothing is sent anywhere; you paste it yourself. After copying, the right pane says how many lines went to the clipboard.
+
+It is plain text between two lines of three backquotes, in sections with English names whatever TASlation's language (`[region 3]`, `[page]`, `[screen]`, `[panes]`, `[program]`, `[log]`), each a list of `key = value` lines, the most important first:
+
+- the regions: each one's number (as its plate shows it and as the region editor counts it), state, kind, box in the frame and on the page and its distance to the page's edges, how many characters were read and how sure the readers were, the translation's length and flags, the lettering's size and what it could not do, how it was erased and how many dark pixels of the original the erase left inside it (`dark_kept`), its pieces on the lettering's window and whether its lettering shows now and, when it does not, why (`differs:top`, for example: the pixels round it at the top changed since the page was read);
+- the page: its key as the log names it, its size, single page or spread, from the cache or read now, the regions by state, how many of those lettered show, the times of the page jobs (started, first request, first line lettered, finished or cancelled and why) and the translator's requests;
+- the screen: the monitors, the viewer's window (a browser or an app, never its name), its place, DPI and state, whether it is in front and what covers it, the capture, the frames per second and what the frames were lately, the capture area, the page box at rest, the band where bars never come and the bars;
+- the side panes and the lettering's window: where each shows, or why it is hidden, whether the lettering takes the mouse, the Insert key, the last changes of the window in front;
+- the program: its version and commit, Python, Windows, torch and the GPU with its memory free, the languages, the mode, the models and where each runs, the translation program, the offline guard, the settings changed and the last error;
+- the log: the kinds of warnings and errors of this session and how many, without their values.
+
+While editing, with regions chosen, the Menu also has "Copy a report of the chosen regions" (those first and in full) and, with one region chosen, "Copy a report with this region's text".
+In the region editor, "Copy a report of this region" does it for its region; check "With this region's text" first to add that region's Japanese and translation. No other region's text goes in, and never a title.
 
 ## Checking for yourself that it works offline
 

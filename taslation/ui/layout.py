@@ -199,6 +199,50 @@ def monitor_at(x: int, y: int) -> tuple[int, int, int, int] | None:
     return None
 
 
+def monitors() -> list[dict[str, Any]]:
+    """The monitors as Windows has them now: each one's "rect" and "work" area (left, top, right, bottom), whether it
+    is the "primary" and its "dpi" (None where it cannot be told), the primary first, then from left to right; none
+    outside Windows (a report's numbers: `report`)."""
+    if not IS_WINDOWS:
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                        ("dwFlags", wintypes.DWORD)]
+
+        user32 = ctypes.windll.user32
+        try:
+            shcore = ctypes.WinDLL("shcore")
+        except OSError:
+            shcore = None
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT),
+                            wintypes.LPARAM)
+        def each(handle, _dc, _rect, _lparam):  # type: ignore[no-untyped-def]
+            info = MonitorInfo()
+            info.cbSize = ctypes.sizeof(MonitorInfo)
+            if user32.GetMonitorInfoW(handle, ctypes.byref(info)):
+                m, w = info.rcMonitor, info.rcWork
+                dpi = None
+                if shcore is not None:
+                    dx, dy = wintypes.UINT(0), wintypes.UINT(0)
+                    if shcore.GetDpiForMonitor(handle, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0 and dx.value:
+                        dpi = int(dx.value)
+                out.append({"rect": (m.left, m.top, m.right, m.bottom), "work": (w.left, w.top, w.right, w.bottom),
+                            "primary": bool(info.dwFlags & 1), "dpi": dpi})
+            return True
+
+        user32.EnumDisplayMonitors(None, None, each, 0)
+    except (AttributeError, OSError, ValueError, TypeError):
+        return out
+    out.sort(key=lambda m: (not m["primary"], m["rect"][0], m["rect"][1]))
+    return out
+
+
 GEOMETRY = re.compile(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$")  # Tk's "WxH+X+Y" (a place left of the primary: "+-1900")
 
 

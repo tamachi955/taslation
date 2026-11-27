@@ -49,6 +49,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "When you close TASlation, it stops the translation program it started, unless another program is using it. If you started the translation program yourself, TASlation leaves it running.",
         "With a viewer in a browser, the book's tab must be the one in front.",
         "A name comes out wrong all through the book: while editing, Find and replace... in the Menu changes it on every page at once.",
+        "To report a problem: Menu > Copy a report puts what TASlation knows of the page on show on the clipboard, numbers and states with no text of the page and no titles, ready to paste where you ask for help. While editing, Copy a report of this region in the region editor does it for that region; only With this region's text adds its Japanese and its translation. Nothing is sent anywhere.",
     )),
     ("Your data", (
         "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only when you install or update TASlation, when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed, and, only if you turn it on or choose Menu > Help > Check for updates..., to look for a new version: then check_update.py, a program of its own, asks GitHub for one small file.",

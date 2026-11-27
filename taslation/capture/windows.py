@@ -1059,6 +1059,11 @@ def window_minimised(hwnd: int) -> bool:
     return bool(IS_WINDOWS and hwnd and user32.IsWindow(hwnd) and user32.IsIconic(hwnd))
 
 
+def window_maximised(hwnd: int) -> bool:
+    """Whether the window *hwnd* exists and is maximised (False outside Windows)."""
+    return bool(IS_WINDOWS and hwnd and user32.IsWindow(hwnd) and user32.IsZoomed(hwnd))
+
+
 def unminimise_window(hwnd: int, below: int | None = None) -> bool:
     """The minimised window *hwnd* shown again as it was before it was minimised - in its last normal size, or
     maximised when it was maximised then (ShowWindow SW_SHOWNOACTIVATE honours WPF_RESTORETOMAXIMIZED) - neither

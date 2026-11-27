@@ -9,7 +9,9 @@ hosts the dialogs), in places of their own.
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
   in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
-  TASlation's language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). While the
+  Copy a report (and, while editing with regions chosen, Copy a report of the chosen regions and, with one, Copy a
+  report with this region's text: `report.menu_entries`, the clipboard alone), TASlation's language, and Help (How to
+  use..., Legal notice..., Check for updates..., About TASlation). While the
   page is being edited (Reader mode off), the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the
   page's tools and what acts on the regions chosen, then Review..., My corrections..., Lines to review..., Find
   and replace..., Series sheet..., Book settings...). Every entry but Quit counts as the reader asking
@@ -150,6 +152,10 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
     menu.add_command(label=_("Saved translations..."), command=_asking(app, app.open_caches))
     menu.add_command(label=_("Names rendered in more than one way..."), command=_asking(app, app.review_names))
     menu.add_command(label=_(RELEASE_ENTRY), command=_asking(app, lambda: release_now(app)))
+    menu.add_separator()
+    from . import report
+
+    report.menu_entries(app, menu)  # (Copy a report...: the clipboard alone, no dialog)
     menu.add_separator()
     for code, name in UI_LANGUAGES.items():
         language.add_radiobutton(label=name, value=code, variable=app.ui_lang_var,

@@ -88,6 +88,7 @@
  "test_region_select.py": 1.1,
  "test_rename_compat.py": 1.0,
  "test_reply_gates.py": 6.2,
+ "test_report.py": 3.0,
  "test_rooms.py": 0.7,
  "test_save_after_showing.py": 7.2,
  "test_settings_dialog.py": 0.8,

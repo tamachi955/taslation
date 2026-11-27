@@ -1127,6 +1127,7 @@ class LiveViewMixin(BlackViewerMixin):
         capture and again right after it: `_shows_other_tab`)."""
         self._captured = None
         if self._shows_other_tab(hwnd):
+            seethrough.note_state(self, "tab")
             raise OtherTab()
         looked = time.monotonic()
         try:
@@ -1153,6 +1154,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._blank_looked = False
             self._blank_since = None
         if black:
+            seethrough.note_state(self, "black")
             return image  # no page in it
         # Every frame of the window passes here, before the capture area (margins) and the pipeline see it: with no
         # area of the reader's, the page panel found in it becomes the capture area.

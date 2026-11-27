@@ -1738,10 +1738,12 @@ def _differs_where(where: dict[str, Any], limit: float) -> str:
     return max(sides)[1] if sides else "box"
 
 
-def unshown(app: Any) -> dict[str, Any] | None:
+def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
     """The page on show's regions lettered or erased (`pipeline.erases`) whose patch does not show now, and why, from
     the see-through window's last look (`SeeThrough.why_not_shown`): numbers and kinds only, no text. None while the
-    page on show is not the last translated page (one filling in, another page in the viewer) or nothing is known.
+    page on show is not the last translated page (one filling in, another page in the viewer) or nothing is known;
+    with *settled*, also while the viewer's frame has been its newest for less than UNSHOWN_SETTLE_S (a report, asked
+    for, takes the look as it is).
 
     Each region not shown: (its index among the page's regions, the kind, facts): "no patch" (its lettering changed
     no pixel there), "covered" (a window over the viewer), "hover" (the pointer rests on it), "original" (the editor
@@ -1763,7 +1765,7 @@ def unshown(app: Any) -> dict[str, Any] | None:
     key = id(original)
     if not on_show or (why.get("key") not in (None, key)):
         return None
-    if not why.get("hidden") and time.monotonic() - float(why.get("frame_at", 0.0)) < UNSHOWN_SETTLE_S:
+    if settled and not why.get("hidden") and time.monotonic() - float(why.get("frame_at", 0.0)) < UNSHOWN_SETTLE_S:
         return None  # (a frame the viewer may be drawing over: a turn's first frames)
     from ..pipeline import erases
 
@@ -1821,9 +1823,10 @@ def unshown(app: Any) -> dict[str, Any] | None:
 def unshown_tick(app: Any, now: float | None = None) -> None:
     """(`tick`, every UNSHOWN_EVERY_S) The page on show's lettered regions not shown (`unshown`), kept for the tools
     and the report (``_see_unshown``: the page's frame key -> {"last": the last look's, "looks": how many looks,
-    "kinds_seen": the kinds summed over them}) and one line in the log per page - and again when its count changes,
-    UNSHOWN_LOGGED lines a page at the most: how many regions, how many not shown, the kinds (numbers and kinds
-    only)."""
+    "kinds_seen": the kinds summed over them, "regions": each lettered region's index -> {"shown_at", "unshown_at"
+    (monotonic s of the last look that found its lettering on show, and not), "kind" (why, at the last look it was
+    not)}}) and one line in the log per page - and again when its count changes, UNSHOWN_LOGGED lines a page at the
+    most: how many regions, how many not shown, the kinds (numbers and kinds only)."""
     now = time.monotonic() if now is None else now
     if now - float(getattr(app, "_see_unshown_at", 0.0)) < UNSHOWN_EVERY_S:
         return
@@ -1842,6 +1845,14 @@ def unshown_tick(app: Any, now: float | None = None) -> None:
     entry["last"], entry["looks"] = found, entry["looks"] + 1
     for kind, n in found["kinds"].items():
         entry["kinds_seen"][kind] = entry["kinds_seen"].get(kind, 0) + n
+    seen = entry.setdefault("regions", {})
+    hidden_now = {i: kind for i, kind, _facts in found["not_shown"]}
+    for i, _box in found["boxes"]:
+        each = seen.setdefault(i, {"shown_at": None, "unshown_at": None, "kind": ""})
+        if i in hidden_now:
+            each["unshown_at"], each["kind"] = now, hidden_now[i]
+        else:
+            each["shown_at"] = now
     kept[key] = entry
     if len(kept) > 64:
         for old in list(kept)[:-64]:
@@ -2013,6 +2024,7 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`)."""
     found = frame_look(app, image, facts)
     if found.kind is not None:
+        note_state(app, found.kind)
         return
     if not found.bands:
         if app._see_bars_since is not None:  # the bars have gone: a page read under them is read once more
@@ -2023,10 +2035,13 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
         app._see_bars_since = None
         ground = _ground_of(app, image, facts, found)
         if _at_rest(app, image, found.box):
+            note_state(app, "rest")
             _rest(app, found.box, ground, image.size)
         else:
+            note_state(app, "held" if held(app) else "moving")
             app._see_unrested = (time.monotonic(), found.box, ground, image.size)
         return
+    note_state(app, "bars")
     if app._see_bars_since is None:
         app._see_bars_since = time.monotonic()
         try:
@@ -2034,6 +2049,22 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
         except Exception:  # noqa: BLE001 - no Tk loop (a test)
             pass
     _ground_under_bars(app, image, facts, found)
+
+
+FRAME_STATES_KEPT = 64  # (`note_state`) the newest frames' states kept, for a report
+
+
+def note_state(app: Any, state: str) -> None:
+    """What a frame of the viewer captured was (a report's "frame states lately": `report`): "rest" (the page at rest
+    in its place), "moving", "held" (the button held in the viewer), "bars" (bars over the page), "black", "half",
+    "washed" (frames to wait out, `seethrough.loading_kind`; "black" too where the live view finds the frame black)
+    or "tab" (another tab on show); the newest FRAME_STATES_KEPT, with when."""
+    kept = app.__dict__.get("_see_frame_states")
+    if kept is None:
+        from collections import deque
+
+        kept = app.__dict__["_see_frame_states"] = deque(maxlen=FRAME_STATES_KEPT)
+    kept.append((time.monotonic(), str(state)))
 
 
 def _ground_of(app: Any, image: Image.Image, facts: Any, found: st.Look) -> Any:

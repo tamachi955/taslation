@@ -301,8 +301,8 @@ def test_the_menu_has_the_windows_entries_that_still_mean_something_and_each_is_
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
     sm.build(app, menu, language, help_menu)
     assert entries(menu) == ["Viewer...", "Series and Volume...", "-", "Saved translations...",
-                             "Names rendered in more than one way...", gpu_release.RELEASE_ENTRY, "-", "Language",
-                             "Help"]
+                             "Names rendered in more than one way...", gpu_release.RELEASE_ENTRY, "-", "Copy a report",
+                             "-", "Language", "Help"]
     assert entries(help_menu) == ["How to use...", "Legal notice...", "-", "Check for updates...", "About TASlation"]
     assert len(entries(language)) == len(sm.UI_LANGUAGES)
     for i in (0, 1, 3, 4, 5):

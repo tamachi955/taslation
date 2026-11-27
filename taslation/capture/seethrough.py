@@ -149,6 +149,7 @@ SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it to
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
 WHERE_KEPT = 64  # (`why_not_shown`) the patches of the set chosen whose differing pixels a look places, at the most
+REPORT_FPS_S = 5.0  # (`report_facts`) the viewer's frames per second are counted over so many seconds
 START_S = 2.0  # how long `start` waits for the window to be made
 
 if IS_WINDOWS:
@@ -797,6 +798,39 @@ class SeeThrough:
         "hidden" (why nothing shows: off, away, no viewer...), "at" (monotonic s), "frame_at" (since when the viewer's
         frame looked at was its newest: a frame at rest so long). Empty before the first look."""
         return self._why
+
+    def report_facts(self, key: int | None = None, within_s: float = REPORT_FPS_S) -> dict[str, Any]:
+        """(the Tk thread, a report: `ui.report`) The window's state as its last look left it, numbers and flags only:
+        "on", "away", "editing" (the whole page takes the mouse), "takes_mouse" (the lettering's window takes it now),
+        "key_held" (the Insert key), "sizing", "dpi", "origin" and "size" of the viewer's client area at the last look,
+        "shown" (set serial, patches on show; None: hidden), "covers" (the windows over the viewer met, screen boxes),
+        "panes" (side -> screen box on show, or None) with "pane_wanted" (side -> handed a picture), "frames_per_s"
+        (the viewer's frames that came in the last *within_s* s), "counts" (`counts`); and for the set of *key* (the
+        page's frame) "patches": each patch's box and the share of its pixels that are not see-through."""
+        now = time.monotonic()
+        arrived = [t for t in list(self._arrived.values()) if now - t <= within_s]
+        look = self._last_look
+        shown = self._shown
+        with self._lock:
+            sets = list(self._store.sets)
+            wanted = {side: want is not None for side, want in self._pane_want.items()}
+        patches: list[tuple[st.Box, float]] | None = None
+        chosen = next((s for s in sets if s.key == key), None) if key is not None else None
+        if chosen is not None:
+            patches = []
+            for p in chosen.patches:
+                alpha = p.bgra[:, :, 3] if getattr(p.bgra, "ndim", 0) == 3 else None
+                share = float((alpha > 0).mean()) if alpha is not None and alpha.size else 0.0
+                patches.append((tuple(int(v) for v in p.box), round(share, 3)))
+        return {"on": bool(self._on), "away": bool(self._away), "editing": bool(self._ground),
+                "takes_mouse": bool(self._edit_takes), "key_held": bool(self._key_held), "sizing": bool(self._sizing),
+                "dpi": int(self._dpi), "origin": tuple(look[5]) if look is not None else None,
+                "size": tuple(look[6]) if look is not None else None,
+                "shown": (int(shown[0]), len(shown[1])) if shown is not None else None,
+                "covers": [tuple(int(v) for v in c) for c in list(self._covers)],
+                "panes": {side: self.pane_shown(side) for side in PANES}, "pane_wanted": wanted,
+                "frames_per_s": round(len(arrived) / within_s, 1) if within_s > 0 else 0.0,
+                "sets": len(sets), "patches": patches, "counts": dict(self.counts)}
 
     def set_panes(self, left: tuple[Any, ...] | None, right: tuple[Any, ...] | None) -> None:
         """The side panes as they are to be: each (its picture - premultiplied BGRA (H, W, 4), not changed after -,

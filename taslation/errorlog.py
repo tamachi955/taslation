@@ -16,7 +16,9 @@ window title, and no path under the reader's profile but the state folder's (by 
 
 `details_text` is what Copy details (Menu > Help > About TASlation, an error box: `ui.copy_details`; a failed start:
 `cli._complain`) gives: the environment, Ollama's version, the offline guard's state (`guard_line`), the settings and
-the last error, through the same `scrub`.
+the last error, through the same `scrub`. Menu > Copy a report (`ui.report`) takes some of the same, with the commit
+of the copy (`program_commit`, from its git folder), the GPU's memory (`gpu_line`) and the session's warnings and
+errors counted by kind, their wording without their values (`problems`).
 """
 
 from __future__ import annotations
@@ -70,6 +72,7 @@ _lock = threading.RLock()
 _roots: list[tuple[re.Pattern[str], str, bool]] = []  # (folder, its label, a program file after it is kept)
 _names: list[tuple[re.Pattern[str], str]] = []  # the reader's login and the computer's name
 _last_error: tuple[float, str] | None = None
+_problems: dict[tuple[str, str, str], tuple[int, float]] = {}  # (`problems`) kind -> (how many, the last one's time)
 _settings: Any = None  # the session's settings, for details_text
 _installed: list[logging.Handler] = []
 _hooks: dict[str, Any] = {}
@@ -238,6 +241,68 @@ def release_date(package: Path | None = None) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(newest)) if newest else ""
 
 
+_HASH = re.compile(r"[0-9a-f]{40}")
+
+
+def program_commit(repo: Path | str | None = None) -> str:
+    """The commit this copy of TASlation was checked out at, shortened to 7 characters, from its git folder (a
+    worktree's too, and packed references); "" for a copy with none (a release's) or one that cannot be read. Only the
+    files are read: no program is run."""
+    from .config import REPO_DIR
+
+    root = Path(repo if repo is not None else REPO_DIR) / ".git"
+    try:
+        if root.is_file():
+            text = root.read_text("utf-8", "replace").strip()
+            if not text.startswith("gitdir:"):
+                return ""
+            gitdir = Path(text[len("gitdir:"):].strip())
+            if not gitdir.is_absolute():
+                gitdir = root.parent / gitdir
+        elif root.is_dir():
+            gitdir = root
+        else:
+            return ""
+        head = (gitdir / "HEAD").read_text("utf-8", "replace").strip()
+        if not head.startswith("ref:"):
+            return head[:7] if _HASH.fullmatch(head) else ""
+        ref = head[len("ref:"):].strip()
+        common = gitdir
+        pointer = gitdir / "commondir"
+        if pointer.is_file():
+            common = gitdir / pointer.read_text("utf-8", "replace").strip()
+        for base in (gitdir, common):
+            path = base / ref
+            if path.is_file():
+                value = path.read_text("utf-8", "replace").strip()
+                return value[:7] if _HASH.fullmatch(value) else ""
+        packed = common / "packed-refs"
+        if packed.is_file():
+            for line in packed.read_text("utf-8", "replace").splitlines():
+                value, _sep, name = line.partition(" ")
+                if name.strip() == ref and _HASH.fullmatch(value):
+                    return value[:7]
+    except OSError:
+        return ""
+    return ""
+
+
+def gpu_line() -> str:
+    """The GPU torch computes on and its memory free and in all (MiB), when torch has started CUDA (nothing is loaded
+    or started for it); "" otherwise."""
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return ""
+    try:
+        cuda = torch.cuda
+        if not cuda.is_initialized():
+            return ""
+        free, total = cuda.mem_get_info()
+        return f"{cuda.get_device_name(0)}; {free // 2**20} MiB free of {total // 2**20} MiB"
+    except Exception as e:  # noqa: BLE001 - a broken CUDA: said, not raised
+        return f"CUDA: {type(e).__name__}"
+
+
 def torch_line() -> str:
     """torch and its GPU, when torch is loaded (nothing is loaded or started for it: CUDA is asked for its device
     only once torch has started it)."""
@@ -356,16 +421,50 @@ def details_text(settings: Any = None, port: int | None = None, ollama: bool = T
 
 
 # ------------------------------------------------------------------ the log
+PROBLEM_KINDS = 64  # the kinds of warnings and errors of this session counted (`problems`), the newest
+PROBLEM_CHARS = 100  # characters of a message's wording a kind keeps
+
+
+def problem_kind(record: logging.LogRecord) -> tuple[str, str, str]:
+    """What a warning or an error is, never what it carried: its level, its logger, and its message's wording as the
+    program has it (``record.msg``, the placeholders not filled in) through `scrub`, cut at PROBLEM_CHARS."""
+    wording = scrub(record.msg if isinstance(record.msg, str) else type(record.msg).__name__)
+    wording = " ".join(wording.split())
+    if len(wording) > PROBLEM_CHARS:
+        wording = wording[:PROBLEM_CHARS] + ELLIPSIS
+    return record.levelname, record.name, wording
+
+
+def problems() -> list[tuple[str, str, str, int, float]]:
+    """The warnings and errors of this session by kind (`problem_kind`): (level, logger, wording, how many, when the
+    last came - `time.time`), the most recent first (`ui.report`: a report's "log" section)."""
+    with _lock:
+        kept = [(*kind, n, at) for kind, (n, at) in _problems.items()]
+    return sorted(kept, key=lambda p: -p[4])
+
+
 class _LastError(logging.Handler):
-    """Keeps the last error (as `PrivacyFormatter` writes it) for `details_text`; after the first, the state of torch
-    and Ollama goes into the log once (from a thread of its own: Ollama is asked over the network)."""
+    """Counts the warnings and errors by kind (`problems`) and keeps the last error (as `PrivacyFormatter` writes it)
+    for `details_text`; after the first, the state of torch and Ollama goes into the log once (from a thread of its
+    own: Ollama is asked over the network)."""
 
     def __init__(self) -> None:
-        super().__init__(logging.ERROR)
+        super().__init__(logging.WARNING)
         self.setFormatter(PrivacyFormatter())
 
     def emit(self, record: logging.LogRecord) -> None:
         global _last_error, _state_told
+        try:
+            kind = problem_kind(record)
+        except Exception:  # noqa: BLE001 - the log never fails the program
+            return
+        with _lock:
+            n, _at = _problems.pop(kind, (0, 0.0))
+            _problems[kind] = (n + 1, record.created)
+            while len(_problems) > PROBLEM_KINDS:
+                _problems.pop(next(iter(_problems)))
+        if record.levelno < logging.ERROR:
+            return
         try:
             text = self.format(record)
         except Exception:  # noqa: BLE001 - the log never fails the program
@@ -490,6 +589,7 @@ def shutdown() -> None:
     logging.captureWarnings(False)
     with _lock:
         _last_error, _settings, _state_told = None, None, False
+        _problems.clear()
 
 
 # ------------------------------------------------------------------ without a window

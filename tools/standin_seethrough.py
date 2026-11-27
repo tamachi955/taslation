@@ -62,6 +62,7 @@ HIT_EVERY_S = 1.0
 CPU_EVERY_S = 0.5
 GPU_EVERY_S = 5.0  # the GPU memory of this process and the stand-in's (Windows' counter, `GpuMemory`)
 TRUTH_EVERY_S = 0.033
+REPORT_EVERY_S = 2.0  # a report as Copy a report makes it (`SeeWatch._make_report`, the Tk thread), so often
 VISIBLE_TOL = 8  # a patch's pixel is on the screen when every channel is within this
 VISIBLE_SHARE = 0.9  # a patch is on the screen when so many of its opaque pixels looked at are
 INK_LEVEL = 100  # a patch's pixel darker than this (every channel) is of its letters (an old patch: its letters seen)
@@ -487,6 +488,8 @@ class SeeWatch:
         self.copies = 0
         self.truth_rows: list[dict[str, Any]] = []
         self.saved: list[str] = []
+        self._report_at = 0.0  # (`_make_report`) when the last report was made, monotonic s
+        self.reports: dict[str, Any] = {"made": 0, "ms": [], "lines": [], "failed": 0, "last": None, "region": None}
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name="see-watch", daemon=True)
 
@@ -532,6 +535,20 @@ class SeeWatch:
                 self.patch_ms.append((time.perf_counter() - t) * 1000)
 
         st.make_patches = timed
+        # the report a person would copy (`ui.report.report_text`, its default: no text of the page), made on the Tk
+        # thread every REPORT_EVERY_S after the window's count of the regions not shown, and kept in memory only
+        # (`report_report`: its lines' count, how long it took, its sections and a few of its values)
+        tick = ui.unshown_tick
+
+        def reported(app: Any, *a: Any, **k: Any) -> Any:
+            out = tick(app, *a, **k)
+            now = time.monotonic()
+            if now - self._report_at >= REPORT_EVERY_S:
+                self._report_at = now
+                self._make_report(app)
+            return out
+
+        ui.unshown_tick = reported
         # the Tk thread's own steps, each call timed (`tk_steps`): what see-through mode and the window spend there
         from taslation import panes as pn
 
@@ -1926,6 +1943,71 @@ class SeeWatch:
             self.saved.append(f"{path}@{t}")
 
     # the report
+    REPORT_VALUES = {"page": ("units", "on_show", "lettered", "not_shown", "job"),
+                     "screen": ("viewer", "viewer_state", "viewer_in_front", "viewer_covered", "tab", "frames_per_s",
+                                "frame_states", "page_at_rest", "steady_band", "bars"),
+                     "panes": ("left", "right", "lettering_window", "lettering", "takes_mouse"),
+                     "program": ("mode", "translator", "ocr", "server"),
+                     "region": ("number", "status", "erase", "dark_kept", "patches", "shown", "history")}
+
+    def _make_report(self, app: Any) -> None:
+        """(the Tk thread, `install`'s hook) A report as Menu > Copy a report makes it, and one of the page's first
+        lettered region as the region editor's button does (without its text), kept in memory: `_digest_report`."""
+        from taslation.pipeline import erases
+        from taslation.ui import report as rp
+
+        t = time.perf_counter()
+        try:
+            text = rp.report_text(app)
+            ms = (time.perf_counter() - t) * 1000
+            result = getattr(app, "last_result", None)
+            first = next((r for r in (getattr(result, "regions", None) or ()) if erases(r)), None)
+            region = rp.report_text(app, [first]) if first is not None else None
+        except Exception as e:  # noqa: BLE001 - told in the run's report
+            self.reports["failed"] += 1
+            self.reports["error"] = type(e).__name__
+            return
+        self.reports["made"] += 1
+        self.reports["ms"].append(round(ms, 1))
+        self.reports["lines"].append(rp.line_count(text))
+        fps = next((line.split(" = ", 1)[1].split(" ")[0] for line in text.splitlines()
+                    if line.startswith("frames_per_s = ")), None)
+        try:
+            self.reports["fps_max"] = max(float(fps), self.reports.get("fps_max") or 0.0)
+        except (TypeError, ValueError):
+            pass
+        self.reports["last"] = self._digest_report(text)
+        if region is not None:
+            self.reports["region"] = self._digest_report(region)
+
+    def _digest_report(self, text: str) -> dict[str, Any]:
+        """What a report *text* says, for the run's report: its sections, its lines, a few values (REPORT_VALUES:
+        numbers and states), and its characters beyond ASCII but the scrub's "…" (none: no text of the page)."""
+        sections: list[str] = []
+        values: dict[str, dict[str, str]] = {}
+        current = ""
+        for line in text.splitlines()[2:-1]:
+            if line.startswith("[") and line.endswith("]"):
+                current = line[1:-1].split(" ")[0]
+                sections.append(current)
+            elif " = " in line:
+                key, value = line.split(" = ", 1)
+                if key in self.REPORT_VALUES.get(current, ()):
+                    values.setdefault(current, {}).setdefault(key, value[:300])
+        return {"head": text.splitlines()[1] if text.count("\n") > 1 else "", "lines": text.count("\n") - 1,
+                "sections": sections, "values": values,
+                "beyond_ascii": sum(1 for c in text if ord(c) > 127 and c != "…")}
+
+    def report_report(self) -> dict[str, Any]:
+        """The reports made in the run (`_make_report`): how many, their lines, how long each took (ms, the Tk
+        thread), and the last one's and the last region report's digest."""
+        out = dict(self.reports)
+        ms = out.pop("ms")
+        out["ms_max"] = max(ms, default=None)
+        out["ms_median"] = sorted(ms)[len(ms) // 2] if ms else None
+        out["lines"] = sorted(set(out["lines"]))
+        return out
+
     def unshown_report(self) -> dict[str, Any]:
         """Per page the window lettered (by the stand-in's screen its frame showed), the lettered regions whose patch
         did not show at the window's looks (`ui.seethrough.unshown_tick`, once a second while the page was on show):
@@ -2092,6 +2174,7 @@ class SeeWatch:
                 "edit": self.edit_result if self.edit and not self.add else None,  # (`_edit_measure`: editing)
                 "add": self.add_result if self.add else None,  # (`_add_measure`: text areas added)
                 "unshown": self.unshown_report(),  # (lettered regions of the page on show whose patch did not show)
+                "copied_report": self.report_report(),  # (Copy a report, made every REPORT_EVERY_S: memory only)
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
                           "max_ms": max((v for v in late if v is not None), default=None),
