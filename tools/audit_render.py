@@ -60,7 +60,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 5
+VERSION = 6
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -108,7 +108,8 @@ CODES = {
     "RESIDUE": "specks of the original lettering left after the erase (inside the erased area or the bubble; not where "
                "LaMa or the tone fill painted the hole)",
     "GHOST": "marks on the bubble's flat paper after the erase, whatever made them (also where LaMa erased)",
-    "LAMA_BUBBLE": "erased by LaMa although its lettering sits in a bubble's closed interior on flat light paper",
+    "LAMA_BUBBLE": "erased by LaMa although its lettering sits in a bubble's closed interior on flat light paper (not "
+                   "a bubble drawn see-through over the drawing, which is lettering on the drawing)",
     "LINE_CUT": "outline, tail or drawing lines erased round a region on paper",
     "ART_CUT": "many lines erased round a region on the drawing (LaMa)",
     "INK_ON_LINE": "lettering drawn on an outline or a line of the drawing",
@@ -1113,6 +1114,21 @@ def _hyphens(lines: Sequence[str]) -> int:
                and ln.rstrip()[-2].isalpha())
 
 
+def _see_through(orig: Any, r: Any) -> bool:
+    """Whether the program takes *r* for a bubble the detectors could not close drawn see-through over the drawing
+    (`artwork.see_through`, on the paper `artwork.closed_interior` finds round its lettering): lettering on the drawing,
+    which LaMa erases on purpose although its paper is closed and light."""
+    import numpy as np
+    from taslation.render import artwork, pagescale
+
+    if not hasattr(artwork, "see_through") or not (r.from_model and r.tier == 3
+                                                    and r.kind in ("bubble", "dark-bubble")):
+        return False
+    rgb = np.ascontiguousarray(np.asarray(orig)[..., :3])
+    closed = artwork.closed_interior(rgb, artwork.box_of(rgb, r), r.dark, pagescale.of(r))
+    return closed is not None and bool(artwork.see_through(rgb, r, closed))
+
+
 def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec: Recorder,
                  truth: list[dict[str, Any]], layers: dict[str, Any] | None, gold_kind: str) -> tuple[list, list]:
     """Per region the measures (`CODES`), and the page's own codes (`PAGE_CODES`)."""
@@ -1206,7 +1222,10 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                     if m["ghost_px"] >= GHOST_PX:
                         codes.append("GHOST")
                     if row["inpainted"]:
-                        codes.append("LAMA_BUBBLE")
+                        if _see_through(orig, r):  # (lettering on the drawing: LaMa's on purpose)
+                            m["see_through"] = 1
+                        else:
+                            codes.append("LAMA_BUBBLE")
             near = lines_ & _box_mask((h, w), _grow(r.bbox, 3, w, h))
             lost = near & (O < LINE_DARK) & (E >= LIGHTENED) & (E - O >= LIGHTER)
             m["line_px"] = int((near & (O < LINE_DARK)).sum())
