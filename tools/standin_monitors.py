@@ -357,9 +357,13 @@ def watch_pane_whys(holder: Any) -> None:
 
 def other_why(over: Any, side: str) -> str:
     """Why the side pane *side*, handed over by the Tk thread, is not on the screen though `watch_pane_whys` found no
-    reason: the viewer sized with the pointer, or a window above the viewer meeting it ("" for neither)."""
+    reason: the viewer sized with the pointer, its window moved or sized a moment ago, or a window above the viewer
+    meeting it ("" for none)."""
     if getattr(over, "_sizing", False):
         return "sizing"  # (the viewer sized with the pointer: `SeeThrough._sizing_tick`)
+    moving = getattr(over, "moving", None)
+    if callable(moving) and moving():
+        return "moving"  # (the viewer's window moved or sized less than PANE_REST_S ago: `SeeThrough._rect_tick`)
     if _covered_pane(over, side):
         return "covered"  # (a window above the viewer meets it: the region editor, a dialog, another program's)
     return ""

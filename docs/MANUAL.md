@@ -137,11 +137,12 @@ the page cannot be read then (see "How the viewer is read").
 
 ### More than one monitor, and the viewer's window resized
 
-With more than one monitor it is the same: put the viewer on any of them, move it from one to another or across two, and the lettering and the panes follow it.
+With more than one monitor it is the same: put the viewer on any of them, move it from one to another or across two, and the lettering and the panes follow it
+(the panes hide while the viewer's window moves or changes its size, and come back a moment after it stops).
 TASlation's dialogs open on the monitor that holds most of the viewer; the region editor and a number plate's entry open beside their bubble, on the monitor where the bubble is. A pane that would run off the screen, or that a window lies over, hides.
 TASlation's taskbar button is wherever Windows shows it (with one taskbar, on the main monitor's).
 
-While you drag an edge or a corner of the viewer's window, the lettering and the panes hide and nothing is taken from the viewer. Once you let go, they come back at the new size: the panes at once, the lettering at once where the page was shown at that size before, else within a second or two.
+While you drag an edge or a corner of the viewer's window, the lettering and the panes hide and nothing is taken from the viewer. Once you let go, they come back at the new size: the panes a moment later, the lettering at once where the page was shown at that size before, else within a second or two.
 Snapping the window to half the screen, maximising it and restoring it work the same way.
 An open region editor stays where it is and goes on with its bubble at the new size; should it now lie over the bubble, it moves beside it.
 When the window becomes too narrow for the panes beside the page, they hide and the Menu comes from a click on TASlation's taskbar button; make it wider and they come back.

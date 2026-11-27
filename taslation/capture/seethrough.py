@@ -26,9 +26,10 @@ taking every click and key itself.
   shows another page, whatever Tk is doing.
 * The side panes (`taslation.panes`; their pictures and their places from the Tk thread, `set_panes`) are two more
   layered windows of this thread's, topmost, never activated (WS_EX_NOACTIVATE), with no taskbar button: they lie on
-  the viewer's ground at the capture area's outer edges, follow the viewer's moves as the lettering does, hide while
-  it is minimised, hidden or cloaked and where a window above the viewer meets them; the lettering's switch on the
-  left one hides the lettering only (`set_on`). The LEFT one (the controls) takes the clicks on its
+  the viewer's ground at the capture area's outer edges, hide at once at any change of the viewer's place or size
+  (this thread's own hook on its moves, and every look: `_rect_tick`) and come back once it has been at rest for
+  PANE_REST_S, hide while it is minimised, hidden or cloaked and where a window above the viewer meets them; the
+  lettering's switch on the left one hides the lettering only (`set_on`). The LEFT one (the controls) takes the clicks on its
   plates - no WS_EX_TRANSPARENT; a layered window passes on a click on a pixel of alpha 0, so between its rows and
   round them the viewer takes it -, answers WM_MOUSEACTIVATE with MA_NOACTIVATE (a click never activates it: the
   viewer keeps the keyboard), and keeps each click (`take_clicks`: where in the pane) for the Tk thread, which acts on
@@ -146,6 +147,7 @@ HOVER_IN_PX, HOVER_OUT_PX = 4, 10  # the pointer this near a patch's box hides i
 # is farther than the second (px at 96 DPI, `seethrough.scaled`): no flicker at its edge
 COVER_S = 0.1  # the windows over the viewer are looked for at most this often
 SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it too (`on_sizing_border`, px at 96 DPI)
+PANE_REST_S = 0.3  # the side panes come back once the viewer's window has kept its place and size so long (`_rect_tick`)
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
 WHERE_KEPT = 64  # (`why_not_shown`) the patches of the set chosen whose differing pixels a look places, at the most
@@ -659,6 +661,11 @@ class SeeThrough:
         self._pointer: tuple[int, int] | None = None  # where the pointer was at the last look (screen pixels)
         self._was_held = False  # the button held at the last look
         self._sizing = False  # the viewer's window sized by the pointer: pressed on its sizing border, held since
+        # (`_rect_tick`) the viewer's client area and frame bounds on the screen as last seen, and when they last
+        # changed (None: at rest); the thread's own hook on the viewer's moves (`_hook_moves`: viewer, hook, callback)
+        self._rect: tuple[Any, ...] | None = None
+        self._rect_at: float | None = None
+        self._move_hook: tuple[int, int, Any] = (0, 0, None)
         self._hover_box: st.Box | None = None  # the box of the patch left out under the pointer
         self._hover_delay = 0.0  # s the pointer rests on a patch before it is left out (`set_hover_delay`)
         self._hover_wait: tuple[st.Box, float] | None = None  # (the patch the pointer came to, since when)
@@ -802,7 +809,8 @@ class SeeThrough:
     def report_facts(self, key: int | None = None, within_s: float = REPORT_FPS_S) -> dict[str, Any]:
         """(the Tk thread, a report: `ui.report`) The window's state as its last look left it, numbers and flags only:
         "on", "away", "editing" (the whole page takes the mouse), "takes_mouse" (the lettering's window takes it now),
-        "key_held" (the Insert key), "sizing", "dpi", "origin" and "size" of the viewer's client area at the last look,
+        "key_held" (the Insert key), "sizing", "moving" (the viewer's window moved or sized less than PANE_REST_S ago:
+        the side panes hidden, `_rect_tick`), "dpi", "origin" and "size" of the viewer's client area at the last look,
         "shown" (set serial, patches on show; None: hidden), "covers" (the windows over the viewer met, screen boxes),
         "panes" (side -> screen box on show, or None) with "pane_wanted" (side -> handed a picture), "frames_per_s"
         (the viewer's frames that came in the last *within_s* s), "counts" (`counts`); and for the set of *key* (the
@@ -824,7 +832,7 @@ class SeeThrough:
                 patches.append((tuple(int(v) for v in p.box), round(share, 3)))
         return {"on": bool(self._on), "away": bool(self._away), "editing": bool(self._ground),
                 "takes_mouse": bool(self._edit_takes), "key_held": bool(self._key_held), "sizing": bool(self._sizing),
-                "dpi": int(self._dpi), "origin": tuple(look[5]) if look is not None else None,
+                "moving": self.moving(), "dpi": int(self._dpi), "origin": tuple(look[5]) if look is not None else None,
                 "size": tuple(look[6]) if look is not None else None,
                 "shown": (int(shown[0]), len(shown[1])) if shown is not None else None,
                 "covers": [tuple(int(v) for v in c) for c in list(self._covers)],
@@ -870,6 +878,11 @@ class SeeThrough:
             except IndexError:
                 break
         return out
+
+    def moving(self) -> bool:
+        """(any thread) Whether the viewer's window moved or changed its size less than PANE_REST_S ago, the side
+        panes hidden meanwhile (`_rect_tick`)."""
+        return self._rect_at is not None
 
     def pane_shown(self, side: str) -> tuple[int, int, int, int] | None:
         """The screen box of the side pane *side* as it shows now; None while it is hidden."""
@@ -974,20 +987,38 @@ class SeeThrough:
 
     # ------------------------------------------------------------------ the window's thread
     def _poke(self) -> None:
-        """The window thread looks again at once: its event set - and, while it waits for the mouse too (editing), a
-        message posted to its own window."""
+        """The window thread looks again at once: its event set, and a message posted to its own window (it waits
+        for its messages: `_wait`)."""
         self._wake.set()
-        if self._edit_takes and self.hwnd and IS_WINDOWS:
+        if self.hwnd and IS_WINDOWS:
             _user32.PostMessageW(self.hwnd, WM_APP, 0, 0)
 
     def _wait(self) -> None:
-        """Until something is to be looked at, LOOK_S at the most: the event (`_poke`) - while editing, any message of the
-        thread's too (a press, the pointer's moves), so that a drag follows the pointer at once."""
-        if self._edit_takes and IS_WINDOWS:
+        """Until something is to be looked at, LOOK_S at the most: the event (`_poke`, or the viewer's window moved:
+        `_viewer_moved`) - while editing, any message of the thread's too (a press, the pointer's moves), so that a
+        drag follows the pointer at once. The thread's messages are read meanwhile (`_pump`), so that its own hook on
+        the viewer's moves is told of each at once."""
+        if not IS_WINDOWS or not self.hwnd:
+            self._wake.wait(LOOK_S)
+        elif self._edit_takes:
             _user32.MsgWaitForMultipleObjectsEx(0, None, int(LOOK_S * 1000), QS_ALLINPUT, MWMO_INPUTAVAILABLE)
         else:
-            self._wake.wait(LOOK_S)
+            end = time.monotonic() + LOOK_S
+            while not self._wake.is_set() and not self._stop.is_set():
+                left = end - time.monotonic()
+                if left <= 0:
+                    break
+                _user32.MsgWaitForMultipleObjectsEx(0, None, max(1, int(left * 1000)), QS_ALLINPUT,
+                                                    MWMO_INPUTAVAILABLE)
+                self._pump()
         self._wake.clear()
+
+    def _pump(self) -> None:
+        """The thread's messages, each handed to its window (and the hook's notes to `_viewer_moved`)."""
+        msg = wintypes.MSG()
+        while _user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
+            _user32.TranslateMessage(ctypes.byref(msg))
+            _user32.DispatchMessageW(ctypes.byref(msg))
 
     def _note(self, kind: str, **facts: Any) -> None:
         self.notes.append({"t": time.monotonic(), "ev": kind, **facts})
@@ -1025,19 +1056,17 @@ class SeeThrough:
         _edit_hooks[self.hwnd] = self._edit_message
         _key_hooks[self.hwnd] = self._hot_key
         wgc.add_listener(self._on_frame)
-        msg = wintypes.MSG()
         try:
             while not self._stop.is_set():
                 self._wait()
-                while _user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
-                    _user32.TranslateMessage(ctypes.byref(msg))
-                    _user32.DispatchMessageW(ctypes.byref(msg))
+                self._pump()
                 try:
                     self._step()
                 except Exception as e:  # noqa: BLE001 - one look's fault: noted, the next look goes on
                     self.counts["errors"] += 1
                     self._note("error", why=type(e).__name__)
         finally:
+            self._hook_moves(0)
             wgc.remove_listener(self._on_frame)
             _edit_hooks.pop(self.hwnd, None)
             self._key_tick(0)  # (the key let go of)
@@ -1071,6 +1100,7 @@ class SeeThrough:
         if not _user32.IsWindow(viewer):
             self._nothing("gone")
             return
+        self._hook_moves(viewer)
         if _user32.IsIconic(viewer) or not _user32.IsWindowVisible(viewer) or windows._is_cloaked(viewer):
             self._nothing("minimised")
             return
@@ -1081,6 +1111,7 @@ class SeeThrough:
         client = windows._client_box(viewer)
         bounds = windows._frame_bounds(viewer)
         now = time.monotonic()
+        resting = self._rect_tick((client, bounds), now)
         geometry = (client, bounds, frame.size)
         new_frame = frame.seq != self._seq
         pointer = cursor_pos()
@@ -1113,7 +1144,7 @@ class SeeThrough:
         if geometry != self._geometry:
             self._dpi = viewer_dpi(viewer)
         self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
-        if not self._sizing:
+        if not self._sizing and resting:
             self._place_panes(panes, origin, size)
         self._right_plates(pointer, panes, held)
         self._edit_held()
@@ -1656,6 +1687,63 @@ class SeeThrough:
                 self._note("sizing", on=1)
         self._was_held = held
         return self._sizing
+
+    def _rect_tick(self, rect: tuple[Any, ...], now: float) -> bool:
+        """Whether the viewer's window is at rest: *rect* (its client area and frame bounds on the screen) as it was,
+        no change of them in the last PANE_REST_S. At any change - moved, sized, maximised, restored, snapped, by the
+        pointer or in one step - the side panes hide at once, since a pane left where it was would lie outside the
+        window until a look placed it again; they come back at rest (the look that finds it so places them, whatever
+        else changed). Told at each look (`_step`) and by the thread's own hook at each move (`_viewer_moved`)."""
+        if self._rect is not None and rect != self._rect:
+            if self._rect_at is None:
+                self._note("moving", on=1)
+            self._rect_at = now
+            self._panes_hide("moving")
+        self._rect = rect
+        if self._rect_at is not None and now - self._rect_at >= PANE_REST_S:
+            self._rect_at = None
+            self._geometry = None  # (the look places the panes again, whatever else changed)
+            self._note("moving", on=0)
+        return self._rect_at is None
+
+    def _hook_moves(self, viewer: int) -> None:
+        """(the window thread) This thread's own hook on the moves and size changes of the window *viewer* (0: none),
+        so that the side panes hide the moment it changes (`_viewer_moved`), not at the next look nor when the Tk
+        thread passes the change on (`poke`). Only the events of the viewer's process and thread are asked for."""
+        if not IS_WINDOWS or viewer == self._move_hook[0]:
+            return
+        from . import windows
+
+        old = self._move_hook[1]
+        if old:
+            windows.user32.UnhookWinEvent(old)
+        self._move_hook = (int(viewer), 0, self._move_hook[2])
+        if not viewer:
+            return
+        proc = self._move_hook[2] or windows.WINEVENTPROC(self._viewer_moved)  # (kept while the thread runs)
+        pid = wintypes.DWORD(0)
+        thread = windows.user32.GetWindowThreadProcessId(viewer, ctypes.byref(pid))
+        hook = 0
+        if thread:
+            hook = int(windows.user32.SetWinEventHook(windows.EVENT_OBJECT_LOCATIONCHANGE,
+                                                      windows.EVENT_OBJECT_LOCATIONCHANGE, None, proc, pid.value,
+                                                      thread, windows.WINEVENT_OUTOFCONTEXT) or 0)
+        self._move_hook = (int(viewer), hook, proc)
+        self._note("move_hook", on=int(bool(hook)))
+
+    def _viewer_moved(self, _hook, _event, hwnd, obj, child, _thread, _ms) -> None:  # type: ignore[no-untyped-def]
+        """(the window thread, the hook's callback while it reads its messages) The viewer's window moved or changed
+        its size: the side panes hide at once if its place did change (`_rect_tick`), and a look follows."""
+        from . import windows
+
+        try:
+            viewer = self._viewer
+            if not hwnd or int(hwnd) != viewer or obj != windows.OBJID_WINDOW or child != windows.CHILDID_SELF:
+                return
+            self._rect_tick((windows._client_box(viewer), windows._frame_bounds(viewer)), time.monotonic())
+            self._wake.set()
+        except Exception:  # noqa: BLE001 - a callback from Windows must never raise
+            pass
 
     def _pane_presses(self, point: tuple[int, int] | None, held: bool, now: float) -> None:
         """A press on a side pane whose release did not come to it (let go over another window, the button up by

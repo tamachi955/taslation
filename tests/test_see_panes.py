@@ -614,6 +614,96 @@ def test_a_press_on_the_viewer_s_sizing_border_hides_the_panes_until_the_release
     assert not over._sizing_tick(5, (1312, 500), True, bounds)  # (maximised: no border to size it by)
 
 
+def test_any_change_of_the_viewer_s_place_or_size_hides_the_panes_at_once_until_it_rests():
+    """A restore, a maximise, a snap or a move changes the viewer's window in one step, the button held or not: a pane
+    left where it was would lie outside the window until a look placed it again. The panes hide at the change and
+    come back once the window has kept its place and size for PANE_REST_S."""
+    from taslation.capture import seethrough as window
+
+    over = window.SeeThrough()
+    hidden = []
+    over._panes_hide = hidden.append
+    restored = ((100, 100, 1200, 800), (93, 70, 1307, 907))  # (client x, y, w, h; frame bounds)
+    maximised = ((0, 23, 1920, 1009), (0, 0, 1920, 1032))
+    assert over._rect_tick(restored, 10.0) and not over.moving() and hidden == []  # (the first look: as it is)
+    assert over._rect_tick(restored, 10.05)
+    over._geometry = ("as it was",)
+    assert not over._rect_tick(maximised, 10.1) and over.moving() and hidden == ["moving"]  # (in one step)
+    assert not over._rect_tick(maximised, 10.3)  # (not at rest yet)
+    assert not over._rect_tick(restored, 10.35) and hidden == ["moving", "moving"]  # (changed again: rest anew)
+    assert not over._rect_tick(restored, 10.35 + window.PANE_REST_S - 0.01) and over._geometry == ("as it was",)
+    assert over._rect_tick(restored, 10.35 + window.PANE_REST_S) and not over.moving()
+    assert over._geometry is None  # (the look that finds it at rest places the panes again)
+    assert [n["on"] for n in over.notes if n["ev"] == "moving"] == [1, 0]
+    assert over.report_facts()["moving"] is False
+
+
+def test_the_window_thread_s_own_hook_hides_the_panes_the_moment_the_viewer_moves(monkeypatch):
+    """The viewer's moves come to the window thread by its own hook (not by way of the Tk thread, which may be busy):
+    only the viewer's window itself counts, not its cursor, caret or other objects, nor another window."""
+    from taslation.capture import seethrough as window
+    from taslation.capture import windows as w
+
+    over = window.SeeThrough()
+    over._viewer = 5
+    hidden = []
+    over._panes_hide = hidden.append
+    place = {"client": (100, 100, 1200, 800)}
+    monkeypatch.setattr(w, "_client_box", lambda hwnd: place["client"])
+    monkeypatch.setattr(w, "_frame_bounds", lambda hwnd: (93, 70, 1307, 907))
+    over._viewer_moved(0, w.EVENT_OBJECT_LOCATIONCHANGE, 5, w.OBJID_WINDOW, w.CHILDID_SELF, 0, 0)
+    assert hidden == [] and over._wake.is_set()  # (the first: as it is; a look follows)
+    place["client"] = (300, 100, 1200, 800)
+    for hwnd, obj in ((6, w.OBJID_WINDOW), (5, -9), (5, -8)):  # (another window, the cursor, the caret)
+        over._viewer_moved(0, w.EVENT_OBJECT_LOCATIONCHANGE, hwnd, obj, w.CHILDID_SELF, 0, 0)
+    assert hidden == []
+    over._viewer_moved(0, w.EVENT_OBJECT_LOCATIONCHANGE, 5, w.OBJID_WINDOW, w.CHILDID_SELF, 0, 0)
+    assert hidden == ["moving"] and over.moving()
+    monkeypatch.setattr(w, "_client_box", lambda hwnd: 1 / 0)
+    over._viewer_moved(0, w.EVENT_OBJECT_LOCATIONCHANGE, 5, w.OBJID_WINDOW, w.CHILDID_SELF, 0, 0)  # (never raises)
+
+
+def test_the_hook_hears_a_move_while_the_window_thread_waits():
+    """On Windows, with the real thread: a hidden window of the window's own (never shown) followed as the viewer and
+    moved off the screen twice - the thread's hook is set at its look and tells the second move at once."""
+    import ctypes
+    import sys
+    import time
+
+    if sys.platform != "win32":
+        pytest.skip("Windows only")
+    from taslation.capture import seethrough as window
+
+    over = window.SeeThrough.start()
+    assert over is not None
+    user32 = ctypes.WinDLL("user32")
+    user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p] + [ctypes.c_int] * 4 + [ctypes.c_uint]
+
+    def noted(kind, deadline=2.0):
+        end = time.monotonic() + deadline
+        while time.monotonic() < end:
+            if any(n["ev"] == kind for n in list(over.notes)):
+                return True
+            time.sleep(0.01)
+        return False
+
+    try:
+        target = over.panes["right"]
+        over.follow(target)
+        assert noted("move_hook") and over._move_hook[1]
+        flags = 0x0001 | 0x0004 | 0x0010  # (SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE: hidden, never activated)
+        user32.SetWindowPos(target, None, -30000, -30000, 0, 0, flags)
+        end = time.monotonic() + 2.0
+        while over._rect is None and time.monotonic() < end:  # (the first move heard: the place as it is)
+            time.sleep(0.01)
+        assert over._rect is not None and not over.moving()
+        user32.SetWindowPos(target, None, -29000, -30000, 0, 0, flags)
+        assert noted("moving") and over.moving()
+    finally:
+        over.close()
+    assert over._move_hook[1] == 0  # (let go of with the thread)
+
+
 def test_shown_again_or_moved_the_windows_go_under_an_open_menu_of_this_process_never_above_it(monkeypatch):
     import inspect
     import os

@@ -500,6 +500,8 @@ def _pane(app: Any, facts: dict[str, Any], side: str) -> str:
         return "hidden: Indicators off"
     if facts.get("sizing"):
         return "hidden: the viewer's window being sized"
+    if facts.get("moving"):
+        return "hidden: the viewer's window moved or sized a moment ago (back at rest)"
     if not (facts.get("pane_wanted") or {}).get(side):
         return "hidden: no room beside the page, or off the monitors"
     if facts.get("covers"):
