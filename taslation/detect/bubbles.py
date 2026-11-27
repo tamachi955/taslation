@@ -745,6 +745,11 @@ def take_columns_beyond(gray: np.ndarray, regions: list[TextRegion], dark_thresh
 
 
 FOCUS_MARGIN = 1.0  # glyphs of room the cut keeps on every side of the text (see focus_oversized)
+# a cut that would keep this share of the area's box or more is none: the area is the text's own bubble - a tall
+# narrow one round a single column, whose text is a small share of it - and stays a bubble (cut down to text on the
+# page, its lettering went to the erase for lettering on the page, judged on a ring round the column that reached its
+# outline on a page shown small: the inpainting there left the strokes' cores as a dotted line)
+FOCUS_WHOLE = 0.9
 
 
 def focus_window(text_box: tuple[int, int, int, int], area: tuple[int, int, int, int],
@@ -782,12 +787,16 @@ def focus_oversized(regions: list[TextRegion], max_text_share: float = 0.30,
     short line, an exclamation in a small bubble, less room than its bubble).
     Whether, and where, is decided on the text as detected before lettering
     against the outline was taken in, so taking it in never widens the cut.
+    A cut that would keep nearly all of the area (`FOCUS_WHOLE`) is none: a
+    narrow bubble round one column of text stays a bubble.
     """
     for r in regions:
         win = focus_window(r.core_box or r.text_box, r.bbox, max_text_share, margin * r.glyph)
         if win is None:
             continue
         nx0, ny0, nx1, ny1 = win
+        if (nx1 - nx0) * (ny1 - ny0) >= FOCUS_WHOLE * r.width * r.height:
+            continue
         r.mask = np.ascontiguousarray(r.mask[ny0 - r.y0 : ny1 - r.y0, nx0 - r.x0 : nx1 - r.x0])
         r.x0, r.y0, r.x1, r.y1 = nx0, ny0, nx1, ny1
         r.kind = "text-on-dark" if r.kind == "dark-bubble" else "text-on-page"

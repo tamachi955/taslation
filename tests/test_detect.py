@@ -116,6 +116,37 @@ def test_oversized_white_area_is_focused_on_its_text():
     assert r.mask.shape == (r.height, r.width)
 
 
+def test_a_narrow_bubble_round_one_column_stays_a_bubble():
+    """A tall narrow bubble round one column of bold characters, as a page shown 1000 px high has it (about 60 px wide,
+    225 high, characters of 15 px): its text is a small share of its box, but the cut would keep nearly all of it
+    (`FOCUS_WHOLE`), so it is no white area round a small text - it stays a bubble, erased with its paper on its
+    interior (cut down to text on the page, its lettering was judged on a ring round the column that reached its
+    outline, went to the inpainting and kept the strokes' cores as a dotted line)."""
+    import cv2
+
+    from taslation.detect import focus_oversized
+    from taslation.render import artwork
+    from taslation.render.erase import erase_region
+
+    img = np.full((600, 400, 3), 255, np.uint8)
+    img[40:560, 40:360] = 190  # a toned panel: the bubble is a white area of its own
+    cv2.ellipse(img, (200, 300), (31, 114), 0, 0, 360, (0, 0, 0), -1)
+    cv2.ellipse(img, (200, 300), (28, 111), 0, 0, 360, (255, 255, 255), -1)
+    img = _draw_vertical(img, "まさかここまで来るなん", 192, 300 - 11 * 16 // 2, 15)
+    (r,) = BubbleDetector().detect(img)
+    tb = r.text_box
+    assert (tb[2] - tb[0]) * (tb[3] - tb[1]) < 0.3 * r.width * r.height  # a small share of its box ...
+    focus_oversized([r])
+    assert r.kind == "bubble" and r.width >= 50 and r.height >= 210  # ... and still the bubble, whole
+    assert not artwork.on_art(img, r)  # its paper erases it, not the inpainting
+    out = img.copy()
+    erase_region(out, r)
+    inside = np.zeros(img.shape[:2], np.uint8)
+    cv2.ellipse(inside, (200, 300), (25, 108), 0, 0, 360, 255, -1)
+    gray = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
+    assert int(((gray < 160) & (inside > 0)).sum()) == 0  # nothing of the column left
+
+
 def _region(x0, y0, x1, y1):
     return TextRegion(x0, y0, x1, y1, np.full((y1 - y0, x1 - x0), 255, np.uint8), (x0, y0, x1, y1))
 

@@ -192,7 +192,74 @@ def make_edge_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[Im
     return img, truth
 
 
-LAYOUTS = {"panels": make_page, "edges": make_edge_page}
+LINES_NARROW = ["まさかここまで来るなんて", "それはないだろう普通", "そりゃな", "ちょっと待ってくれよ", "確かにな"]
+LINES_NARROW_BIG = "そういうことなら仕方ないけど本当にいいの"
+
+
+def make_narrow_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[Image.Image, list[dict]]:
+    """A page of tall narrow bubbles, each with one column of bold characters (as a long line set in one column is),
+    and two bubbles joined side by side: a large oval and a small one tucked behind its right side, the large one's
+    outline between them, with a short column of large characters. For the erase and the lettering of narrow bubbles
+    and of a bubble that shares an outline, at the page's size and scaled down (`--layout narrow`)."""
+    rng = random.Random(seed)
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    margin, gutter = 60, 24
+    mid_y = height // 2 + 40
+    panels = [(margin, margin, width - margin, mid_y - gutter // 2),
+              (margin, mid_y + gutter // 2, width - margin, height - margin)]
+    for p in panels:
+        scribble(draw, (p[0] + 10, p[1] + 10, p[2] - 10, p[3] - 10), rng)
+        draw.rectangle(p, outline=(0, 0, 0), width=6)
+    truth: list[dict] = []
+
+    def column(text: str, cx: float, cy: float, size: int) -> tuple[int, int, int, int]:
+        return draw_vertical_text(draw, text, cx, cy - len(text) * size * 1.05 / 2, find_jp_font(size), size,
+                                  len(text))
+
+    def narrow(cx: float, cy: float, rx: float, ry: float, text: str, size: int) -> None:
+        draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(255, 255, 255), outline=(0, 0, 0), width=4)
+        tb = column(text, cx, cy, size)
+        truth.append({"bbox": [int(cx - rx), int(cy - ry), int(math.ceil(cx + rx)), int(math.ceil(cy + ry))],
+                      "text_box": list(tb), "text": text, "shape": "ellipse", "kind": "narrow"})
+
+    top = panels[0]
+    narrow(top[2] - 150, top[1] + 300, 52, 205, LINES_NARROW[0], 27)  # 11 characters in one column
+    narrow(top[2] - 330, top[1] + 280, 48, 180, LINES_NARROW[1], 26)
+    narrow(top[0] + 170, top[1] + 270, 44, 160, LINES_NARROW[3], 24)
+    # the joined pair: the small bubble first, the large one over its left side (its outline between them)
+    bottom = panels[1]
+    bx, by, brx, bry = bottom[0] + 520, bottom[1] + 330, 175, 215
+    sx, sy, srx, sry = bx + brx + 25, by - 60, 60, 110
+    draw.ellipse((sx - srx, sy - sry, sx + srx, sy + sry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+    draw.ellipse((bx - brx, by - bry, bx + brx, by + bry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+    big = draw_vertical_text(draw, LINES_NARROW_BIG, bx, by - 5 * 34 * 1.05 / 2 - 20, find_jp_font(34), 34, 5)
+    truth.append({"bbox": [bx - brx, by - bry, bx + brx, by + bry], "text_box": list(big), "text": LINES_NARROW_BIG,
+                  "shape": "ellipse", "kind": "joined-large"})
+    small = column(LINES_NARROW[2], (bx + brx + sx + srx) / 2, sy, 36)  # (between the shared outline and its own)
+    truth.append({"bbox": [bx + brx, sy - sry, sx + srx, sy + sry], "text_box": list(small), "text": LINES_NARROW[2],
+                  "shape": "ellipse", "kind": "joined-small", "ellipse": [sx, sy, srx, sry],
+                  "big": [bx, by, brx, bry]})
+    # a second pair, the small one's column of large characters nearly as wide as its free interior and a tail at its
+    # lower right
+    bx, by, brx, bry = bottom[0] + 840, bottom[1] + 570, 120, 150
+    sx, sy, srx, sry = bx + brx + 20, by - 40, 48, 140
+    draw.polygon([(sx + 10, sy + sry * 0.8), (sx + 34, sy + sry * 0.62), (sx + 75, sy + sry + 55)],
+                 fill=(255, 255, 255), outline=(0, 0, 0), width=4)
+    draw.ellipse((sx - srx, sy - sry, sx + srx, sy + sry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+    draw.ellipse((sx - srx + 4, sy - sry + 4, sx + srx - 4, sy + sry - 4), fill=(255, 255, 255))
+    draw.ellipse((bx - brx, by - bry, bx + brx, by + bry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+    big = draw_vertical_text(draw, LINES_NARROW_BIG[:10], bx, by - 5 * 30 * 1.05 / 2, find_jp_font(30), 30, 5)
+    truth.append({"bbox": [bx - brx, by - bry, bx + brx, by + bry], "text_box": list(big),
+                  "text": LINES_NARROW_BIG[:10], "shape": "ellipse", "kind": "joined-large2"})
+    small = column(LINES_NARROW[4], (bx + brx + sx + srx) / 2 - 2, sy, 46)
+    truth.append({"bbox": [bx + brx, sy - sry, sx + srx, sy + sry], "text_box": list(small), "text": LINES_NARROW[4],
+                  "shape": "ellipse", "kind": "joined-small2", "ellipse": [sx, sy, srx, sry],
+                  "big": [bx, by, brx, bry]})
+    return img, truth
+
+
+LAYOUTS = {"panels": make_page, "edges": make_edge_page, "narrow": make_narrow_page}
 
 
 def main() -> None:
@@ -200,7 +267,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--layout", choices=sorted(LAYOUTS), default="panels",
-                    help="panels: the test pages' (the default); edges: bubbles cut by the page's four edges")
+                    help="panels: the test pages' (the default); edges: bubbles cut by the page's four edges; narrow: "
+                         "tall narrow bubbles with one column each, and bubbles joined side by side")
     args = ap.parse_args()
     img, truth = LAYOUTS[args.layout](args.seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)
