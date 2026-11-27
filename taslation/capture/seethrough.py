@@ -47,27 +47,32 @@ taking every click and key itself.
   viewer keeps the keyboard, and gets the keys alone), the page drawn at alpha EDIT_ALPHA wherever nothing else is,
   whatever page the viewer shows (one with no marks: `seethrough.GROUND`); the viewer's title bar and frame stay its
   own, and so do the windows over the viewer (alpha 0 there: `edit_compose`'s holes). The wheel, the middle and side
-  buttons reach nothing. No patch gives way under the pointer: every box is outlined in its colour and numbered, the
-  one under the pointer in the stronger outline with its corner handles. A press takes hold of a box (the capture
-  besides, which a window not in front has only over its own pixels); a drag moves the box (those chosen with it), a
-  drag on a corner resizes it, a click on a box's number plate types its place in the reading order (a drag from it
-  moves the box), a drag on the empty ground draws a rectangle, a click there is kept as no more than that, a right
-  click gives a press up (and a region to add: an "add" with no box), and the release is kept for the Tk thread
-  (`take_edits`: a click, a plate, a move, a resize, a rectangle drawn - "draw", or "add" for Add area -, a click on
-  the ground), which acts on it. In Reader mode, marks of no box while a region is to be added (`Marks.adding`) have
+  buttons reach nothing. Every box is outlined in its colour and numbered, the one under the pointer in the stronger
+  outline, the one chosen alone in it with its corner handles too; the patches of the box under the pointer give way
+  to the original once it has rested there the hover delay, as in Reader mode (`_edit_out`: not while a press is
+  held, nor for the box in the editor). A press takes hold of a box (the capture besides, which a window not in
+  front has only over its own pixels); a drag moves the box (those chosen with it), a drag on a corner resizes it, a
+  click on a box's number plate types its place in the reading order (a drag from it moves the box), a drag on the
+  empty ground draws a rectangle, a click there is kept as no more than that, a right click gives a press up (and a
+  region to add: an "add" with no box), and the release is kept for the Tk thread (`take_edits`: a click, a double
+  click - the second press on the same box within the system's double-click time and reach, `double_click`: the class
+  has no CS_DBLCLKS -, a plate, a move, a resize, a rectangle drawn - "draw", or "add" for Add area -, a click on the
+  ground), which acts on it. In Reader mode, marks of no box while a region is to be added (`Marks.adding`) have
   the whole page take the mouse for that rectangle alone. The box in the editor and one being dragged keep their
   patches whatever the frame says; the one whose original is shown has none. A press the window holds is no press
   on the viewer (`pressing`: frames go on being taken). The thread then waits for its messages too
   (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its own window), so a drag follows the pointer at once. It
   sends, posts and presses nothing to another window.
-* The Insert key (`set_add_key`: ``Settings.add_area_key``; the Tk thread's Add area, `ui.see_edit`) is the one key
-  TASlation takes: a hot key of the lettering's window (``RegisterHotKey``, Insert alone - Shift+Insert and
-  Ctrl+Insert stay the viewer's - with MOD_NOREPEAT), held only while the viewer is the window in front and not
-  minimised (`_key_tick`, at every look: never a keyboard hook), let go at the look that finds another program or a
-  dialog of TASlation's in front, the viewer minimised or gone, or the setting off. Each press is kept for the Tk
-  thread (`take_keys`; ``WM_HOTKEY``, `_hot_key`), and a rectangle being drawn to add a region is given up there and
-  then. A registration that fails (another program holds the key) is harmless: counted, logged once, and not tried
-  again until the key is let go of and wanted once more.
+* The Insert key (`set_add_key`: ``Settings.add_area_key``; the Tk thread's Add area, `ui.see_edit`) and the Delete
+  key (`set_delete_key`: wanted only while editing with a region chosen; the Tk thread drops it) are the keys
+  TASlation takes: hot keys of the lettering's window (``RegisterHotKey``, each alone - Shift+Insert, Ctrl+Insert,
+  Shift+Delete and the like stay the viewer's - with MOD_NOREPEAT), held only while wanted and the viewer is the
+  window in front and not minimised (`_key_tick`, at every look: never a keyboard hook), let go at the look that finds
+  another program or a dialog of TASlation's in front, the viewer minimised or gone, or the key not wanted (the
+  setting off; no region chosen any more). Each press is kept for the Tk thread (`take_keys`, `take_deletes`;
+  ``WM_HOTKEY``, `_hot_key`), and a rectangle being drawn to add a region (Insert), or a box held (Delete), is given
+  up there and then. A registration that fails (another program holds the key) is harmless: counted, logged once,
+  and not tried again until the key is let go of and wanted once more.
 * Topmost, but never above a menu of TASlation's own: shown again or moved, the lettering's window and the panes go
   just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the left pane's Menu, the
   one the taskbar button opens and their submenus), since a window made topmost again comes above every other topmost
@@ -131,13 +136,18 @@ HTCLIENT, MK_SHIFT, WM_APP = 1, 0x0004, 0x8000
 QS_ALLINPUT, MWMO_INPUTAVAILABLE = 0x04FF, 0x0004
 VK_LBUTTON, VK_RBUTTON, SM_SWAPBUTTON = 0x01, 0x02, 23
 CURSOR_IDS = {"move": 32649, "drag": 32646, "nw": 32642, "se": 32642, "ne": 32643, "sw": 32643, "add": 32515,
-              st.PLATE: 32513, None: IDC_ARROW}  # IDC_HAND (a click edits), IDC_SIZEALL, IDC_SIZENWSE, IDC_SIZENESW,
-# IDC_CROSS (a rectangle drawn), IDC_IBEAM (a number plate: a click types its place)
+              st.PLATE: 32513, None: IDC_ARROW}  # IDC_HAND (a click chooses, a double click edits), IDC_SIZEALL,
+# IDC_SIZENWSE, IDC_SIZENESW, IDC_CROSS (a rectangle drawn), IDC_IBEAM (a number plate: a click types its place)
 EDITS_KEPT = 64  # presses on the regions not taken yet by the Tk thread (`take_edits`)
-# the Insert key (`set_add_key`): a hot key of the lettering's window while the viewer is in front (`_key_tick`)
-WM_HOTKEY, VK_INSERT, MOD_NOREPEAT = 0x0312, 0x2D, 0x4000
-HOTKEY_ID = 0x0A11  # (an application's hot key: 0x0000-0xBFFF)
-KEYS_KEPT = 16  # presses of the key not taken yet by the Tk thread (`take_keys`)
+# a double click on a box (`double_click`): the second press within the system's double-click time of the first and
+# within its reach (GetDoubleClickTime, SM_CXDOUBLECLK, SM_CYDOUBLECLK), these where the system gives none
+SM_CXDOUBLECLK, SM_CYDOUBLECLK = 36, 37
+DOUBLE_CLICK_S, DOUBLE_CLICK_PX = 0.5, 4
+# the Insert key (`set_add_key`) and the Delete key (`set_delete_key`): hot keys of the lettering's window while the
+# viewer is in front (`_key_tick`)
+WM_HOTKEY, VK_INSERT, VK_DELETE, MOD_NOREPEAT = 0x0312, 0x2D, 0x2E, 0x4000
+HOTKEY_ID, DELETE_ID = 0x0A11, 0x0A12  # (an application's hot keys: 0x0000-0xBFFF)
+KEYS_KEPT = 16  # presses of a key not taken yet by the Tk thread (`take_keys`, `take_deletes`)
 PANES = ("left", "right")
 MENU_CLASS = "#32768"  # the window class of a popup menu (Tk's menus on Windows are TrackPopupMenu's)
 CLICKS_KEPT = 32  # clicks on the side panes not taken yet by the Tk thread (`take_clicks`): the oldest go first
@@ -443,7 +453,36 @@ def viewer_dpi(viewer: int) -> int:
 
 
 _edit_hooks: dict[int, Any] = {}  # the lettering's window -> what makes editing's messages (`SeeThrough._edit_message`)
-_key_hooks: dict[int, Any] = {}  # the lettering's window -> what takes the Insert key's presses (`SeeThrough._hot_key`)
+_key_hooks: dict[int, Any] = {}  # the lettering's window -> what takes its hot keys' presses (`SeeThrough._hot_key`)
+
+
+def double_click() -> tuple[float, int, int]:
+    """The system's double click: (the most seconds from one press to the next, the most px across and down between
+    them), DOUBLE_CLICK_S and DOUBLE_CLICK_PX where it gives none."""
+    seconds, across, down = DOUBLE_CLICK_S, DOUBLE_CLICK_PX, DOUBLE_CLICK_PX
+    if IS_WINDOWS:
+        try:
+            ms = int(_user32.GetDoubleClickTime() or 0)
+            seconds = ms / 1000 if ms > 0 else seconds
+        except (AttributeError, OSError):
+            pass
+        try:
+            across = int(_user32.GetSystemMetrics(SM_CXDOUBLECLK) or 0) or across
+            down = int(_user32.GetSystemMetrics(SM_CYDOUBLECLK) or 0) or down
+        except (AttributeError, OSError):
+            pass
+    return seconds, across, down
+
+
+def _taken(kept: deque[Any]) -> list[Any]:
+    """What *kept* holds, taken out of it, the oldest first (another thread appends meanwhile)."""
+    out = []
+    while kept:
+        try:
+            out.append(kept.popleft())
+        except IndexError:
+            break
+    return out
 
 
 def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
@@ -639,7 +678,8 @@ class SeeThrough:
         self.counts = {"frames": 0, "looks": 0, "draws": 0, "hides": 0, "moves": 0, "errors": 0,
                        "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
                        "clicks": 0, "hovers": 0, "keys": 0, "key_registered": 0, "key_released": 0,
-                       "key_failed": 0}
+                       "key_failed": 0, "deletes": 0, "delete_registered": 0, "delete_released": 0,
+                       "delete_failed": 0}
         # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels, the boxes of
         # its plates that take a click) or None, from the Tk thread; what shows of each, (serial, screen origin, size)
         # or None, the window thread's own
@@ -697,14 +737,25 @@ class SeeThrough:
         self._edit_dirty = False  # a press, a move while one is held, its release: the page drawn again
         self._ghost: tuple[int, tuple[st.Box, ...]] | None = None
         self._cursors: dict[int, int] = {}
-        # the Insert key (`set_add_key`): wanted by the Tk thread; the window thread's own: held as the hot key now,
-        # a registration failed (not tried again until the key is let go of), the failure logged (once a session),
-        # its presses for the Tk thread
+        # (the window thread's) the last click on a box: (its page's key, its index, its box, when it was pressed,
+        # where), for a double click (`_edit_press`); the box whose patches give way to the original under the pointer
+        # now, and the one the pointer rests on until its wait is over (box, since when)
+        self._last_click: tuple[int, int, st.Box, float, tuple[int, int]] | None = None
+        self._edit_out: st.Box | None = None
+        self._edit_wait: tuple[st.Box, float] | None = None
+        # the Insert key (`set_add_key`) and the Delete key (`set_delete_key`): wanted by the Tk thread; the window
+        # thread's own: held as the hot key now, a registration failed (not tried again until the key is let go of),
+        # the failure logged (once a session), its presses for the Tk thread
         self._key_wanted = False
         self._key_held = False
         self._key_failed = False
         self._key_logged = False
         self._keys: deque[float] = deque(maxlen=KEYS_KEPT)
+        self._del_wanted = False
+        self._del_held = False
+        self._del_failed = False
+        self._del_logged = False
+        self._deletes: deque[float] = deque(maxlen=KEYS_KEPT)
 
     # ------------------------------------------------------------------ from the Tk thread
     @classmethod
@@ -800,8 +851,9 @@ class SeeThrough:
         unshown`): "key" the set chosen (None: none matched - "sets" the keys of those of the frame's size), "boxes" its
         patches' boxes, "valid" those whose pixels match (`seethrough.patch_matches`), "where" for each other one where
         its compared pixels differ (`seethrough.where_differs`), "covered" those a window over the viewer meets,
-        "drawn" those on show, "hover" the one left out under the pointer, "held" those kept whatever the frame says
-        (the region in the editor, one being pressed), "bare" those of the region whose original is shown, "editing",
+        "drawn" those on show, "hover" the one left out under the pointer (editing: "original", those of the box under
+        the pointer left out), "held" those kept whatever the frame says (the region in the editor, one being
+        pressed), "bare" those of the region whose original is shown, "editing",
         "hidden" (why nothing shows: off, away, no viewer...), "at" (monotonic s), "frame_at" (since when the viewer's
         frame looked at was its newest: a frame at rest so long). Empty before the first look."""
         return self._why
@@ -809,8 +861,9 @@ class SeeThrough:
     def report_facts(self, key: int | None = None, within_s: float = REPORT_FPS_S) -> dict[str, Any]:
         """(the Tk thread, a report: `ui.report`) The window's state as its last look left it, numbers and flags only:
         "on", "away", "editing" (the whole page takes the mouse), "takes_mouse" (the lettering's window takes it now),
-        "key_held" (the Insert key), "sizing", "moving" (the viewer's window moved or sized less than PANE_REST_S ago:
-        the side panes hidden, `_rect_tick`), "dpi", "origin" and "size" of the viewer's client area at the last look,
+        "key_held" (the Insert key), "delete_held" (the Delete key), "sizing", "moving" (the viewer's window moved or
+        sized less than PANE_REST_S ago: the side panes hidden, `_rect_tick`), "dpi", "origin" and "size" of the
+        viewer's client area at the last look,
         "shown" (set serial, patches on show; None: hidden), "covers" (the windows over the viewer met, screen boxes),
         "panes" (side -> screen box on show, or None) with "pane_wanted" (side -> handed a picture), "frames_per_s"
         (the viewer's frames that came in the last *within_s* s), "counts" (`counts`); and for the set of *key* (the
@@ -831,7 +884,8 @@ class SeeThrough:
                 share = float((alpha > 0).mean()) if alpha is not None and alpha.size else 0.0
                 patches.append((tuple(int(v) for v in p.box), round(share, 3)))
         return {"on": bool(self._on), "away": bool(self._away), "editing": bool(self._ground),
-                "takes_mouse": bool(self._edit_takes), "key_held": bool(self._key_held), "sizing": bool(self._sizing),
+                "takes_mouse": bool(self._edit_takes), "key_held": bool(self._key_held),
+                "delete_held": bool(self._del_held), "sizing": bool(self._sizing),
                 "moving": self.moving(), "dpi": int(self._dpi), "origin": tuple(look[5]) if look is not None else None,
                 "size": tuple(look[6]) if look is not None else None,
                 "shown": (int(shown[0]), len(shown[1])) if shown is not None else None,
@@ -934,8 +988,9 @@ class SeeThrough:
             c[0] <= point[0] < c[2] and c[1] <= point[1] < c[3] for c in list(self._covers))
 
     def take_edits(self) -> list[dict[str, Any]]:
-        """The presses on the page since the last call, the oldest first: dicts with "kind" ("click" and "plate" - a
-        click on a box's number plate -: "index", "shift"; "move" and "resize": "boxes", index -> the box it was dragged
+        """The presses on the page since the last call, the oldest first: dicts with "kind" ("click", "double" - the
+        second click of a double click on a box, its first handed as a "click" before it - and "plate" - a click on a
+        box's number plate -: "index", "shift"; "move" and "resize": "boxes", index -> the box it was dragged
         to; "add" - Add area's rectangle - and "draw" - one drawn on the empty ground while editing -: "box", None when the
         drag drew nothing; "ground": a click on the empty ground), "press" (their serial, which `Marks.seen` gives
         back), "marks" (the serial of the marks the press was made on, 0 for none) and "key" (their page)."""
@@ -960,13 +1015,23 @@ class SeeThrough:
 
     def take_keys(self) -> list[float]:
         """The presses of the Insert key since the last call (when each came), the oldest first."""
-        out = []
-        while self._keys:
-            try:
-                out.append(self._keys.popleft())
-            except IndexError:
-                break
-        return out
+        return _taken(self._keys)
+
+    def set_delete_key(self, wanted: bool) -> None:
+        """Whether the Delete key drops the region chosen (the Tk thread's: editing with a region chosen, no editor
+        open, `ui.see_edit.delete_wanted`): the key held while the viewer is in front (`_key_tick`); not *wanted*, it
+        is let go of at the next look, so that the viewer has its own Delete at all other times."""
+        if bool(wanted) != self._del_wanted:
+            self._del_wanted = bool(wanted)
+            self._poke()
+
+    def delete_held(self) -> bool:
+        """Whether the Delete key is TASlation's now (held as the hot key: a region chosen, the viewer in front)."""
+        return self._del_held
+
+    def take_deletes(self) -> list[float]:
+        """The presses of the Delete key since the last call (when each came), the oldest first."""
+        return _taken(self._deletes)
 
     def client_origin(self) -> tuple[int, int] | None:
         """The screen point the viewer's client area (and the lettering's window) began at at the last look; None
@@ -1124,7 +1189,8 @@ class SeeThrough:
                 now - self._covers_at < COVER_S:
             self._right_plates(pointer, panes, held)
             self._edit_held()
-            waiting = self._hover_wait is not None  # (a patch the pointer rests on, to be left out once its wait is over)
+            # (a patch the pointer rests on, to be left out once its wait is over: Reader mode's, editing's)
+            waiting = self._hover_wait is not None or self._edit_wait is not None
             if (moved or waiting or self._edit_dirty) and on and self._last_look is not None:  # only the pointer
                 self._new_frame = False  # moved: the last look, less the patch under it now (no frame compared again)
                 self._show_look(*self._last_look)
@@ -1207,6 +1273,7 @@ class SeeThrough:
             return
         self._marks_live = None
         self._left_out = frozenset()
+        self._edit_rested(None)
         ground = self._edit_takes  # (editing: the whole page takes the mouse though none of its regions is edited)
         if chosen is None or not shown:
             why = "covered" if chosen is not None else ("no match" if any_sets else "no patches")
@@ -1254,44 +1321,62 @@ class SeeThrough:
         self._draw(chosen, shown, origin, size, seq, compare_ms, shares,
                    (st.GROUND, None, None, frozenset(), drawing, (), holes), key)
 
-    # ------------------------------------------------------------------ the Insert key (the window's thread)
+    # ---------------------------------------------------------------- the Insert and Delete keys (the window's thread)
     def _key_tick(self, viewer: int) -> None:
-        """(every look) The Insert key held as the lettering's window's hot key while it is wanted (`set_add_key`) and
-        the viewer *viewer* is the window in front, not minimised (`viewer_in_front`); let go of otherwise (another
-        program or a dialog of TASlation's in front, the viewer minimised or gone, the setting off; *viewer* 0: none).
-        A registration that fails is noted ("key_failed"), logged the first time, and not tried again until the key
-        has been let go of."""
+        """(every look) The Insert key held as the lettering's window's hot key while it is wanted (`set_add_key`),
+        and the Delete key while it is (`set_delete_key`), and the viewer *viewer* is the window in front, not
+        minimised (`viewer_in_front`); each let go of otherwise (another program or a dialog of TASlation's in front,
+        the viewer minimised or gone, the key not wanted; *viewer* 0: none). A registration that fails is noted
+        ("key_failed", "delete_failed"), logged the first time, and not tried again until the key has been let go of."""
         if not IS_WINDOWS or not self.hwnd:
             return
-        wanted = bool(self._key_wanted and viewer and viewer_in_front(viewer))
+        front = bool((self._key_wanted or self._del_wanted) and viewer and viewer_in_front(viewer))
+        self._key_held, self._key_failed = self._hold_key("key", HOTKEY_ID, VK_INSERT, self._key_wanted and front,
+                                                          self._key_held, self._key_failed)
+        self._del_held, self._del_failed = self._hold_key("delete", DELETE_ID, VK_DELETE, self._del_wanted and front,
+                                                          self._del_held, self._del_failed)
+
+    def _hold_key(self, name: str, ident: int, vk: int, wanted: bool, held: bool, failed: bool) -> tuple[bool, bool]:
+        """One hot key of the lettering's window at a look (`_key_tick`): registered when *wanted* and neither *held*
+        nor *failed* to be before, let go of when not *wanted*; whether it is held and whether it failed, after.
+        Counted and noted under *name* ("key": Insert, "delete": Delete)."""
         if not wanted:
-            self._key_failed = False
-            if self._key_held:
-                _user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
-                self._key_held = False
-                self.counts["key_released"] += 1
-                self._note("key_held", on=0)
-            return
-        if self._key_held or self._key_failed:
-            return
-        if _user32.RegisterHotKey(self.hwnd, HOTKEY_ID, MOD_NOREPEAT, VK_INSERT):
-            self._key_held = True
-            self.counts["key_registered"] += 1
-            self._note("key_held", on=1)
-            return
+            if held:
+                _user32.UnregisterHotKey(self.hwnd, ident)
+                self.counts[name + "_released"] += 1
+                self._note(name + "_held", on=0)
+            return False, False
+        if held or failed:
+            return held, failed
+        if _user32.RegisterHotKey(self.hwnd, ident, MOD_NOREPEAT, vk):
+            self.counts[name + "_registered"] += 1
+            self._note(name + "_held", on=1)
+            return True, False
         error = ctypes.get_last_error()
-        self._key_failed = True
-        self.counts["key_failed"] += 1
-        self._note("key_failed", error=int(error))
-        if not self._key_logged:
+        self.counts[name + "_failed"] += 1
+        self._note(name + "_failed", error=int(error))
+        if name == "key" and not self._key_logged:
             self._key_logged = True
             log.info("the Insert key could not be taken for Add area (Windows error %s; another program may hold "
                      "it): Add area in the left pane still works", error)
+        elif name == "delete" and not self._del_logged:
+            self._del_logged = True
+            log.info("the Delete key could not be taken for the region chosen (Windows error %s; another program "
+                     "may hold it): Menu > Page > Drop the chosen regions still works", error)
+        return False, True
 
     def _hot_key(self, ident: int) -> None:
         """(the window thread: ``WM_HOTKEY`` to the lettering's window) Insert pressed while the viewer was in front:
         kept for the Tk thread (`take_keys`), whose Add area it starts or gives up; a rectangle being drawn to add a
-        region is given up there and then."""
+        region is given up there and then. Delete: kept for the Tk thread (`take_deletes`), which drops the region
+        chosen; a box held is let go of there and then (nothing done with it)."""
+        if ident == DELETE_ID:
+            self.counts["deletes"] += 1
+            if self._press is not None:
+                self._edit_cancel("delete")
+            self._deletes.append(time.monotonic())
+            self._note("delete")
+            return
         if ident != HOTKEY_ID:
             return
         self.counts["keys"] += 1
@@ -1359,11 +1444,12 @@ class SeeThrough:
     def _show_edit(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], marks: st.Marks) -> None:
         """A look while editing: the patches the frame has (*shown*), and also those of the region in the editor and of a
-        region being dragged whatever the frame says, less those of the region whose original is shown (*bare*); no
-        patch gives way under the pointer - the box there is outlined instead, with its corner handles -, and the
-        right pane is told of that region (`hovered`). The boxes a window over the viewer meets, those whose patches
-        the frame has none of, and those with no patch whose pixels round them it has not (`_failed_probes`), take
-        nothing."""
+        region being dragged whatever the frame says, less those of the region whose original is shown (*bare*); the
+        box under the pointer is outlined more strongly, the right pane is told of that region (`hovered`), and its
+        patches give way to the original once the pointer has rested on it the hover delay (`_edit_rested`; not while
+        a press is held, nor for the region in the editor, whose patches show its changes). The boxes a window over
+        the viewer meets, those whose patches the frame has none of, and those with no patch whose pixels round them
+        it has not (`_failed_probes`), take nothing."""
         patches = chosen.patches if chosen is not None else ()
         press = self._press if self._press is not None and self._press["marks"] is marks else None
         meets = _meets
@@ -1413,8 +1499,11 @@ class SeeThrough:
             self._ghost = None
         self._hover_wait = None
         self._set_hover(marks.boxes[hover] if hover is not None else None, marks.key)
-        indices = tuple(sorted(keep))
-        self._drew(indices, editing=True, hover=None,
+        out = marks.boxes[hover] if press is None and hover is not None and hover not in held else None
+        out = out if self._edit_rested(out) else None
+        original = tuple(i for i in sorted(keep) if out is not None and meets(patches[i].box, out))
+        indices = tuple(i for i in sorted(keep) if i not in original)
+        self._drew(indices, editing=True, hover=None, original=original,
                    held=tuple(i for i, p in enumerate(patches) if any(meets(p.box, b) for b in held_boxes)),
                    bare=tuple(i for i, p in enumerate(patches) if bare is not None and meets(p.box, bare)),
                    left_out=tuple(sorted(left_out)), region_boxes=marks.boxes)
@@ -1427,6 +1516,26 @@ class SeeThrough:
         if state == self._shown:
             return
         self._draw(chosen, indices, origin, size, seq, compare_ms, shares, edit, key)
+
+    def _edit_rested(self, box: st.Box | None) -> bool:
+        """(editing, `_show_edit`) Whether the patches of *box* - the box under the pointer, None for none - give way
+        to the original now: once the pointer has rested on it the hover delay (`set_hover_delay`, as in Reader mode;
+        the looks go on meanwhile, `_step`), and while it stays on it."""
+        if box is None:
+            self._edit_out = self._edit_wait = None
+            return False
+        if box == self._edit_out:
+            return True
+        if self._hover_delay > 0:
+            now = time.monotonic()
+            if self._edit_wait is None or self._edit_wait[0] != box:
+                self._edit_wait = (box, now)
+            if now - self._edit_wait[1] < self._hover_delay:
+                self._edit_out = None
+                return False
+        self._edit_wait = None
+        self._edit_out = box
+        return True
 
     def _edit_message(self, message: int, wparam: Any, lparam: Any) -> int | None:
         """(the window thread: the lettering's window procedure, `_proc`) What editing answers to *message* while the
@@ -1475,10 +1584,11 @@ class SeeThrough:
     def _edit_press(self, point: tuple[int, int], shift: bool) -> None:
         """A press on the page while editing: on a box (or its number plate) it takes hold of it - a corner to resize it,
         the plate to type its place (or move the box), else the box to move it, or a click (`Marks.locked`: a click
-        only) -; with a region to add, it begins the rectangle; on the empty ground - or on a page with no marks of
-        its own - it begins a rectangle drawn to add a region ("draw"; a click only while presses only click). The
-        capture is the window's until it is let go: the next moves are the window's whatever the pointer passes
-        over."""
+        only; the second press of a double click, "double", without Shift: on the box the last click was on, within
+        the system's double-click time and reach of it, `double_click`) -; with a region to add, it begins the
+        rectangle; on the empty ground - or on a page with no marks of its own - it begins a rectangle drawn to add a
+        region ("draw"; a click only while presses only click). The capture is the window's until it is let go: the
+        next moves are the window's whatever the pointer passes over."""
         marks = self._marks_live
         if self._edit_size() is None or (marks is None and not self._edit_takes):
             return
@@ -1492,12 +1602,26 @@ class SeeThrough:
                          "marks": marks, "key": marks.key if marks is not None else int(self._look_key or 0)}
             else:
                 press = {"index": grip[0], "grip": "move" if marks.locked else grip[1], "start": point,
-                         "now": point, "shift": shift, "moved": False, "marks": marks}
+                         "now": point, "shift": shift, "moved": False, "marks": marks, "t": time.monotonic()}
+                press["double"] = not shift and grip[1] != st.PLATE and self._double(marks, grip[0], point,
+                                                                                     press["t"])
         self._press = press
         if IS_WINDOWS:
             _user32.SetCapture(self.hwnd)
         self._note("press", x=point[0], y=point[1], adding=int(bool(press.get("adding"))))
         self._edit_redraw()
+
+    def _double(self, marks: st.Marks, index: int, point: tuple[int, int], now: float) -> bool:
+        """Whether a press at *point* on the box *index* of *marks* is the second of a double click: the last click
+        (`_last_click`) was on the same box of the same page, pressed no longer than the system's double-click time
+        before, and no farther away than its reach (`double_click`)."""
+        last = self._last_click
+        if last is None or not 0 <= index < len(marks.boxes):
+            return False
+        key, at, box, when, where = last
+        seconds, across, down = double_click()
+        return (key == marks.key and at == index and tuple(box) == tuple(marks.boxes[index])
+                and now - when <= seconds and abs(point[0] - where[0]) <= across and abs(point[1] - where[1]) <= down)
 
     def _edit_move(self, point: tuple[int, int]) -> None:
         press = self._press
@@ -1511,10 +1635,11 @@ class SeeThrough:
         self._edit_dirty = True
 
     def _edit_release(self, point: tuple[int, int]) -> None:
-        """The press let go: what it did kept for the Tk thread (`take_edits`) - a click (on a number plate: "plate"),
-        a box moved or resized (the others chosen with it), a rectangle drawn (Add area's, or none: a press without a
-        drag gives adding up; one on the empty ground, "draw"), a click on the empty ground -, the boxes it changed
-        outlined at their new places until the Tk thread's marks have seen it (`Marks.seen`)."""
+        """The press let go: what it did kept for the Tk thread (`take_edits`) - a click (on a number plate: "plate";
+        the second of a double click: "double"), a box moved or resized (the others chosen with it), a rectangle drawn
+        (Add area's, or none: a press without a drag gives adding up; one on the empty ground, "draw"), a click on the
+        empty ground -, the boxes it changed outlined at their new places until the Tk thread's marks have seen it
+        (`Marks.seen`). A click on a box is remembered for a double click (`_double`); anything else forgets it."""
         press, self._press = self._press, None
         if IS_WINDOWS:
             _user32.ReleaseCapture()
@@ -1524,6 +1649,7 @@ class SeeThrough:
         press["now"] = point
         self._edit_move(point)
         marks = press["marks"]
+        self._last_click = None
         self._edit_serial += 1
         event: dict[str, Any] = {"press": self._edit_serial, "marks": marks.serial if marks is not None else 0,
                                  "key": marks.key if marks is not None else press.get("key", 0)}
@@ -1545,8 +1671,11 @@ class SeeThrough:
                          index=press["index"])
             ghosts = tuple(changed.values())
         else:
-            event.update(kind="plate" if press["grip"] == st.PLATE else "click", index=press["index"],
-                         shift=bool(press.get("shift")))
+            kind = "plate" if press["grip"] == st.PLATE else "double" if press.get("double") else "click"
+            event.update(kind=kind, index=press["index"], shift=bool(press.get("shift")))
+            if kind == "click" and not press.get("shift") and 0 <= press["index"] < len(marks.boxes):
+                self._last_click = (marks.key, press["index"], marks.boxes[press["index"]], press["t"],
+                                    press["start"])
         self._edits.append(event)
         if ghosts:
             self._ghost = (self._edit_serial, ghosts)
@@ -1554,7 +1683,9 @@ class SeeThrough:
         self._edit_redraw()
 
     def _edit_cancel(self, why: str) -> None:
-        """A press held given up (a right click, the capture gone, Reader mode, the viewer gone): nothing is done."""
+        """A press held given up (a right click, the capture gone, Reader mode, the viewer gone, the Delete key):
+        nothing is done."""
+        self._last_click = None
         if self._press is None:
             return
         self._press = None
@@ -1588,9 +1719,10 @@ class SeeThrough:
             self._show_look(*self._last_look)
 
     def _set_cursor(self) -> None:
-        """The cursor over the window while editing: a hand on a box (a click edits it, a drag moves it), the text cursor on
-        its number plate (a click types its place), the move cursor while one is dragged, a corner's resize cursor, a
-        cross while a region is to be added or a rectangle is drawn on the ground; the arrow on the ground."""
+        """The cursor over the window while editing: a hand on a box (a click chooses it, a double click edits it, a
+        drag moves it), the text cursor on its number plate (a click types its place), the move cursor while one is
+        dragged, a corner's resize cursor, a cross while a region is to be added or a rectangle is drawn on the ground;
+        the arrow on the ground."""
         press, marks = self._press, self._marks_live
         name: str | None = None
         if press is not None:

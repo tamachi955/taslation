@@ -37,7 +37,7 @@ There is no account to make and no limit on the pages it translates. Nothing of 
 
 The lettering lies in a window of its own over the viewer's. In Reader mode it takes no click and no key: every click and key goes to the viewer, as without TASlation,
 Insert alone excepted, which adds a text area while the viewer is in front. While editing (as TASlation starts), the mouse over the viewer's window is TASlation's and the keys
-stay the viewer's: turn the pages with the keys (see "Editing: correcting the page"). Each piece of the lettering belongs to the pixels
+stay the viewer's (Delete excepted while a region is selected: it drops it): turn the pages with the keys (see "Editing: correcting the page"). Each piece of the lettering belongs to the pixels
 it was made from, and shows only while the viewer shows those very pixels there: when you turn the page, the old lettering goes at the first picture of the new page,
 and where the viewer draws something over the page (a bar, a menu, a panel) or another window lies over it, the lettering there is left out.
 A page whose translations are all in the cache is lettered as soon as the viewer shows it.
@@ -107,7 +107,7 @@ A dialog that comes by itself while you read (a warning, a question after a chan
 
 Rest the pointer on a bubble, and after a moment (`hover_delay_ms`, 450 milliseconds by default; "Delay under the pointer" in "Settings...", 0 to 3000, 0 at once)
 its lettering gives way to the original lettering in its place. The lettering comes back once the pointer leaves the bubble.
-The pointer is only read: the viewer keeps the keyboard, and in Reader mode a click there goes to the viewer as ever (while editing, the bubble's box is outlined instead, and a click opens the region editor).
+The pointer is only read: the viewer keeps the keyboard, and in Reader mode a click there goes to the viewer as ever (while editing, the bubble's box gets a stronger outline and its lettering gives way to the original in the same way; a click selects it, a double click opens the region editor).
 
 With "Indicators" on, the right pane shows that bubble at its top: "Copy the Japanese", "Copy the translation" and "Ask again", then its Japanese and its translation
 (up to five lines each). It stays after the pointer has left the bubble, so that the pointer can go to the pane, until another bubble is under the pointer or the viewer shows another page.
@@ -296,7 +296,7 @@ a moment after its name is, the lettering takes no clicks and shows no boxes. Wh
 is outlined over the viewer in its colour, with its number in the reading order on a small plate of that colour (green: translated, orange: not translated, blue: a region you marked yourself,
 red: translated but flagged for review). The right pane's foot says "Editing: turn pages with the keys" or "Reader mode".
 
-* **The viewer takes the keys only**: while editing, the mouse over the viewer's window is TASlation's, and the keys stay the viewer's (Insert alone excepted: "Adding a text area", below).
+* **The viewer takes the keys only**: while editing, the mouse over the viewer's window is TASlation's, and the keys stay the viewer's (Insert excepted, "Adding a text area", and Delete while a region is selected, "The mouse on the boxes", below).
   Turn the pages with the keys; to use the mouse in the viewer (its buttons, its page slider, the wheel), check "Reader mode". The wheel reaches nothing while editing,
   and the viewer's bars do not come up under the pointer (bars already up go when the viewer hides them by itself). While a dialog of TASlation's (the region editor among them) is open, the keys are the dialog's.
 * **Adding a text area** works while editing and in Reader mode: press "Add area" in the left pane (it shows pressed), or Insert while the viewer is in front,
@@ -304,15 +304,19 @@ red: translated but flagged for review). The right pane's foot says "Editing: tu
   reading as before. Until the rectangle is drawn, the whole page takes the mouse; a click without a drag, a right click, Insert again or "Add area" again gives it up.
   A text area can be added once the page on show is translated, with "Lettering" on and the book named (the status line says what is missing).
   While editing, a rectangle dragged on the page's empty ground adds a text area in the same way, and "Add a text area" in the Menu's "Page" does the same as "Add area".
-  Insert is the only key TASlation takes, and only while the viewer is the window in front: not while another program or a dialog of TASlation's is, nor while the viewer
+  TASlation takes Insert only while the viewer is the window in front: not while another program or a dialog of TASlation's is, nor while the viewer
   is minimised. Only Insert alone is taken (Shift+Insert and Ctrl+Insert stay the viewer's). "Insert adds a text area" in "Settings..." (`add_area_key`) turns it off,
-  and TASlation then takes no key at all. Where another program holds Insert already, the key does nothing and "Add area" still works (the log says so once).
+  and Insert then stays the viewer's. Where another program holds Insert already, the key does nothing and "Add area" still works (the log says so once).
+  The only other key TASlation takes is Delete, in the same way and only while a region is selected ("The mouse on the boxes", below).
 
-* **The mouse on the boxes**: a click on a box opens the region editor beside it. Like shapes in office software, a region is moved by dragging and resized with its corner handles,
-  and it is read again only when the new frame covers a larger area (a right click during a drag gives the drag up). Shift+click adds a box to the chosen regions,
-  or takes it out; dragging one of the chosen regions moves them all together (the whole group stops when one of them reaches the edge of the page). The box under the pointer
-  gets a stronger outline with its corner handles instead of giving way to the original, and the right pane shows its words. A click on the empty ground does nothing,
-  but drops a choice of several regions.
+* **The mouse on the boxes**: a click on a box selects it: it gets a stronger outline with its corner handles. A double click opens the region editor beside it.
+  Like shapes in office software, a region is moved by dragging and resized with its corner handles (a corner of any box resizes it),
+  and it is read again only when the new frame covers a larger area (a right click during a drag gives the drag up). Shift+click adds a box to the selected regions,
+  or takes it out; dragging one of the selected regions moves them all together (the whole group stops when one of them reaches the edge of the page).
+  Delete drops the selected regions ("Undo" brings them back). TASlation takes Delete only while a region is selected and the viewer is the window in front,
+  and lets it go as soon as nothing is selected: at all other times Delete is the viewer's (with the region editor open, the editor's).
+  The box under the pointer gets a stronger outline and the right pane shows its words; after the same delay as in Reader mode its lettering gives way to the original
+  (not while you drag it, nor for the region open in the editor). A click on the empty ground clears the selection.
 * **The number plates**: a click on a box's number opens a small field over it to type the region's place in the reading order (1 to the number of regions on show).
   Enter takes it: the regions are numbered anew, and the lines whose earlier lines changed (from the first place that changed on) are translated again, your own corrections kept;
   "Undo" takes the new order and those translations back in one step. Esc, or a click anywhere else, gives it up. A drag from the number moves the box.
@@ -800,12 +804,13 @@ The translation itself is never shortened or asked again to fit. The rows (`fit_
 It is taken only where the lettering across is under the review size (`readable_font_size`), at the smallest size, or has a hyphen, and turned it comes out at least 1.25 times as large and 2 pixels larger, with no more hyphens. Japanese and Chinese are never turned (they are set in columns).
 "Narrower letters (down to 92 %)" (`condense`): where the lettering would be under 14 pixels, the letters may be set up to 8 % narrower.
 "Hyphens (at most one in a word)" (`hyphenate`): there too, a long word may take a hyphen at one of its hyphenation points, once at most, leaving three letters or more on each line; the hyphens are tried before the narrower letters where this row comes first.
-Off, no word takes a hyphen, except one too wide for its bubble even at the smallest size, which is still split, at one of its hyphenation points where one fits (so too a word too long for two lines with the row on: a German compound breaks at its syllables).
+On, a word too wide for its bubble even at the smallest size is split as a last resort, at one of its hyphenation points where one fits (so too a word too long for two lines: a German compound breaks at its syllables).
+Off, no word takes a hyphen at all: such a word is set whole at the smallest size and runs past its room, and the review list says "letters touch the bubble's edge" for it.
 "Run over the bubble's outline" (`overrun`, off by default): where the lettering would still be small and this sets it larger by the same margin as for the turned line, the bubble's room is grown by 6 pixels (at the page's scale) over its outline, and the letters get an outline in the paper's colour (it shows where they cross the bubble's line).
-A row unticked is not tried; with none ticked, the lettering is set at the size that fits with whole words (a word too wide even at the smallest size is still split). The report of a region ("Copy a report of this region") says "turned" or "over the outline" when the lettering took one of these rooms.
+A row unticked is not tried; with none ticked, the lettering is set at the size that fits with whole words (a word too wide even at the smallest size stays whole and runs past its room). The report of a region ("Copy a report of this region") says "turned" or "over the outline" when the lettering took one of these rooms.
 Under "Dialogs" it has the size of the dialogs' text, the dialogs' colours (light, dark, or as Windows is set), reusing the translation of a short line seen before,
 "Indicators at the right of the viewer" (`see_through_indicators`, the same as "Indicators" in the left pane), "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default; a number out of these bounds is not saved),
-"Insert adds a text area" (`add_area_key`, on by default; off, TASlation takes no key at all) and "Start in Reader mode" (`role = "reader"`, off by default; from the next start, for a book you have not switched "Reader mode" for).
+"Insert adds a text area" (`add_area_key`, on by default; off, Insert stays the viewer's) and "Start in Reader mode" (`role = "reader"`, off by default; from the next start, for a book you have not switched "Reader mode" for).
 Last come the optional page models (the layout model and the inpainting).
 "Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
 that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
@@ -843,7 +848,7 @@ Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation 
 Settings changed in the file take effect from the next start.
 
 TASlation has no keys of its own to set: every key goes to the viewer, except Insert, which adds a text area while the viewer is in front
-("Insert adds a text area" turns it off; "Editing: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
+("Insert adds a text area" turns it off), and Delete, which drops the selected regions while editing ("Editing: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
 Ctrl+Shift+C and Ctrl+Shift+V. Keys an earlier version saved for these in `shortcuts.json` in the state folder still apply, but there is no page to change them any more.
 
 The "System" page of "Settings" shows, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU") and how many seconds a page took.
@@ -907,7 +912,7 @@ reuse_lines = true           # a short line translated before in the book or its
 see_through_indicators = true  # the right pane: the bubble under the pointer, how far the page is, the status line
 hover_delay_ms = 450         # the wait before a bubble under the pointer gives way to the original (0-3000; 0: at once)
 role = "translator"          # at the start: "translator" (editing) or "reader" (Reader mode); a book keeps its own choice ("Start in Reader mode")
-add_area_key = true          # Insert adds a text area while the viewer is in front (the one key TASlation takes); false: no key at all
+add_area_key = true          # Insert adds a text area while the viewer is in front (taken only then); false: Insert stays the viewer's
 update_check = "off"         # "daily": at the start, look for a new version at most once a day (check_update.py asks GitHub); "off": only Menu > Help > Check for updates...
 ```
 
@@ -1052,7 +1057,7 @@ It is plain text between two lines of three backquotes, in sections with English
 - the regions: each one's number (as its plate shows it and as the region editor counts it), state, kind, box in the frame and on the page and its distance to the page's edges, how many characters were read and how sure the readers were, the translation's length and flags, the lettering's size and what it could not do, how it was erased and how many dark pixels of the original the erase left inside it (`dark_kept`), its pieces on the lettering's window and whether its lettering shows now and, when it does not, why (`differs:top`, for example: the pixels round it at the top changed since the page was read);
 - the page: its key as the log names it, its size, single page or spread, from the cache or read now, the regions by state, how many of those lettered show, the times of the page jobs (started, first request, first line lettered, finished or cancelled and why) and the translator's requests;
 - the screen: the monitors, the viewer's window (a browser or an app, never its name), its place, DPI and state, whether it is in front and what covers it, the capture, the frames per second and what the frames were lately, the capture area, the page box at rest, the band where bars never come and the bars;
-- the side panes and the lettering's window: where each shows, or why it is hidden, whether the lettering takes the mouse, the Insert key, the last changes of the window in front;
+- the side panes and the lettering's window: where each shows, or why it is hidden, whether the lettering takes the mouse, the Insert and Delete keys, the last changes of the window in front;
 - the program: its version and commit, Python, Windows, torch and the GPU with its memory free, the languages, the mode, the models and where each runs, the translation program, the offline guard, the settings changed and the last error;
 - the log: the kinds of warnings and errors of this session and how many, without their values.
 

@@ -297,7 +297,8 @@ class Settings:
     # viewer's); a book's own choice, kept as it is switched, comes first (the Settings dialog's "Start in Reader mode")
     role: str = "translator"
     # the Insert key adds a text area, as the left pane's Add area does (`ui.see_edit`): held only while the viewer
-    # is the window in front, the one key TASlation takes (`capture.seethrough.SeeThrough.set_add_key`); off, none
+    # is the window in front (`capture.seethrough.SeeThrough.set_add_key`); off, the viewer's (Delete, the only other
+    # key TASlation takes, is held while a region is selected in editing whatever this says: `set_delete_key`)
     add_area_key: bool = True
     ui_language: str = ""  # language of the window (a code from i18n.UI_LANGUAGES); empty = the first-start choice
     # the size of the text of TASlation's dialogs, times what Windows sets for the monitor (1.0 = as Windows has it;

@@ -82,9 +82,12 @@ def test_damn_it_in_a_narrow_bubble_is_condensed_or_set_whole_never_split():
     assert any(fit.condense < 1.0 for fit in fits)  # where a little narrower is enough, it is set narrower
     laid = shape_layout(_ellipse_mask(24, 90), "Damn it", fp, 9, 9)  # along the shape too
     assert laid is not None and [ln for ln, _x, _y in laid[1]] == ["Damn", "it"]
-    long_word = layout_text(_ellipse_mask(30, 200), "Extraordinarily", fp, 9, 64, hyphenate=False, condense=False)
+    long_word = layout_text(_ellipse_mask(30, 200), "Extraordinarily", fp, 9, 64, condense=False)
     assert long_word.size == 9 and all(ln.endswith("-") for ln, _x, _y in long_word.lines[:-1])
-    assert len(long_word.lines) > 1  # a long word may still be split
+    assert len(long_word.lines) > 1  # a long word may still be split, as the last resort
+    whole = layout_text(_ellipse_mask(30, 200), "Extraordinarily", fp, 9, 64, hyphenate=False, condense=False)
+    assert whole.size == 9 and [ln for ln, _x, _y in whole.lines] == ["Extraordinarily"]  # the hyphens off: whole
+    assert whole.whole == 1 and whole.split == 0
 
 
 def test_erase_and_draw_change_only_the_bubble():

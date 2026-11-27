@@ -80,7 +80,7 @@ early_start = true            # a new page is read from its first frame; it asks
 
 # --- app ---
 role = "translator"           # the mode at the start: "translator" (editing: the page's regions take the mouse, the viewer the keys only) | "reader" (Reader mode: every click goes to the viewer); a book's own choice comes first (Settings...: "Start in Reader mode")
-add_area_key = true           # the Insert key adds a text area, as Add area in the controls at the left does, only while the viewer is in front (the one key TASlation takes); false: no key at all (also Settings...)
+add_area_key = true           # the Insert key adds a text area, as Add area in the controls at the left does, only while the viewer is in front; false: Insert stays the viewer's (also Settings...). Delete, the only other key TASlation takes, is held only while a region is selected in editing
 ui_language = ""              # language of the controls and dialogs: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
 ui_scale = 1.0                # size of the dialogs' text, times what Windows sets for the monitor (0.5-3.0; also Settings...)
 theme = "system"              # the dialogs' and menus' colours: "system" (as Windows' app mode), "light" or "dark"; Windows' high contrast comes first (also Settings...)

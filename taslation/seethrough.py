@@ -322,8 +322,8 @@ EDIT_ALPHA = 1  # the page while editing, where no lettering is: next to nothing
 GRIP_PX = 7  # a press this near a corner of a region's box resizes it (px at 96 DPI)
 DRAG_PX = 4  # the pointer moved farther than this with the button down: a drag, not a click (px at 96 DPI)
 LINE_PX = 2  # the outline round a region's box, in its colour (px at 96 DPI)
-HOVER_LINE_PX = 3  # the stronger outline round the box under the pointer (px at 96 DPI)
-HANDLE_PX = 7  # the squares at the corners of the box under the pointer (px at 96 DPI)
+HOVER_LINE_PX = 3  # the stronger outline round the box under the pointer and the one chosen (px at 96 DPI)
+HANDLE_PX = 7  # the squares at the corners of the box chosen (px at 96 DPI)
 MIN_BOX = 8  # a region's shortest side after a resize, and the least a rectangle drawn to add one (`area.MIN_REGION`)
 OUTLINE = (0, 212, 255)  # (BGR) the box under the pointer, the one in the editor and those selected (the window's
 # FRAME_COLOUR, #ffd400)
@@ -338,8 +338,9 @@ class Marks:
     """the editing marks on one page, from the Tk thread (`capture.seethrough.SeeThrough.set_edit`): *key* the page's
     frame (its patches' set), *boxes* the regions a press takes hold of, in their reading order (frame pixels), each
     one's number plate (*plates*: premultiplied BGRA and its top left, or None) and the colour it is outlined in all
-    the time (*colours*: BGR, the plate's; none given: outlined only as below), the regions *chosen* (outlined; a
-    drag of one of them moves them all), the one in the editor (*held*: outlined, its patches shown whatever the frame
+    the time (*colours*: BGR, the plate's; none given: outlined only as below), the regions *chosen* (outlined, one
+    alone with its corner handles; a drag of one of them moves them all; the Delete key drops them), the one in the
+    editor (*held*: outlined, its patches shown whatever the frame
     says) and the one whose original is shown (*bare*: its patches left out), whether presses only click (*locked*:
     an editor open, a change being stored, the reading order being clicked), whether the next drag draws a region to
     add (*adding*: in Reader mode too; the whole page takes the mouse meanwhile, as it does while editing), the boxes a
@@ -477,9 +478,10 @@ def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[i
     page are the window's: the viewer gets the keys alone); every region's box outlined in its colour
     (`Marks.colours`), with its number plate; the one in the editor, those chosen, the boxes of a drag where it has
     them now (*moved*, by index) and the ghosts outlined in OUTLINE, the box under the pointer (*hover*) in OUTLINE's
-    stronger line with its corner handles (none while presses only click); the rectangle being drawn (*drawing*).
-    The boxes of *left_out* (covered, or not over their page now) get nothing, and the *holes* (the windows over the
-    viewer, frame pixels) are left at alpha 0: a press there is that window's."""
+    stronger line, and so the one chosen alone, with its corner handles as well (a click chose it: a drag moves it, a
+    drag on a corner sizes it; none while presses only click); the rectangle being drawn (*drawing*). The boxes of
+    *left_out* (covered, or not over their page now) get nothing, and the *holes* (the windows over the viewer, frame
+    pixels) are left at alpha 0: a press there is that window's."""
     height, width = out.shape[:2]
     alpha = out[..., 3]
     alpha[alpha == 0] = EDIT_ALPHA
@@ -496,10 +498,13 @@ def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[i
             _frame(out, box, OUTLINE, line)
     for box in marks.ghosts:
         _frame(out, box, OUTLINE, line)
-    if hover is not None and 0 <= hover < len(marks.boxes) and hover not in left_out:
-        left, top, right, bottom = (moved or {}).get(hover, marks.boxes[hover])
+    alone = marks.chosen[0] if len(marks.chosen) == 1 else None
+    for i in dict.fromkeys((hover, alone)):
+        if i is None or not 0 <= i < len(marks.boxes) or i in left_out:
+            continue
+        left, top, right, bottom = (moved or {}).get(i, marks.boxes[i])
         _frame(out, (left, top, right, bottom), OUTLINE, scaled(HOVER_LINE_PX, dpi))
-        if not marks.locked:
+        if i == alone and not marks.locked:
             side = scaled(HANDLE_PX, dpi)
             for corner in ((left, top), (right - 1, top), (right - 1, bottom - 1), (left, bottom - 1)):
                 _square(out, corner, side, OUTLINE)

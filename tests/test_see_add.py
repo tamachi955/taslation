@@ -143,6 +143,72 @@ def test_the_key_or_a_right_click_while_a_rectangle_is_drawn_gives_the_adding_up
     assert see.take_edits() == []
 
 
+def test_the_delete_key_is_held_only_while_a_region_is_chosen_and_the_viewer_in_front_apart_from_insert(keyed):
+    see = keyed.see
+    assert window.VK_DELETE == 0x2E and window.DELETE_ID != window.HOTKEY_ID
+    see.set_delete_key(True)  # (the Tk thread: editing, a region chosen)
+    see._key_tick(VIEWER)
+    assert keyed.calls == [("register", 9, window.DELETE_ID, window.MOD_NOREPEAT, window.VK_DELETE)]
+    assert see.delete_held() and not see.key_held() and see.counts["delete_registered"] == 1  # (Insert not wanted)
+    see.set_add_key(True)
+    see._key_tick(VIEWER)
+    assert keyed.calls[-1] == ("register", 9, window.HOTKEY_ID, window.MOD_NOREPEAT, window.VK_INSERT)
+    assert len(keyed.calls) == 2 and see.delete_held() and see.key_held()  # (each its own, Delete not again)
+    see.set_delete_key(False)  # (the choice dropped: let go of at the next look, Insert kept)
+    see._key_tick(VIEWER)
+    assert keyed.calls[-1] == ("unregister", 9, window.DELETE_ID) and not see.delete_held() and see.key_held()
+    see.set_delete_key(True)
+    see._key_tick(VIEWER)
+    keyed.front = False  # (another program in front: both let go of)
+    see._key_tick(VIEWER)
+    assert keyed.calls[-2:] == [("unregister", 9, window.HOTKEY_ID), ("unregister", 9, window.DELETE_ID)]
+    assert not see.delete_held() and see.counts["delete_released"] == 2
+    assert [n["on"] for n in see.notes if n["ev"] == "delete_held"] == [1, 0, 1, 0]
+    assert see.report_facts()["delete_held"] is False
+
+
+def test_a_delete_key_held_by_another_program_is_logged_once_and_insert_still_taken(keyed, caplog):
+    see = keyed.see
+    keyed.takes = False
+    see.set_delete_key(True)
+    with caplog.at_level(logging.INFO, logger=window.__name__):
+        see._key_tick(VIEWER)
+        see._key_tick(VIEWER)
+        assert not see.delete_held() and see.counts["delete_failed"] == 1 and len(keyed.calls) == 1
+        keyed.front = False
+        see._key_tick(VIEWER)
+        keyed.front = True
+        see._key_tick(VIEWER)
+        assert see.counts["delete_failed"] == 2
+    lines = [r for r in caplog.records if "Delete key could not be taken" in r.getMessage()]
+    assert len(lines) == 1 and "1409" in lines[0].getMessage() and "Drop the chosen regions" in lines[0].getMessage()
+    assert not any("Insert key" in r.getMessage() for r in caplog.records)
+    keyed.takes = True
+    see.set_add_key(True)
+    see._key_tick(VIEWER)
+    assert see.key_held() and not see.delete_held()  # (Delete not tried again until let go of; Insert its own)
+
+
+def test_a_press_of_delete_is_handed_to_the_tk_thread_and_gives_a_box_held_up(keyed):
+    see = keyed.see
+    window._key_hooks[see.hwnd] = see._hot_key
+    try:
+        assert window._proc(see.hwnd, window.WM_HOTKEY, window.DELETE_ID, 0) == 0
+    finally:
+        window._key_hooks.pop(see.hwnd, None)
+    assert len(see.take_deletes()) == 1 and see.counts["deletes"] == 1 and see.take_deletes() == []
+    assert see.take_keys() == []  # (not Insert's)
+    marks = st.Marks(key=5, boxes=((10, 10, 60, 60),), serial=1)
+    see._marks_live = marks
+    see._last_look = (None, (), [], 1, 0.0, (0, 0), SIZE, True)
+    see._edit_redraw = lambda: None
+    see._edit_takes = True
+    see._press = {"index": 0, "grip": "move", "start": (20, 20), "now": (40, 40), "moved": True, "marks": marks}
+    see._last_click = (5, 0, (10, 10, 60, 60), 0.0, (20, 20))
+    see._hot_key(window.DELETE_ID)  # (while a box is dragged: given up, nothing moved)
+    assert see._press is None and see._last_click is None and see.take_edits() == [] and len(see.take_deletes()) == 1
+
+
 def test_viewer_in_front_is_the_viewer_or_a_window_of_its_own_and_not_minimised(monkeypatch):
     from taslation.capture import windows
 

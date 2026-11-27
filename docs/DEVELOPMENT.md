@@ -415,8 +415,11 @@ rows' languages.
   messages POSTED to TASlation's own windows, no input of the system's, its look at the physical button left out for
   them): on a region of the page on show, whether the window takes the mouse, which window `WindowFromPoint` gives
   on the box, beside every box and at the client area's bottom corner (the see-through window each time) and just
-  above the client area (the stand-in's frame), the pointer on it (its patches stay, outlined; the right pane holds the bubble's
-  block), a click (the ms until the region editor is on the screen, beside the box or over it, on the box's monitor,
+  above the client area (the stand-in's frame), the pointer on it (outlined; after the hover delay its patches give
+  way to the original, the others stay; the right pane holds the bubble's block), a click (`select`: the ms until the
+  region is chosen, in the window and in the marks, and no editor comes), a double click - two clicks posted at once,
+  past the system's double-click time after the first - (the ms until the region editor is on the screen, beside the
+  box or over it, on the box's monitor,
   whether it took the keys and holds that region; a WM_CLOSE posted to it, and the ms until the stand-in is in front
   again), a drag of the box by 24 x 12 px (handed over as a move, outlined at its new place meanwhile, the ms until
   the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize);
@@ -424,8 +427,10 @@ rows' languages.
   place entry shows and has the keys), "1" and Enter posted to the entry's own window (the ms until it is gone and the
   stand-in is in front again, the job and its end; whether the region is first now, the others in their order, the
   history's newest change an "order", the marks with its box first), a click on the empty ground (a "ground": no
-  editor, no change) and a rectangle drawn there (a "draw": a region of the reader's at the rectangle, and the others
-  still in the order typed). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
+  editor, no change, nothing chosen after it) and a rectangle drawn there (a "draw": a region of the reader's at the
+  rectangle, and the others still in the order typed); last, that region chosen by a click and the Delete key's
+  WM_HOTKEY POSTED to the lettering's own window (`delete`: the ms until the key is TASlation's, until the region is
+  dropped, the change in the history, and until the key is let go of after). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
   presses, clicks - none expected, the whole client area being the overlay's - and its turns). In every run the
   right pane's foot rows are looked at once a second (`panes.foot`: their tops in the client area, one per frame
   size, `constant`). `--editing` keeps the role as editing as `--see-edit` does, but does nothing on the page (the

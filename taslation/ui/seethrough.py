@@ -6,9 +6,10 @@ where no window lies over it - and the viewer the keys alone.
 
 * `start` makes the see-through window at the window's start (Windows; and asks the capture for frames up to every
   `wgc.FAST_UPDATE_MS`); where it cannot be made the program says so and ends (`could_not_start`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
-  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode's one key is
+  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode's keys are
   Insert, held only while the viewer is in front and only while ``Settings.add_area_key`` is on (`tick`:
-  `SeeThrough.set_add_key`; Add area, `see_edit`): every other key goes to the viewer, and the lettering is hidden
+  `SeeThrough.set_add_key`; Add area, `see_edit`), and Delete, held only while a region is selected in editing
+  (`see_edit.tick`: `SeeThrough.set_delete_key`): every other key goes to the viewer, and the lettering is hidden
   and shown again with the left pane's switch.
 * The patches are where the lettered page differs from the frame it was read from - the page filling in (drafts,
   then the final page) and the last translated page -, made by a thread of their own once per change of the page

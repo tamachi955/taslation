@@ -6193,10 +6193,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "program's, into shots/ (it shows a sample page: delete it after)")
     ap.add_argument("--see-edit", action="store_true",
                     help="the book's role kept as editing (the program's default; without it a run sets Reader mode), "
-                         "so that the left pane's Reader mode is off from the start; a click and drags on a region, "
-                         "a click on its number plate with its place typed, and a rectangle drawn on the empty "
-                         "ground, posted to TASlation's own windows, are measured in place of the patch under the "
-                         "pointer (run.see_through.edit)")
+                         "so that the left pane's Reader mode is off from the start; a click (it chooses), a double "
+                         "click (the editor) and drags on a region, a click on its number plate with its place typed, "
+                         "a rectangle drawn on the empty ground and the Delete key on it, posted to TASlation's own "
+                         "windows, are measured in place of the patch under the pointer (run.see_through.edit)")
     ap.add_argument("--editing", action="store_true",
                     help="the book's role kept as editing, as --see-edit keeps it, but nothing is done on the page: the "
                          "patch under the pointer measured as in Reader mode (timing runs of editing against Reader "

@@ -69,10 +69,17 @@ def test_the_whole_page_takes_the_mouse_every_box_is_outlined_and_the_one_under_
     hover = st.scaled(st.HOVER_LINE_PX, 96)
     assert hover > line and tuple(out[130, 100 + hover - 1]) == (*st.OUTLINE, 255)
     assert tuple(out[130, 100 + hover]) != (*st.OUTLINE, 255)
-    assert out[100, 100, 3] == 255 and tuple(out[103, 103]) != (0, 0, 0, 0)  # (a corner handle)
+    assert tuple(out[103, 103]) == (0, 0, 0, st.EDIT_ALPHA)  # (the box under the pointer: no corner handles)
     assert tuple(out[130, 300]) == (*colours[1], 255)  # (the other: its own outline)
     out = np.zeros((300, 500, 4), np.uint8)
-    st.edit_compose(out, st.Marks(key=1, boxes=(A, B), colours=colours, locked=True), 0, None, 96)
+    st.edit_compose(out, st.Marks(key=1, boxes=(A, B), colours=colours, chosen=(0,)), None, None, 96)
+    assert tuple(out[130, 100 + hover - 1]) == (*st.OUTLINE, 255)  # (the one chosen alone: the stronger outline,)
+    assert tuple(out[103, 103]) == (32, 32, 32, 255) and tuple(out[98, 98]) == (*st.OUTLINE, 255)  # (its handles)
+    out = np.zeros((300, 500, 4), np.uint8)
+    st.edit_compose(out, st.Marks(key=1, boxes=(A, B), colours=colours, chosen=(0, 1)), 0, None, 96)
+    assert tuple(out[103, 103]) == (0, 0, 0, st.EDIT_ALPHA)  # (several chosen: a drag moves them all, no handles)
+    out = np.zeros((300, 500, 4), np.uint8)
+    st.edit_compose(out, st.Marks(key=1, boxes=(A, B), colours=colours, chosen=(0,), locked=True), 0, None, 96)
     assert out[103, 103, 3] == st.EDIT_ALPHA  # (an editor open: outlined, no handles - a press only clicks)
     out = np.zeros((300, 500, 4), np.uint8)
     st.edit_compose(out, marks, None, None, 96, left_out=frozenset({1}))
@@ -261,16 +268,40 @@ def test_a_press_of_the_windows_own_is_no_press_on_the_viewer(over, monkeypatch)
     assert over.pressing()  # (one held: the window's wherever the pointer is)
 
 
-def test_a_look_in_edit_keeps_the_patch_under_the_pointer_and_outlines_it(over):
+def test_a_look_in_edit_outlines_the_patch_under_the_pointer_and_shows_its_original_once_it_rests_there(
+        over, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(window.time, "monotonic", lambda: clock[0])
     marks = st.Marks(key=5, boxes=(A, B), serial=1)
     chosen = FakeSet([A, B])
     over.set_edit(marks)
     over._edit_take(True, [chosen])
+    over.set_hover_delay(450)
     over._pointer = screen(150, 130)
     look(over, chosen, (0, 1))
     shown, edit = over.drawn[-1]
-    assert shown == (0, 1) and edit[1] == 0  # (none given way: the one under the pointer outlined)
+    assert shown == (0, 1) and edit[1] == 0  # (not rested yet: kept, the one under the pointer outlined)
     assert over.hovered() == (5, A)  # (the right pane's block shows its original and translation)
+    assert over._edit_wait is not None  # (the looks go on while it waits)
+    clock[0] += 0.5
+    look(over, chosen, (0, 1))
+    shown, edit = over.drawn[-1]
+    assert shown == (1,) and edit[1] == 0 and over.why_not_shown()["original"] == (0,)  # (rested: as in Reader)
+    press(over, 150, 130)
+    look(over, chosen, (0, 1))
+    assert over.drawn[-1][0] == (0, 1)  # (a press held: the patch it moves stays on show)
+    over._edit_message(window.WM_LBUTTONUP, 0, lparam(150, 130))
+    over.take_edits()
+    over._pointer = screen(250, 130)  # (between the boxes: nothing given way)
+    look(over, chosen, (0, 1))
+    assert over.drawn[-1][0] == (0, 1) and over._edit_out is None and over._edit_wait is None
+    over.set_hover_delay(0)
+    over._pointer = screen(320, 130)
+    look(over, chosen, (0, 1))
+    assert over.drawn[-1][0] == (0,)  # (no delay: at once)
+    over.set_edit(st.Marks(key=5, boxes=(A, B), held=1, locked=True, serial=2))
+    look(over, chosen, (0, 1))
+    assert over.drawn[-1][0] == (0, 1)  # (the region in the editor: its patches show its changes)
     assert over._marks_for(FakeSet([A, B], key=6)) is None  # (another page's set: no marks on it)
 
 
@@ -370,6 +401,65 @@ def test_a_click_a_drag_and_a_corner_drag_are_handed_to_the_tk_thread_with_their
     typed, moved = over.take_edits()
     assert typed["kind"] == "plate" and typed["index"] == 1 and typed["shift"] is False
     assert moved["kind"] == "move" and moved["boxes"] == {1: (310, 110, 390, 170)}  # (a drag from it moves the box)
+
+
+def test_a_second_click_on_the_same_box_within_the_system_s_time_and_reach_is_a_double_click(over, monkeypatch):
+    assert window.double_click() == (window.DOUBLE_CLICK_S, window.DOUBLE_CLICK_PX, window.DOUBLE_CLICK_PX)
+    window._user32.GetDoubleClickTime = lambda: 200  # (the system's: 0.2 s, 12 px across, 6 down)
+    window._user32.GetSystemMetrics = lambda index: {window.SM_CXDOUBLECLK: 12, window.SM_CYDOUBLECLK: 6}.get(index, 0)
+    assert window.double_click() == (0.2, 12, 6)
+    del window._user32.GetDoubleClickTime
+    window._user32.GetSystemMetrics = lambda index: 0  # (the system gives none: 0.5 s, 4 px)
+    clock = [50.0]
+    monkeypatch.setattr(window.time, "monotonic", lambda: clock[0])
+    chosen = FakeSet([A, B])
+    plate = np.zeros((18, 18, 4), np.uint8)
+    over.set_edit(st.Marks(key=5, boxes=(A, B), plates=(None, (plate, (310, 82))), serial=1))
+    over._edit_take(True, [chosen])
+    look(over, chosen, (0, 1))
+
+    def click(x, y, shift=False, after=0.1):
+        clock[0] += after
+        press(over, x, y, shift)
+        over._edit_message(window.WM_LBUTTONUP, 0, lparam(x, y))
+
+    def kinds():
+        return [e["kind"] for e in over.take_edits()]
+
+    click(150, 130)
+    click(152, 133)  # (soon and near: the second of a double click)
+    click(152, 133)  # (a third: a click again, the fourth a double)
+    click(152, 133)
+    assert kinds() == ["click", "double", "click", "double"]
+    click(150, 130)
+    click(150, 130, after=0.6)  # (too late)
+    click(155, 130)  # (too far)
+    click(320, 130)  # (another box)
+    click(150, 130)
+    click(150, 130, shift=True)  # (Shift: chooses it with the others, never edits)
+    click(150, 130)
+    assert kinds() == ["click"] * 7
+    click(150, 130, after=1.0)
+    click(250, 130)  # (the empty ground between: the click forgotten)
+    click(150, 130)
+    press(over, 150, 130)  # (a drag: forgotten too)
+    over._edit_message(window.WM_MOUSEMOVE, 0, lparam(170, 140))
+    over._edit_message(window.WM_LBUTTONUP, 0, lparam(170, 140))
+    click(150, 130)
+    assert kinds() == ["click", "ground", "click", "move", "click"]
+    click(315, 90)
+    click(315, 90)  # (a number plate: each click types its place)
+    click(315, 90)
+    assert kinds() == ["plate", "plate", "plate"]
+    click(320, 130)
+    press(over, 320, 130)
+    over._edit_message(window.WM_RBUTTONDOWN, 0, lparam(320, 130))  # (a press given up: forgotten)
+    click(320, 130)
+    assert kinds() == ["click", "click"]
+    over.set_edit(st.Marks(key=5, boxes=(A, (300, 100, 390, 160)), serial=2))  # (the box changed between: no double)
+    look(over, chosen, (0, 1))
+    click(320, 130)
+    assert kinds() == ["click"]
 
 
 def test_a_right_click_or_the_capture_lost_gives_a_press_up_and_a_locked_press_only_clicks(over):
@@ -549,26 +639,31 @@ def hand(app, **event):
     see_edit.tick(app, app._see_through)
 
 
-def test_a_click_opens_the_editor_shift_chooses_and_the_reading_order_numbers(monkeypatch):
+def test_a_click_chooses_a_double_click_opens_the_editor_shift_chooses_and_the_reading_order_numbers(monkeypatch):
     monkeypatch.setattr(see_edit.seethrough, "asked", lambda app: app.calls.append(("asked",)))
     app = edit_app()
     a, b = app.last_result.regions[:2]
     hand(app, kind="click", index=0, shift=False)
-    assert app.calls == [("choose", a), ("asked",), ("editor", a)] and app._see_edit_seen == 1
+    assert app.calls == [("choose", a)] and app._see_edit_seen == 1  # (chosen, with its handles: no editor)
+    app.calls.clear()
+    hand(app, kind="double", index=0, shift=False)
+    assert app.calls == [("choose", a), ("asked",), ("editor", a)]
     app.calls.clear()
     hand(app, kind="click", index=1, shift=True)
     assert app.calls == [("toggle", b)]
     app.calls.clear()
     app._ordering = [b]
     hand(app, kind="click", index=0, shift=False)
-    hand(app, kind="click", index=0, shift=False)  # (numbered once)
+    hand(app, kind="double", index=0, shift=False)  # (numbered once)
     assert app._ordering == [b, a] and app.calls == [("redisplay",)]
     app._ordering, app.calls[:] = None, []
     app._editor = Editor(b)
     hand(app, kind="click", index=0, shift=False)  # (an editor open: it comes to the front, one region at a time)
-    assert app._editor.raised == 1 and ("editor", a) not in app.calls
+    hand(app, kind="double", index=0, shift=False)
+    assert app._editor.raised == 2 and ("editor", a) not in app.calls
     app._editor, app.busy, app.calls[:] = None, True, []
     hand(app, kind="click", index=0, shift=False)
+    hand(app, kind="double", index=0, shift=False)
     assert app.calls == []  # (a change being stored: nothing)
 
 
@@ -644,7 +739,7 @@ def test_the_whole_page_takes_the_mouse_while_editing_whatever_page_is_on_show()
     assert over.grounds[-1] is False and over.marks[-1] is None
 
 
-def test_a_rectangle_drawn_on_the_empty_ground_adds_a_region_and_a_click_there_drops_a_choice():
+def test_a_rectangle_drawn_on_the_empty_ground_adds_a_region_and_a_click_there_drops_the_choice():
     app = edit_app()
     a, b = app.last_result.regions[:2]
     hand(app, kind="draw", box=None)  # (too small to be a region)
@@ -664,12 +759,71 @@ def test_a_rectangle_drawn_on_the_empty_ground_adds_a_region_and_a_click_there_d
     assert app.calls == [("choose", None), ("redisplay",)]
     app.calls.clear()
     app._chosen_region, app._also_chosen = a, []
-    hand(app, kind="ground")  # (one chosen: it stays)
+    hand(app, kind="ground")  # (one chosen: dropped too, its handles gone)
+    assert app.calls == [("choose", None), ("redisplay",)]
+    app.calls.clear()
+    hand(app, kind="ground")  # (none chosen: nothing)
     assert app.calls == []
+    app._chosen_region, app._editor = a, Editor(a)
+    hand(app, kind="ground")  # (the editor open: its region stays chosen)
+    assert app.calls == []
+    app._editor = None
     app.role_var.set("reader")
     app._see_through.edits.append({"kind": "draw", "box": (10, 10, 60, 60), "press": 9, "marks": 0, "key": 0})
     see_edit.tick(app, app._see_through)  # (in Reader mode no rectangle is drawn on the ground)
     assert app.calls == []
+
+
+class DeleteOver(Over):
+    """`Over` with the Delete key: its presses handed in, whether it is wanted kept."""
+
+    def __init__(self):
+        super().__init__()
+        self.deletes, self.wanted = [], []
+
+    def take_deletes(self):
+        out, self.deletes = self.deletes, []
+        return out
+
+    def set_delete_key(self, wanted):
+        self.wanted.append(wanted)
+
+
+def test_the_delete_key_is_wanted_only_while_a_region_is_chosen_and_drops_the_chosen_as_the_menu_does():
+    app = edit_app()
+    over = app._see_through = DeleteOver()
+    a = app.last_result.regions[0]
+    dropped = []
+    # (the window's own drop, as Menu > Page > Drop the chosen regions: the choice goes, Undo brings them back)
+    app._drop_chosen = lambda: (dropped.append(app._chosen_region), setattr(app, "_chosen_region", None))
+    see_edit.tick(app, over)
+    assert over.wanted[-1] is False  # (none chosen: the viewer's own Delete)
+    over.deletes.append(1.0)
+    see_edit.tick(app, over)
+    assert dropped == []
+    app._chosen_region = a
+    see_edit.tick(app, over)
+    assert over.wanted[-1] is True
+    over.deletes += [2.0, 3.0]  # (pressed twice before the tick: dropped once, then none chosen)
+    see_edit.tick(app, over)
+    assert dropped == [a] and over.wanted[-1] is False  # (let go of: the viewer's again)
+    app._chosen_region = a
+    for name, value, back in (("_editor", Editor(a), None), ("busy", True, False), ("_ordering", [], None),
+                              ("_see_adding", True, False), ("_see_place_entry", object(), None)):
+        setattr(app, name, value)  # (an editor, a change stored, the order clicked, a region to add, a place typed)
+        assert not see_edit.delete_wanted(app), name
+        setattr(app, name, back)
+    assert see_edit.delete_wanted(app)
+    app._chosen_region = Region((1, 2, 3, 4))  # (not of the page on show)
+    assert not see_edit.delete_wanted(app)
+    app._chosen_region = a
+    app._editing = lambda: False  # (another page on show)
+    assert not see_edit.delete_wanted(app)
+    app._editing = lambda: True
+    app.role_var.set("reader")  # (Reader mode)
+    over.deletes.append(4.0)
+    see_edit.tick(app, over)
+    assert over.wanted[-1] is False and dropped == [a]
 
 
 def test_a_click_on_a_plate_types_its_place_enter_takes_it_and_esc_or_any_other_press_gives_it_up(hidden_root,

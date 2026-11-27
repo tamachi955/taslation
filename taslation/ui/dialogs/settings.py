@@ -104,8 +104,8 @@ SEE_INDICATORS_TIP = ("The pane at the right of the viewer's page: the bubble la
                       "page on show is, the pages turned past. Off: none of these. Also the Indicators switch in the "
                       "controls at the left.")
 ADD_KEY_TIP = ("While the viewer is in front, the Insert key starts adding a text area, as Add area in the controls "
-               "at the left does; Insert again gives it up. It is the only key TASlation takes. Off: TASlation takes "
-               "no key at all.")
+               "at the left does; Insert again gives it up. Off: Insert stays the viewer's. The only other key "
+               "TASlation takes is Delete, while a bubble is selected in editing, to drop it.")
 START_READER_TIP = ("TASlation starts in Reader mode, every click going to the viewer, for a book you have not "
                     "switched Reader mode on or off for; a book keeps the choice you made for it. Off: it starts "
                     "editing, the page's bubbles taking the mouse and the viewer the keys. From the next start.")
@@ -205,7 +205,8 @@ FIT_ROWS: dict[str, tuple[str, str]] = {
                  "a larger size."),
     "hyphenate": ("Hyphens (at most one in a word)",
                   "A long word may be broken with a hyphen, once at most, leaving three letters or more on each line. "
-                  "Off: no hyphens, except in a word too wide for its bubble even at the smallest size."),
+                  "Off: no hyphens at all; a word too wide for its bubble even at the smallest size is set whole and "
+                  "runs past it."),
     "overrun": ("Run over the bubble's outline",
                 "Where the lettering would still be small, it may run a few pixels over the bubble's outline, edged in "
                 "the paper's colour so that it stays readable. Off by default."),

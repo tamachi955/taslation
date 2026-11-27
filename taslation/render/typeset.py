@@ -62,7 +62,10 @@ letters, three or more on either side, with a hyphen, in a language with
 hyphenation patterns at one of its hyphenation points where one fits
 (`SPLIT_AT_POINTS`); a shorter word
 stays whole, past its room if it must. A Thai word is split so between two of
-its clusters of letters, without a hyphen.
+its clusters of letters, without a hyphen. Where the person has switched the
+hyphens off (the "hyphenate" try of `Settings.fit_tries` left out), no Latin,
+Greek or Cyrillic word takes one even so: it stays whole at the smallest size
+and runs past its room (`Fit.whole`), and its lettering is flagged `TIGHT`.
 
 In a rectangle, once the size is chosen the lines are balanced (`_balanced`):
 the same lines at the same places, the words shared out over them by a dynamic
@@ -292,20 +295,21 @@ def _split_points(word: str, cuts: list[int], language: str) -> list[int]:
     return sorted(good)
 
 
-def _split_word(word: str, font: FontT, max_width: int, script: str, language: str = "") -> tuple[str, str] | None:
+def _split_word(word: str, font: FontT, max_width: int, script: str, language: str = "",
+                hyphen: bool = True) -> tuple[str, str] | None:
     """A word wider than its line at the smallest size, split as a last resort: (its first part, the rest), the
     first part as long as *max_width* allows (the shortest there is when none fits); None when it stays whole. In
     Latin, Greek and Cyrillic only a word of BREAK_MIN_LETTERS letters or more is split, only between two letters
     (or after a hyphen it has), HYPHEN_EDGE letters or more on either side, and the break shows a hyphen; "Damn" stays
-    whole. In a target *language* of `SPLIT_AT_POINTS` (those with patterns) the split goes at the last of the word's
-    hyphenation points whose first part fits (`_split_points`: for-ward, mem-bers), and only where none fits
-    anywhere else (where nothing fits, at the shorter of its first point and the shortest other place). A Thai word
-    breaks between two of its clusters of letters (`breaks.cluster_cuts`), other scripts between any two letters,
-    without a hyphen."""
+    whole, and so does every such word without *hyphen* (the person switched the hyphens off). In a target *language*
+    of `SPLIT_AT_POINTS` (those with patterns) the split goes at the last of the word's hyphenation points whose first
+    part fits (`_split_points`: for-ward, mem-bers), and only where none fits anywhere else (where nothing fits, at
+    the shorter of its first point and the shortest other place). A Thai word breaks between two of its clusters of
+    letters (`breaks.cluster_cuts`), other scripts between any two letters, without a hyphen."""
     lgc = script == "lgc"
     edge = HYPHEN_EDGE if lgc else 1
     letters = [i for i, ch in enumerate(word) if ch.isalpha()]
-    if len(letters) < (BREAK_MIN_LETTERS if lgc else 2):
+    if len(letters) < (BREAK_MIN_LETTERS if lgc else 2) or (lgc and not hyphen):
         return None
     if script == "thai":
         cuts = list(breaks.cluster_cuts(word))
@@ -326,12 +330,13 @@ def _split_word(word: str, font: FontT, max_width: int, script: str, language: s
     return (head(first), word[first:]) if first is not None else None
 
 
-def _break_word(word: str, font: FontT, max_width: int, script: str, language: str = "") -> list[str]:
-    """*word*, wider than *max_width*, in the parts `_split_word` gives (in the target *language*); alone when it
-    stays whole."""
+def _break_word(word: str, font: FontT, max_width: int, script: str, language: str = "",
+                hyphen: bool = True) -> list[str]:
+    """*word*, wider than *max_width*, in the parts `_split_word` gives (in the target *language*, with *hyphen* or
+    not); alone when it stays whole."""
     parts: list[str] = []
     while _display_width(font, word, script) > max_width:
-        split = _split_word(word, font, max_width, script, language)
+        split = _split_word(word, font, max_width, script, language, hyphen)
         if split is None:
             break
         parts.append(split[0])
@@ -478,9 +483,11 @@ def _hyphenate(token: str, script: str, fits: Any, language: str = "") -> tuple[
 
 
 def wrap_lines(text: str, font: FontT, max_width: int, script: str | None = None, keep_blank: bool = False,
-               hyphenate: int = 0, stats: dict[str, int] | None = None, language: str = "") -> list[str]:
+               hyphenate: int = 0, stats: dict[str, int] | None = None, language: str = "",
+               hyphen: bool = True) -> list[str]:
     """Wrap *text* to *max_width*; words wider than the box are split (`_split_word`, in *language*; one too short to
-    split stays whole, wider than the box). Each line break ends a line;
+    split stays whole, wider than the box, and without *hyphen* every Latin, Greek or Cyrillic one does, counted in
+    *stats* as "whole" too). Each line break ends a line;
     an empty line is left out, or with *keep_blank* kept as an empty line. With *hyphenate*, a word wider than the
     box is first hyphenated at its syllable-like points in *language* (`hyphen_points`), and with *hyphenate* 2 a
     word that does not fit the rest of a line also gives the line its first part - but where its rest would then
@@ -533,26 +540,31 @@ def wrap_lines(text: str, font: FontT, max_width: int, script: str | None = None
             if _display_width(font, word, script) <= max_width:
                 cur = word
             else:
-                pieces = _break_word(word, font, max_width, script, language)
+                pieces = _break_word(word, font, max_width, script, language, hyphen)
                 lines.extend(pieces[:-1])
                 cur = pieces[-1] if pieces else ""
                 _count(stats, "breaks")
+                if len(pieces) == 1:
+                    _count(stats, "whole")
         if cur:
             lines.append(cur)
     return lines
 
 
 def _count(stats: dict[str, int] | None, what: str) -> None:
-    """A word hyphenated ("hyphens") or that fit nowhere ("breaks": split, or left too wide), counted when asked."""
+    """A word hyphenated ("hyphens") or that fit nowhere ("breaks": split, or left too wide - those also "whole"),
+    counted when asked."""
     if stats is not None:
         stats[what] = stats.get(what, 0) + 1
 
 
 def fit_text(text: str, font_path: str | Lettering | None, box_w: int, box_h: int, min_size: int = 9,
              max_size: int = 64, line_spacing: float = 1.12, bold_variation: bool = False,
-             script: str | None = None, language: str = "") -> tuple[FontT, list[str], int]:
+             script: str | None = None, language: str = "", hyphen: bool = True,
+             stats: dict[str, int] | None = None) -> tuple[FontT, list[str], int]:
     """Largest font size whose wrapped text fits (box_w x box_h). Falls back to min_size, a word wider than the box
-    there split as a last resort in the target *language* (`wrap_lines`)."""
+    there split as a last resort in the target *language* (`wrap_lines`; without *hyphen* a Latin, Greek or Cyrillic
+    one stays whole, wider than the box), counted in *stats* ("breaks", "whole")."""
     box_w, box_h = max(4, box_w), max(4, box_h)
     script = script or script_of(text)
     hi = max(min_size, min(max_size, int(box_h / line_spacing)))
@@ -568,20 +580,22 @@ def fit_text(text: str, font_path: str | Lettering | None, box_w: int, box_h: in
                 return font, lines, size
         size -= 1 if size <= 24 else 2
     font = styled_font(font_path, min_size, bold_variation)
-    return font, wrap_lines(text, font, box_w, script, language=language), min_size
+    return font, wrap_lines(text, font, box_w, script, stats=stats, language=language, hyphen=hyphen), min_size
 
 
 def _fill_line(tokens: list[str], start: int, font: FontT, width: int, script: str, allow_break: bool,
                widths: dict[str, int], hyphenate: int = 0,
                stats: dict[str, int] | None = None, language: str = "",
-               splits: dict[tuple[str, int], tuple[str, str] | None] | None = None) -> tuple[str, int] | None:
+               splits: dict[tuple[str, int], tuple[str, str] | None] | None = None,
+               hyphen: bool = True) -> tuple[str, int] | None:
     """The longest run of *tokens* from *start* that fits *width* (words joined by spaces, characters as they are)
     and the index after it. None when the first token is wider than *width* and may not be broken; when it may,
     the line is its first part and the rest stays in *tokens* at *start*, or all of it, wider than *width*, when it
-    is too short to split (`_split_word`, in the target *language*; *splits* keeps them). With *hyphenate*, a token
-    too wide for the line on its own is hyphenated first (`hyphen_points`), and with *hyphenate* 2 one that does not
-    fit the rest of the line also gives it its first part; the rest stays in *tokens*. *stats* counts the hyphens,
-    the breaks and the Latin, Greek or Cyrillic words broken a second time ("again": the rest of one, `_Rest`)."""
+    is too short to split (`_split_word`, in the target *language*; *splits* keeps them) or, without *hyphen*, a
+    Latin, Greek or Cyrillic word. With *hyphenate*, a token too wide for the line on its own is hyphenated first
+    (`hyphen_points`), and with *hyphenate* 2 one that does not fit the rest of the line also gives it its first part;
+    the rest stays in *tokens*. *stats* counts the hyphens, the breaks (those left whole also as "whole") and the
+    Latin, Greek or Cyrillic words broken a second time ("again": the rest of one, `_Rest`)."""
     chars = script in NO_SPACE_SCRIPTS
     cur = ""
     i = start
@@ -616,7 +630,7 @@ def _fill_line(tokens: list[str], start: int, font: FontT, width: int, script: s
             return None
         _count(stats, "breaks")
         word = _lead(tokens[i], script)
-        if chars and script != "thai":
+        if (chars and script != "thai") or (script == "lgc" and not hyphen):
             split = None
         elif splits is None:
             split = _split_word(word, font, width, script, language)
@@ -625,6 +639,7 @@ def _fill_line(tokens: list[str], start: int, font: FontT, width: int, script: s
         else:
             split = splits[word, width] = _split_word(word, font, width, script, language)
         if split is None:  # a single character, or a word that stays whole: wider than the line
+            _count(stats, "whole")
             return word, i + 1
         tokens[i : i + 1] = [_Rest(split[1])]
         if again:
@@ -642,13 +657,13 @@ def _layout_at(paras: list[list[str]], font: FontT, script: str, size: int, line
                left: np.ndarray, right: np.ndarray, allow_break: bool,
                widths: dict[str, int], hyphenate: int = 0, stats: dict[str, int] | None = None,
                ink: tuple[int, int] = (0, 0), language: str = "",
-               splits: dict[tuple[str, int], tuple[str, str] | None] | None = None
+               splits: dict[tuple[str, int], tuple[str, str] | None] | None = None, hyphen: bool = True
                ) -> list[tuple[str, float, int]] | None:
     """The lines of *paras* set from *top* down, each as wide as the mask is at its rows: (text, x centre, y top).
     None when they do not fit (a line's rows leave the mask, or a word is wider than its line). An empty paragraph
-    (an empty line kept) takes a line's height and sets nothing. *hyphenate*, *stats*, *language* and *splits* as for
-    `_fill_line`. *ink* is where a line's glyphs lie below its top (`_ink_rows`): each line must fit the mask over
-    those rows."""
+    (an empty line kept) takes a line's height and sets nothing. *hyphenate*, *stats*, *language*, *splits* and
+    *hyphen* as for `_fill_line`. *ink* is where a line's glyphs lie below its top (`_ink_rows`): each line must fit
+    the mask over those rows."""
     h = left.shape[0]
     lh = size * line_spacing
     out: list[tuple[str, float, int]] = []
@@ -672,7 +687,7 @@ def _layout_at(paras: list[list[str]], font: FontT, script: str, size: int, line
             if hi - lo < size:
                 return None  # the band leaves the mask, or is narrower than a glyph
             filled = _fill_line(tokens, i, font, hi - lo, script, allow_break, widths, hyphenate, stats, language,
-                                splits)
+                                splits, hyphen)
             if filled is None:
                 return None
             text, i = filled
@@ -1579,9 +1594,9 @@ def _sizes(lo: int, hi: int) -> list[int]:
 @dataclass
 class _Shaped:
     """What `_shape_fit` found: the font, the lines (text, x centre, y top), the size, each line's room (none for a
-    last resort), the hyphens, the words split as a last resort, what is wrong with the block (`_defects`), and the
-    largest size the text fits at (*fits*: the size before a trade for a better block, what a rectangle competes
-    with)."""
+    last resort), the hyphens, the words split as a last resort (or left whole, wider than their line: those also
+    *whole*), what is wrong with the block (`_defects`), and the largest size the text fits at (*fits*: the size
+    before a trade for a better block, what a rectangle competes with)."""
 
     font: Any
     lines: list[tuple[str, float, float]]
@@ -1591,6 +1606,7 @@ class _Shaped:
     breaks: int = 0
     defects: float = 0.0
     fits: int = 0
+    whole: int = 0
 
 
 def _upper_bound(body: _Body, paras: list[list[str]], text: str, font_path: str | Lettering | None, top: int,
@@ -1679,9 +1695,11 @@ def _fit_body(body: _Body, paras: list[list[str]], text: str, font_path: str | L
 
 
 def _split_fallback(body: _Body, paras: list[list[str]], text: str, font_path: str | Lettering | None, size: int,
-                    line_spacing: float, bold_variation: bool, script: str, language: str = "") -> _Shaped | None:
+                    line_spacing: float, bold_variation: bool, script: str, language: str = "",
+                    hyphen: bool = True) -> _Shaped | None:
     """The last resort at the smallest size: the lines filled one after the other, a word too wide for every line split
-    (`_split_word`, in the target *language*), each line as wide as the body's row through its centre column is
+    (`_split_word`, in the target *language*; without *hyphen* a Latin, Greek or Cyrillic one stays whole, past its
+    line: `_Shaped.whole`), each line as wide as the body's row through its centre column is
     (`_layout_at`; not kept to one axis: in a bubble this cramped every pixel counts), the ink `MARGIN_PX` off the
     outline. Of the places the block fits at (every third of a line's height, then each one round the best), the one
     with the fewest words broken a second time (a word in three pieces does not read as one: only where no place takes
@@ -1705,18 +1723,19 @@ def _split_fallback(body: _Body, paras: list[list[str]], text: str, font_path: s
     splits: dict[tuple[str, int], tuple[str, str] | None] = {}
     ink_top, ink_bottom = _ink_rows(font, text, script)
     step = max(1, int(size * line_spacing / 3))
-    Placed = tuple[tuple[int, int, float], list[tuple[str, float, int]], int]  # (again, breaks, off), lines, breaks
+    # ((again, breaks, off), lines, breaks, whole)
+    Placed = tuple[tuple[int, int, float], list[tuple[str, float, int]], int, int]
 
     def place(top: int, lo: np.ndarray, hi: np.ndarray, seen: dict[int, Placed | None]) -> None:
         if top in seen:
             return
         tried: dict[str, int] = {}
         lines = _layout_at(paras, font, script, size, line_spacing, top, lo, hi, True, widths, 0, tried,
-                           (ink_top, ink_bottom), language, splits)
+                           (ink_top, ink_bottom), language, splits, hyphen)
         broken = tried.get("breaks", 0)
         seen[top] = None if lines is None else (
             (tried.get("again", 0), broken, abs((lines[0][2] + lines[-1][2] + ink_top + ink_bottom) / 2.0 - body.cy)),
-            lines, broken)
+            lines, broken, tried.get("whole", 0))
 
     kept: Placed | None = None  # the best with a word broken a second time, at the centre's runs first
     for lo, hi in ((left, right), (widest[0], widest[1])):  # the longest runs only where the centre fails
@@ -1738,22 +1757,23 @@ def _split_fallback(body: _Body, paras: list[list[str]], text: str, font_path: s
             place(top, lo, hi, seen)
         best = min((placed for placed in seen.values() if placed is not None), key=lambda placed: placed[0])
         if not best[0][0]:
-            return _Shaped(font, best[1], size, (), 0, best[2], 0.0, size)
+            return _Shaped(font, best[1], size, (), 0, best[2], 0.0, size, best[3])
         if kept is None:
             kept = best
-    return None if kept is None else _Shaped(font, kept[1], size, (), 0, kept[2], 0.0, size)
+    return None if kept is None else _Shaped(font, kept[1], size, (), 0, kept[2], 0.0, size, kept[3])
 
 
 def _shape_fit(mask: np.ndarray, text: str, font_path: str | Lettering | None, min_size: int, max_size: int,
                line_spacing: float, bold_variation: bool, script: str, centre: tuple[float, float] | None,
                valign: str = "middle", keep_blank: bool = False, break_at_min: bool = True, hyphenate: int = 0,
                bodies: list[_Body] | None = None, language: str = "", cut: dict[Any, _Pieces] | None = None,
-               twice: bool | None = None) -> _Shaped | None:
+               twice: bool | None = None, hyphen: bool = True) -> _Shaped | None:
     """The largest size from *max_size* down to *min_size* at which *text* fits along the body of *mask* (`_bodies`; a
     smaller size in another of them wins where it has fewer defects, traded as in `_fit_body`), with its best block
     (`_fit_body`). A word breaks at one of its hyphenation points at the most; where no size takes the text so, at as
     many as it needs (*twice* None; True or False: only that way, `_plan`). At *min_size* (with *break_at_min*) a word
-    too wide for every line is split as a last resort (`_split_fallback`). None when nothing fits."""
+    too wide for every line is split as a last resort (`_split_fallback`; without *hyphen* a Latin, Greek or Cyrillic
+    one stays whole there, past its line). None when nothing fits."""
     bodies = bodies if bodies is not None else _bodies(mask, centre)
     paras = _words(text, script, keep_blank)
     if not bodies or not any(paras):
@@ -1777,7 +1797,8 @@ def _shape_fit(mask: np.ndarray, text: str, font_path: str | Lettering | None, m
     if not break_at_min:
         return None
     for body in bodies:  # the last resort (a hyphen at a syllable instead is the rescue's, `_rescue`)
-        shaped = _split_fallback(body, paras, text, font_path, min_size, line_spacing, bold_variation, script, language)
+        shaped = _split_fallback(body, paras, text, font_path, min_size, line_spacing, bold_variation, script, language,
+                                 hyphen)
         if shaped is not None:
             return shaped
     return None
@@ -1815,6 +1836,8 @@ def shape_layout(mask: np.ndarray, text: str, font_path: str | Lettering | None,
             stats["hyphens"] = shaped.hyphens
         if shaped.breaks:
             stats["breaks"] = shaped.breaks
+        if shaped.whole:
+            stats["whole"] = shaped.whole
     return shaped.font, [(t, x, int(round(y))) for t, x, y in shaped.lines], shaped.size
 
 
@@ -1826,7 +1849,9 @@ class Fit:
     inside it, "box" in the mask's bounding box for a text that does not fit at its size), whether the text
     overflows its room (*overflow*: the caller cuts it at the mask), how many words took a hyphen and how much the
     text was condensed at the limit (`_rescue`), and whether it fits as it is (*clean*: not with a word split as a
-    last resort, nor running out of its room at the smallest size); *measure* and *ink* tell `_balanced` how wide a
+    last resort, nor running out of its room at the smallest size; of those, *split* the words split, *whole* the
+    words left whole wider than their line - every Latin, Greek or Cyrillic one where the hyphens are off - which
+    run past their room); *measure* and *ink* tell `_balanced` how wide a
     line may be, and along the shape *rooms* says it for each line (its lines were shared out by `_plan_lines`
     already) and *defects* what is wrong with the block (`_defects`). It unpacks as (font, lines, size), the three
     things the layout functions gave before."""
@@ -1847,6 +1872,8 @@ class Fit:
     defects: float = 0.0  # along the body: what is wrong with the block (`_defects`) ...
     fits: int = 0  # ... and the largest size the text fits at there (before a trade for a better block)
     body: tuple[float, float, int, int] | None = None  # a bubble's body (`_bodies`): its centroid, width and height
+    split: int = 0  # words split as a last resort ...
+    whole: int = 0  # ... and words left whole, wider than their line (past their room)
 
     @property
     def won(self) -> str:
@@ -1957,24 +1984,27 @@ def _layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None,
     rects = _candidate_rects(mask, centre, on_page, anchor)
     best = None
     for rect in rects:
+        broken: dict[str, int] = {}  # (the last resort's words split or left whole, at the smallest size)
         fitted = fit_text(text, font_path, rect[2] - rect[0], rect[3] - rect[1], min_size, max_size, line_spacing,
-                          bold_variation, script, language)
+                          bold_variation, script, language, hyphenate, broken)
         if best is None or fitted[2] > best[0][2]:
-            best = (fitted, rect)
+            best = (fitted, rect, broken)
     assert best is not None
-    (font, lines, size), (rx0, ry0, rx1, ry1) = best
+    (font, lines, size), (rx0, ry0, rx1, ry1), broken = best
     room = _bodies(mask, centre)
     shaped = _shape_fit(mask, text, font_path, min_size, max_size, line_spacing, bold_variation, script, centre,
-                        bodies=room, language=language)
+                        bodies=room, language=language, hyphen=hyphenate)
     if shaped is not None and shaped.fits >= size:  # as large as the rectangle's, or traded for a better block
         fit = Fit(shaped.font, shaped.lines, shaped.size, shaped.size * line_spacing, "shape", clean=not shaped.breaks,
-                  hyphens=shaped.hyphens, rooms=shaped.rooms, defects=shaped.defects, fits=shaped.fits)
+                  hyphens=shaped.hyphens, rooms=shaped.rooms, defects=shaped.defects, fits=shaped.fits,
+                  split=shaped.breaks - shaped.whole, whole=shaped.whole)
     else:
         line_h = size * line_spacing
         top = (ry0 + ry1) / 2.0 - line_h * len(lines) / 2.0
+        whole = broken.get("whole", 0)
         fit = Fit(font, [(ln, (rx0 + rx1) / 2.0, top + i * line_h) for i, ln in enumerate(lines)], size, line_h, "rect",
                   clean=size > min_size or _rect_holds(text, font, lines, line_h, rx1 - rx0, ry1 - ry0, script),
-                  measure=rx1 - rx0)
+                  measure=rx1 - rx0, split=broken.get("breaks", 0) - whole, whole=whole)
     if hyphenate or condense:
         fit = _rescue(mask, text, font_path, fit, max_size, line_spacing, bold_variation, script, centre, rects,
                       TextFormat(), False, hyphenate, condense, room, language, hyphen_first) or fit
@@ -2158,8 +2188,8 @@ TURNED, OVERRUN = "turned", "overrun"  # (`Lettered.frame`)
 
 def poor(size: int, hyphenated: bool, floor: int, min_size: int) -> bool:
     """Whether lettering at *size*, *hyphenated* or not, calls for another room: under the readable size *floor*, at
-    the smallest size *min_size* (where a word too wide for every line is split as a last resort), or with a word
-    hyphenated."""
+    the smallest size *min_size* (where a word too wide for every line is split as a last resort, or left whole past
+    it), or with a word hyphenated."""
     return size < floor or size <= min_size or hyphenated
 
 
@@ -2291,7 +2321,8 @@ def layout_formatted(mask: np.ndarray, text: str, font_path: str | Lettering | N
     allows it). Centred lines are shared out as layout_text's (`_plan_lines`, `_balanced`, between the line
     breaks), text aligned left or right wraps as in a word processor. A text that does not fit at its size even so (at
     *min_size*, or at the fixed size) is set at it in the mask's bounding box instead, aligned the same way, and marked
-    as overflowing: the caller cuts it at the mask.
+    as overflowing: the caller cuts it at the mask. Without *hyphenate* no Latin, Greek or Cyrillic word is split as a
+    last resort either: it stays whole, past its room (`Fit.whole`, flagged `TIGHT` as drawn: `_draw_fit`).
     """
     script = script or script_of(text)
     ls = fmt.line_spacing or line_spacing
@@ -2308,11 +2339,12 @@ def layout_formatted(mask: np.ndarray, text: str, font_path: str | Lettering | N
     if fmt.align == "center":
         room = _bodies(mask, centre)
         shaped = _shape_fit(mask, text, font_path, lo, hi, ls, bold_variation, script, centre, fmt.valign, True,
-                            not fmt.size, bodies=room, language=language)
+                            not fmt.size, bodies=room, language=language, hyphen=hyphenate)
         if shaped is not None and (best is None or shaped.fits > best[0][2]
                                    or shaped.fits == best[0][2] and fmt.valign == "middle"):
             fit = Fit(shaped.font, shaped.lines, shaped.size, shaped.size * ls, "shape", clean=not shaped.breaks,
-                      hyphens=shaped.hyphens, rooms=shaped.rooms, defects=shaped.defects, fits=shaped.fits)
+                      hyphens=shaped.hyphens, rooms=shaped.rooms, defects=shaped.defects, fits=shaped.fits,
+                      split=shaped.breaks - shaped.whole, whole=shaped.whole)
     if fit is None and best is not None:
         (font, lines, size), rect = best
         fit = Fit(font, _placed(lines, size * ls, rect, fmt), size, size * ls, "rect", fmt.align,
@@ -2328,7 +2360,7 @@ def layout_formatted(mask: np.ndarray, text: str, font_path: str | Lettering | N
     box = ((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1) if xs.size
            else (0, 0, mask.shape[1], mask.shape[0]))
     font = styled_font(font_path, lo, bold_variation)
-    lines = wrap_lines(text, font, box[2] - box[0], script, keep_blank=True, language=language)
+    lines = wrap_lines(text, font, box[2] - box[0], script, keep_blank=True, language=language, hyphen=hyphenate)
     return Fit(font, _placed(lines, lo * ls, box, fmt), lo, lo * ls, "box", fmt.align, overflow=True)
 
 
@@ -2411,9 +2443,10 @@ def busy_under(image: Image.Image, box: Box) -> bool:
 
 # What the checks of an automatic lettering say is still wrong with it (`lettering_flags`; `Lettered.flags`, the
 # review list's reasons for them in `ui.dialogs.review.FIT_REASONS`): nothing the layout could do better at its size
-TIGHT = "tight"  # a glyph within TIGHT_PX of the bubble's edge, or past it
+TIGHT = "tight"  # a glyph within TIGHT_PX of the bubble's edge, or past it; a word left whole past its line
 OFF_CENTRE = "off-centre"  # the block's middle off the bubble body's centroid by over OFF_SHARE of its width or height
-HYPHENATED = "hyphenated"  # a word split with a hyphen (at a hyphenation point, or as a last resort)
+HYPHENATED = "hyphenated"  # a word split with a hyphen (at a hyphenation point, or as a last resort), or the text
+#                            out of its room at the smallest size
 LONE_WORD = "lone-word"  # a word of LONE_FLAG_LETTERS or fewer on a line of its own (`LONE_WORDS`; not in a column)
 HOURGLASS_LINE = "hourglass"  # an inner line under `HOURGLASS` of the narrower of its neighbours (not in a column)
 LOW_CONTRAST = "low-contrast"  # the letters' grey within CONTRAST_MIN of the ground's under them, and no outline
@@ -2466,8 +2499,10 @@ def lettering_flags(ground: np.ndarray, mask: np.ndarray, fit: Fit, lines: list[
         mid_y = (min(b[1] for b in found) + max(b[3] for b in found)) / 2.0
         if max(abs(mid_x - cx) / max(1, bw), abs(mid_y - cy) / max(1, bh)) > OFF_SHARE:
             flags.append(OFF_CENTRE)
-    if fit.hyphens or not fit.clean:
+    if fit.hyphens or fit.split or (not fit.clean and not fit.whole):
         flags.append(HYPHENATED)
+    if fit.whole and TIGHT not in flags:  # (a word left whole past its line: the hyphens off, or one too short)
+        flags.append(TIGHT)
     texts = [t for t, _x, _y in fit.lines if t]
     words = sum(len(t.split()) for t in texts)
     if script not in NO_SPACE_SCRIPTS and len(texts) > 1 and words >= COLUMN_WORDS * len(texts):
@@ -2639,7 +2674,8 @@ def _draw_fit(image: Image.Image, region: TextRegion, fit: Fit, script: str, col
               outline: bool | None, outline_color: Colour | None = None) -> Lettered:
     """Draw the lines of a formatted *fit* (each anchored at its left end, centre or right end) in *color*, with an
     outline in *outline_color* (None: the opposite colour) as *outline* says; an overflowing text is drawn on a copy
-    of the region and only what lies inside its mask goes on the page."""
+    of the region and only what lies inside its mask goes on the page (`NO_FIT`). A word left whole past its line
+    (`Fit.whole`: the hyphens off) is drawn as it is and said (`TIGHT`)."""
     font, size = fit.font, fit.size
     lines = []
     for ln, x, top in fit.lines:
@@ -2659,7 +2695,7 @@ def _draw_fit(image: Image.Image, region: TextRegion, fit: Fit, script: str, col
     if not fit.overflow:
         for shown, left, top, _w in lines:
             font.draw(image, region.x0 + left, region.y0 + top, shown, color, contour)
-        return Lettered(size, (), fit.won)
+        return Lettered(size, (TIGHT,) if fit.whole else (), fit.won)
     part = image.crop((region.x0, region.y0, region.x1, region.y1))  # the region alone, cut at its mask below
     for shown, left, top, _w in lines:
         font.draw(part, left, top, shown, color, contour)

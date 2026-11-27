@@ -1166,8 +1166,10 @@ class SeeWatch:
         the page on show, its box at least EDIT_MIN_BOX px a side, its middle in no other box nor on a pane: whether
         the window takes the mouse (no WS_EX_TRANSPARENT), which window `WindowFromPoint` gives on the box, beside
         every box and on the ground at the client area's corner (the overlay: it takes the mouse over the whole client
-        area) and just above the client area (the stand-in's own frame); the pointer
-        on it (its patches stay, outlined, and the right pane holds the bubble's block); a click: how long until the
+        area) and just above the client area (the stand-in's own frame); the pointer on it (after the hover delay
+        its patches give way to the original, the others stay, the box outlined, and the right pane holds the
+        bubble's block); a click: how long until the region is chosen (its handles), and no editor comes; a double
+        click (two clicks posted at once, past the system's double-click time after the first): how long until the
         region editor is on the screen, whether it lies over the box, on a monitor, the box's own, whether it took the
         foreground (it takes the keys) and the region it holds (the page done: its set handed over as final); a
         WM_CLOSE posted to it: how long until it is gone and
@@ -1257,22 +1259,41 @@ class SeeWatch:
                        if not any(p[0] <= x < p[2] and p[1] <= y < p[3] for p in panes)), None)
         out["hit_ground"] = who_at(*corner) if corner is not None else None  # (the client area's bottom corner)
         out["hit_above"] = who_at(cx0 + cw // 2, cy0 - 3) if cy0 >= 3 else None  # (the stand-in's frame, its title)
-        # the pointer on the box: its patches stay (none gives way while editing), the box outlined, the bubble's block
+        # the pointer on the box: after the hover delay its patches give way to the original (the others stay), the
+        # box outlined, the bubble's block
         first = over.shown()
         before = tuple(first[1]) if first is not None else ()
+        own = next((s for s in list(over._store.sets) if first is not None and s.serial == first[0]), None)
+        on_box = {i for i, p in enumerate(own.patches) if window._meets(p.box, box)} if own is not None else set()
         self.fake_point = (origin[0] + cx, origin[1] + cy)
         time.sleep(0.3 + float(getattr(over, "_hover_delay", 0.0)))
         during = over.shown()
         state = over._shown
         same = first is not None and during is not None and during[0] == first[0]  # (the same set: comparable)
         out["hover"] = {"patches_before": len(before), "patches_on_it": None if during is None else len(during[1]),
-                        "kept": (set(before) <= set(during[1])) if same else "another set meanwhile",
+                        "patches_of_the_box": len(on_box & set(before)),
+                        "original_shown": (not on_box & set(during[1]) and set(before) - on_box <= set(during[1]))
+                        if same else "another set meanwhile",
                         "outlined": state is not None and len(state) > 4 and state[4][1] == index,
                         "bubble_block_ms": wait(lambda: getattr(self.app, "_see_right_used", "") == "bubble", 1.0)}
-        # a click: the region editor beside the box, taking the keys
-        t = time.monotonic()
+
+        def chosen() -> bool:
+            region = getattr(self.app, "_chosen_region", None)
+            return region is not None and tuple(int(v) for v in region.bbox) == tuple(box)
+
+        # a click: the region chosen, its corner handles on it, and no editor
         _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
         _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx, cy))
+        select: dict[str, Any] = {"chosen_ms": wait(chosen, 3.0)}
+        select["marks_chosen_ms"] = wait(lambda: getattr(over._marks_live, "chosen", ()) == (index,), 1.0)
+        apart = max(1.0, window.double_click()[0] + 0.2)  # (the double click below: no double with this one)
+        select["editor_ms"] = wait(lambda: self._editor_window() != 0, apart)
+        out["select"] = select
+        # a double click: the region editor beside the box, taking the keys
+        t = time.monotonic()
+        for _twice in range(2):
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx, cy))
         shown_ms = wait(lambda: self._editor_window() != 0, 6.0)
         editor = self._editor_window()
         click: dict[str, Any] = {"editor_ms": shown_ms}
@@ -1365,8 +1386,9 @@ class SeeWatch:
                 drag["resize"] = why
         self._edit_more(over, origin, size, wait, lp, out)
         kinds = Counter(n["ev"] for n in list(over.notes)
-                        if n["ev"] in ("edit", "press", "edit_click", "edit_move", "edit_resize", "edit_add",
-                                       "edit_draw", "edit_ground", "edit_plate", "press_given_up"))
+                        if n["ev"] in ("edit", "press", "edit_click", "edit_double", "edit_move", "edit_resize",
+                                       "edit_add", "edit_draw", "edit_ground", "edit_plate", "press_given_up",
+                                       "delete", "delete_held"))
         out["window_notes"] = dict(kinds)
         out["fronts_meanwhile"] = sorted(fronts)
         if said_from is not None:  # (the stand-in's words meanwhile: bars, presses and clicks would be the pointer's)
@@ -1385,8 +1407,11 @@ class SeeWatch:
         entry's own window: how long until it is gone, the stand-in in front again, the job (the lines after the
         place asked again) and its end; whether the region is first now, the others in their order, the newest change
         of the history an "order" one, and the marks with its box first (its plate numbered 1). Then a click on the
-        empty ground (a "ground": nothing opens, nothing is stored) and a rectangle of ADD_BOX px drawn there (a
-        "draw": the job, a region of the reader's at the rectangle, and the others still in the order typed)."""
+        empty ground (a "ground": nothing opens, nothing is stored, nothing is chosen after it) and a rectangle of
+        ADD_BOX px drawn there (a "draw": the job, a region of the reader's at the rectangle, and the others still in
+        the order typed); last, that region chosen by a click and the Delete key pressed (its WM_HOTKEY posted to the
+        lettering's window): whether the key was TASlation's meanwhile, how long until the region is dropped, the
+        change, and the key let go of after."""
         from taslation import seethrough as st
 
         app = self.app
@@ -1501,6 +1526,7 @@ class SeeWatch:
         ground["job_ms"] = wait(busy, 0.8)
         ground["editor"] = self._editor_window() != 0
         ground["changes"] = len(app.history.done) - steps
+        ground["none_chosen"] = getattr(app, "_chosen_region", None) is None
         draw: dict[str, Any] = {"idle_ms": wait(idle, 30.0), "spot": [box[2] - box[0], box[3] - box[1]]}
         out["draw"] = draw
         before = order()
@@ -1527,6 +1553,28 @@ class SeeWatch:
         draw["place"] = None if not regions else [
             next((i + 1 for i, b in enumerate(after) if b == tuple(int(v) for v in regions[0].bbox)), None), len(after)]
         draw["others_in_order"] = kept(before, after)
+        # the Delete key: the region drawn chosen by a click, the key TASlation's meanwhile (the stand-in in front), a
+        # press of it (WM_HOTKEY posted to the lettering's window, as Windows sends it) drops it; let go of after
+        from taslation.capture import seethrough as window
+
+        delete: dict[str, Any] = {"idle_ms": wait(idle, 30.0)}
+        out["delete"] = delete
+        regions = made()
+        if not regions:
+            delete["region"] = None
+            return
+        drawn = tuple(int(v) for v in regions[0].bbox)
+        click((drawn[0] + drawn[2]) // 2, (drawn[1] + drawn[3]) // 2)
+        delete["chosen_ms"] = wait(lambda: tuple(int(v) for v in getattr(
+            getattr(app, "_chosen_region", None), "bbox", ())) == drawn, 3.0)
+        delete["key_held_ms"] = wait(over.delete_held, 2.0)
+        steps = len(app.history.done)
+        _user32.PostMessageW(over.hwnd, window.WM_HOTKEY, window.DELETE_ID, 0)
+        delete["job_ms"] = wait(busy, 3.0)
+        delete["dropped_ms"] = wait(lambda: not busy() and not made(), 30.0)
+        newest = app.history.done[-1] if len(app.history.done) > steps else None
+        delete["change"] = None if newest is None else [newest.kind, newest.state]
+        delete["key_let_go_ms"] = wait(lambda: not over.delete_held(), 2.0)
 
     def _add_safe(self) -> None:
         try:

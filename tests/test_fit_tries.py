@@ -176,6 +176,41 @@ def test_a_hyphen_at_the_limit_leaves_three_letters_or_more_and_a_word_takes_one
                 assert len(line.split()[-1].rstrip("-")) >= HYPHEN_LEAST, lines
 
 
+def test_with_the_hyphens_off_a_word_too_wide_at_the_smallest_size_stays_whole_runs_over_and_is_flagged():
+    """The "hyphenate" try left out: not even the last resort splits a Latin word with a hyphen - it is set whole at
+    the smallest size, past its room, and flagged as touching the bubble's edge, never as hyphenated."""
+    font = _font()
+    word = "Incomprehensibilities"
+    mask = _ellipse(40, 120)  # (narrower than the word at the smallest size)
+    on = typeset.layout_text(mask, word, font, 9, 64, language="English")
+    off = typeset.layout_text(mask, word, font, 9, 64, language="English", hyphenate=False, condense=False)
+    on_lines, off_lines = [t for t, *_ in on.lines if t], [t for t, *_ in off.lines if t]
+    assert len(on_lines) > 1 and any(t.endswith("-") for t in on_lines)
+    assert off_lines == [word] and off.size == 9 and (off.whole, off.split, off.hyphens) == (1, 0, 0)
+    assert not off.clean and "+hyphens" not in off.won
+    region = _bubble(40, 120)
+    image = Image.new("RGB", (100, 180), "white")
+    done = letter_text(image, region, word, font, 9, 64, floor=11, tries=("condense",))
+    assert done.size == 9 and typeset.TIGHT in done.flags and typeset.HYPHENATED not in done.flags
+    xs = np.nonzero(np.asarray(image.convert("L")) < 128)[1]
+    assert xs.min() < region.x0 and xs.max() >= region.x1  # (it runs past the bubble on both sides)
+    hyphened = letter_text(Image.new("RGB", (100, 180), "white"), region, word, font, 9, 64, floor=11,
+                           tries=("condense", "hyphenate"))
+    assert typeset.HYPHENATED in hyphened.flags
+    # as formatted in the region editor, at an automatic size: whole too, and said
+    formatted = letter_text(Image.new("RGB", (100, 180), "white"), region, word, font, 9, 64,
+                            fmt=typeset.TextFormat(), tries=("condense",))
+    assert formatted.flags == (typeset.TIGHT,)
+    # the rectangle's wrapping alike, and the counts: a word left whole is a break, and "whole"
+    small = typeset.styled_font(font, 9, False)
+    stats: dict[str, int] = {}
+    assert typeset.wrap_lines(f"so {word} now", small, 30, "lgc", stats=stats, hyphen=False) == ["so", word, "now"]
+    assert stats == {"breaks": 1, "whole": 1}
+    assert len(typeset.wrap_lines(word, small, 30, "lgc")) > 1
+    assert typeset._split_word(word, small, 30, "lgc", "English", hyphen=False) is None
+    assert typeset._split_word(word, small, 30, "lgc", "English") is not None
+
+
 # ---------------------------------------------------------------- the pipeline
 def test_the_size_for_review_and_the_room_a_translator_is_told_follow_the_turned_line(settings):
     _font()

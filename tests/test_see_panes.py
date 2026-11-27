@@ -482,16 +482,20 @@ def test_the_right_pane_shows_the_window_s_words_as_they_are(tmp_path):
     assert not hasattr(pn, "without_keys") and not hasattr(pn, "pane_words")
 
 
-def test_see_through_mode_holds_no_hot_key_but_insert(tmp_path, monkeypatch):
+def test_see_through_mode_holds_no_hot_key_but_insert_and_delete(tmp_path, monkeypatch):
     import importlib.util
     import inspect
     import re
 
     assert importlib.util.find_spec("taslation.capture.overlay") is None  # (the hot keys' module is gone)
     assert "RegisterHotKey" not in inspect.getsource(ui)
-    calls = re.findall(r"_user32\.RegisterHotKey\(([^)]*)\)", inspect.getsource(ui.window))
-    assert calls == ["self.hwnd, HOTKEY_ID, MOD_NOREPEAT, VK_INSERT"]  # (Insert alone, Add area: `test_see_add`)
-    assert ui.window.VK_INSERT == 0x2D and "SetWindowsHookEx" not in inspect.getsource(ui.window)
+    source = inspect.getsource(ui.window)
+    calls = re.findall(r"_user32\.RegisterHotKey\(([^)]*)\)", source)
+    assert calls == ["self.hwnd, ident, MOD_NOREPEAT, vk"]  # (one place, `_hold_key`, each key alone)
+    held = re.findall(r"_hold_key\(\"(\w+)\", (\w+), (\w+),", source)
+    # (Insert alone, Add area; Delete alone, while a region is chosen: `test_see_add`)
+    assert held == [("key", "HOTKEY_ID", "VK_INSERT"), ("delete", "DELETE_ID", "VK_DELETE")]
+    assert ui.window.VK_INSERT == 0x2D and ui.window.VK_DELETE == 0x2E and "SetWindowsHookEx" not in source
     monkeypatch.setattr(ui.window, "viewer_dpi", lambda hwnd: 96)
     app = fake_app(tmp_path, selected=SimpleNamespace(hwnd=1234), _see_memo=[])
     app._see_through.follow = lambda hwnd: None
