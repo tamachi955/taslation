@@ -207,6 +207,8 @@ jobs:
         with:
           path: models
           key: ${{ steps.plan.outputs.models_key }}
+          # (setup_models.py changed on a ci branch: main's newest models serve, the files it names being the same)
+          restore-keys: models-
           lookup-only: true
 
       - name: Are pip's downloads in the cache?
@@ -222,7 +224,7 @@ jobs:
         env:
           PROGRAM: ${{ steps.program.outputs.cache-hit }}
           STORE: ${{ steps.store.outputs.cache-hit }}
-          MODELS: ${{ steps.models.outputs.cache-hit }}
+          MODELS: ${{ steps.models.outputs.cache-matched-key != '' }}
           PIP: ${{ steps.pip.outputs.cache-hit }}
         run: |
           . .github/gpu-checks/helpers.ps1
@@ -421,6 +423,7 @@ jobs:
         with:
           path: models
           key: ${{ needs.prepare.outputs.models_key }}
+          restore-keys: models-
           fail-on-cache-miss: true
 
       - name: 'Set up: Ollama'
@@ -570,6 +573,7 @@ jobs:
         with:
           path: models
           key: ${{ needs.prepare.outputs.models_key }}
+          restore-keys: models-
           fail-on-cache-miss: true
 
       - name: 'Set up: Ollama'
