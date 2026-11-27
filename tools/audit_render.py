@@ -60,7 +60,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 4
+VERSION = 5
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -105,7 +105,8 @@ LOW_AGREEMENT = 0.8  # OCR confidence under this, or the readers split
 NO_GOLD_SHARE = 0.3  # a region's text box overlaps no gold or made-up text box by this share of itself
 
 CODES = {
-    "RESIDUE": "specks of the original lettering left after the erase (inside the erased area or the bubble)",
+    "RESIDUE": "specks of the original lettering left after the erase (inside the erased area or the bubble; not where "
+               "LaMa or the tone fill painted the hole)",
     "GHOST": "marks on the bubble's flat paper after the erase, whatever made them (also where LaMa erased)",
     "LAMA_BUBBLE": "erased by LaMa although its lettering sits in a bubble's closed interior on flat light paper",
     "LINE_CUT": "outline, tail or drawing lines erased round a region on paper",
@@ -786,23 +787,34 @@ class Recorder:
     def __init__(self, pipe: Any):
         import numpy as np
         import taslation.pipeline as pl
+        import taslation.render.artwork as aw
         import taslation.render.typeset as ts
 
-        self.np, self.pl, self.ts, self.pipe = np, pl, ts, pipe
+        self.np, self.pl, self.ts, self.aw, self.pipe = np, pl, ts, aw, pipe
         self.reset()
         self._erase = pipe._erase
         self._letter = pl.letter_text
         self._layout = ts.layout_text
         self._set = pipe._set_text
+        self._tone = aw.fill_tone
         self.current: Any = None
+        self._toning = False
 
         def erase(out, region, quick=False):
             mask = region.mask.copy()
             self.before[id(region)] = (region.bbox, mask)
             self.page = out
+            self._toning = False
             bg = self._erase(out, region, quick)
+            if self._toning:
+                self.toned.add(id(region))
             self.paper[id(region)] = tuple(int(v) for v in bg)
             return bg
+
+        def fill_tone(*a, **k):  # (the region painted over with its ground's own pattern: its dots are no residue)
+            done = self._tone(*a, **k)
+            self._toning = self._toning or bool(done)
+            return done
 
         def set_text(image, region, text, background, style, scaled=True, part=self.pl.OWN_PART):
             held, self.current = self.current, region
@@ -841,9 +853,11 @@ class Recorder:
         pipe._set_text = set_text
         pl.letter_text = letter
         ts.layout_text = layout_text
+        aw.fill_tone = fill_tone
 
     def reset(self) -> None:
         self.before: dict[int, Any] = {}
+        self.toned: set[int] = set()
         self.paper: dict[int, tuple[int, ...]] = {}
         self.rooms: dict[int, Any] = {}
         self.ink: dict[int, Any] = {}
@@ -858,6 +872,7 @@ class Recorder:
         self.pipe._set_text = self._set
         self.pl.letter_text = self._letter
         self.ts.layout_text = self._layout
+        self.aw.fill_tone = self._tone
 
 
 def _fit_lines(fit: Any) -> list[str]:
@@ -1125,7 +1140,8 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             "from_model": bool(r.from_model), "tier": int(r.tier), "status": r.status, "ja_chars": cjk(r.source_text),
             "glyph": round(g, 1), "font": int(r.font_size), "cap": int(r.size_cap), "flags": list(r.letter_flags),
             "ocr_conf": round(float(r.ocr_confidence), 3), "ocr_split": bool(r.ocr_split),
-            "inpainted": r.inpainted is not None, "angle": round(float(r.angle), 1), "codes": [], "m": {}}
+            "inpainted": r.inpainted is not None, "toned": id(r) in getattr(rec, "toned", ()),
+            "angle": round(float(r.angle), 1), "codes": [], "m": {}}
         m = row["m"]
         codes = row["codes"]
         before = rec.before.get(id(r))
@@ -1156,7 +1172,9 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             m["letter_px"] = int(dom.sum())
             m["resid_px"] = int(left.sum())
             m["resid_specks"] = _specks(left)
-            if m["resid_px"] >= max(RESID_PX, RESID_SHARE * m["letter_px"]) and not row["inpainted"]:
+            # (not where LaMa or the tone fill painted the hole: the drawing or the tone's dots there are no lettering)
+            if (m["resid_px"] >= max(RESID_PX, RESID_SHARE * m["letter_px"]) and not row["inpainted"]
+                    and not row["toned"]):
                 codes.append("RESIDUE")
             # marks on a bubble's flat light paper after the erase, whatever made them (lettering half taken, a
             # grey ghost of it, a stroke LaMa drew): darker than the paper by GHOST_DROP, a quarter glyph inside the
