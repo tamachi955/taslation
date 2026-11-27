@@ -850,3 +850,61 @@ def test_the_pipeline_takes_the_page_scale_from_the_paper_or_the_capture_area():
 
     pl._place(r, unit, 0.8)
     assert (r.unit, r.scale) == (1, 0.8)
+
+
+# ------------------------------------------------------------------ a ground that repeats itself
+def dot_tone(size=(500, 500), pitch=6, dot=2):
+    """A screentone: dark dots every *pitch* px on white, in rows offset by half a pitch."""
+    page = flat(255, size)
+    for y in range(0, size[0], pitch):
+        for x in range((y // pitch % 2) * pitch // 2, size[1], pitch):
+            cv2.circle(page, (x, y), dot, (40, 40, 40), -1)
+    return page
+
+
+def white_ringed(page, box=(150, 120, 230, 380)):
+    """A column of strokes with a white ring of 4 px, on *page*, in *box*."""
+    x0, y0, x1, y1 = box
+    for y in range(y0 + 10, y1 - 40, 50):
+        cv2.rectangle(page, (x0 + 6, y - 4), (x1 - 6, y + 34), (255, 255, 255), -1)
+        cv2.rectangle(page, (x0 + 10, y), (x1 - 10, y + 30), (0, 0, 0), 4)
+    return page
+
+
+def test_lettering_with_a_white_ring_on_a_dot_tone_is_painted_over_with_the_tone(tmp_path):
+    """LaMa made rows of stripes of a dot tone round lettering with a white ring; the tone repeats itself, so the hole
+    is painted from the tone round it, the dots going on through it."""
+    tone = dot_tone()
+    page = white_ringed(tone.copy())
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    r = region("text", (150, 120, 230, 380))
+    assert on_art(page, r)
+    eraser.erase(page, r)
+    assert eraser.counts["tone"] == 1 and eraser._model.runs == 0 and not calls
+    inside = page[130:370, 160:220].astype(int)
+    assert np.abs(inside - tone[130:370, 160:220]).mean() < 3  # the tone, dot for dot: no stripes, no white left
+
+
+def test_hatching_repeats_itself_too_and_a_drawing_does_not():
+    hatched = flat(230)
+    hatched[::5] = 60
+    hole = np.zeros(hatched.shape[:2], bool)
+    hole[200:300, 200:260] = True
+    assert artwork.tone_shifts(hatched, hole) is not None
+    assert artwork.tone_shifts(drawn(), hole) is None  # a drawing's texture: no repeat
+    assert artwork.tone_shifts(flat(200), hole) is None  # an even ground
+    smooth = np.dstack([np.repeat(np.linspace(60, 230, 500).astype(np.uint8)[None], 500, axis=0)] * 3)
+    cv2.line(smooth, (0, 100), (499, 400), (0, 0, 0), 3)
+    assert artwork.tone_shifts(smooth, hole) is None  # a smooth drawing correlates near by and never repeats
+
+
+def test_a_hole_the_tone_cannot_reach_goes_to_the_model(tmp_path, monkeypatch):
+    page = white_ringed(dot_tone())
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    monkeypatch.setattr(artwork, "TONE_SHIFTS", 2)  # (too few repeats to paint all of the hole from)
+    eraser.erase(page, region("text", (150, 120, 230, 380)))
+    assert eraser.counts["tone"] == 0 and eraser.counts["art"] == 1

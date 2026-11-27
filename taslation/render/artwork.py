@@ -56,6 +56,7 @@ import cv2
 import numpy as np
 
 from ..config import LAMA_MODEL
+from ..detect.bubbles import fill_holes
 from ..regions import TextRegion
 from . import pagescale
 from .erase import MANUAL_KINDS, erase_region, paper_colour, paper_surface, within_paper
@@ -93,6 +94,17 @@ CLOSED_SHARE = 0.9  # ... which holds this share of the light pixels in the box 
 CLOSED_PAPER = 0.03  # ... and of the box's area at least this much paper clear of the ink (`closed_interior`; the
 #                      white rings of outlined lettering closed on the made-up layouts' tones and gradients had none)
 PAPER_SURE = 0.95  # ... and a rectangle whose own ground, white (`RINGED` or lighter), is this even lies on a bubble's
+TONE_FILL = True  # a hole on a ground that repeats itself (a screentone, a hatching) is painted from it (`fill_tone`)
+TONE_BAND = 24  # px of ground round the hole its repeats are measured on (`tone_shifts`) ...
+TONE_REPEAT, TONE_DIP = 0.8, 0.3  # ... where it repeats (normalised autocorrelation), after falling under this
+TONE_LEAST, TONE_PITCH = 3, 40  # px: the nearest repeat lies this far at the least and at the most
+TONE_CONTRAST = 6.0  # grey levels (RMS) of the ground at the least: an even ground has no pattern
+TONE_GROUND, TONE_OVERLAP = 400, 300  # pixels of ground, and of it overlapping itself at a shift, at the least
+TONE_OVERLAP_SHARE = 0.2  # ... and that share of the ground (a few pixels overlapping make a peak of noise)
+TONE_SHIFTS = 600  # repeats the hole is painted from, nearest first
+TONE_PEAKS = 200  # repeats looked at, nearest first, for one past a dip
+TONE_NEAR = 12  # the nearest repeats, painted with again and again from the hole's edge inwards
+TONE_GROW = 2  # px the hole is taken wider by (anti-aliasing)
 WINDOW = 512  # px: the part of the page the model sees (at least)
 SMALLEST = 256  # px: a page narrower than this is left to the paper fill (the network pads by reflection)
 
@@ -405,6 +417,118 @@ def fill_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, i
     return True
 
 
+def tone_shifts(image: np.ndarray, hole: np.ndarray, scale: float = 1.0
+                ) -> tuple[tuple[int, int, int, int], list[tuple[int, int]]] | None:
+    """The shifts at which the ground round *hole* (bool, the page) repeats itself, as (the window looked at, the
+    shifts (dy, dx) nearest first), when that ground is a pattern that repeats - a screentone's dots, a hatching's
+    lines; None otherwise. Measured on the ground within `TONE_BAND` px of the hole (at the page's *scale*), the hole
+    and a pixel round it left out: its normalised autocorrelation. A pattern repeats where it climbs back to
+    `TONE_REPEAT` at a shift of at least `TONE_LEAST` px after falling under `TONE_DIP` on the way there (a dot's
+    width; a drawing's smooth parts correlate at a short shift too, but never fall and climb back); the shifts taken
+    are those it repeats at, `TONE_SHIFTS` at the most. What the hole encloses (`_closed`) is no ground."""
+    ys, xs = np.nonzero(hole)
+    if not xs.size:
+        return None
+    h, w = hole.shape[:2]
+    band = pagescale.px(TONE_BAND, scale)
+    x0, y0 = max(0, int(xs.min()) - band), max(0, int(ys.min()) - band)
+    x1, y1 = min(w, int(xs.max()) + 1 + band), min(h, int(ys.max()) + 1 + band)
+    part = _closed(hole[y0:y1, x0:x1])
+    near = cv2.dilate(part.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    ground = ~near & (cv2.dilate(part.astype(np.uint8), pagescale.disc(2 * band + 1, 1.0)) > 0)
+    if int(ground.sum()) < TONE_GROUND:
+        return None
+    gray = cv2.cvtColor(np.ascontiguousarray(image[y0:y1, x0:x1, :3]), cv2.COLOR_RGB2GRAY).astype(np.float64)
+    m = ground.astype(np.float64)
+    z = (gray - float(gray[ground].mean())) * m
+    if float(np.sqrt((z[ground] ** 2).mean())) < TONE_CONTRAST:
+        return None  # an even ground: no pattern to repeat
+    hh, ww = part.shape
+    size = (2 * hh, 2 * ww)
+    fz, fm, fq = np.fft.rfft2(z, size), np.fft.rfft2(m, size), np.fft.rfft2(z * z, size)
+    # sums over the pixels p of the ground whose p + d lies on the ground too, for every shift d
+    cross = np.fft.irfft2(np.conj(fz) * fz, size)
+    there = np.fft.irfft2(np.conj(fm) * fq, size)  # the energy at p + d
+    here = np.fft.irfft2(np.conj(fq) * fm, size)  # the energy at p
+    count = np.fft.irfft2(np.conj(fm) * fm, size)
+    least_overlap = max(TONE_OVERLAP, TONE_OVERLAP_SHARE * float(ground.sum()))
+    ncc = np.where((count > least_overlap) & (here > 1e-6) & (there > 1e-6),
+                   cross / np.sqrt(np.maximum(here * there, 1e-12)), -1.0)
+    ncc = np.fft.fftshift(ncc)  # shift (0, 0) at (hh, ww)
+    least = max(2.0, TONE_LEAST * scale)
+    dy, dx = np.mgrid[-hh:hh, -ww:ww]
+    far = np.hypot(dy, dx)
+    peak = (ncc >= TONE_REPEAT) & (far >= least) & (far <= TONE_PITCH * max(scale, 0.5))
+    if not peak.any():
+        return None
+    # one such shift must lie past a dip: the pattern falls off between its repeats (a hatching's lines do not along
+    # themselves, only across)
+    k = np.flatnonzero(peak.ravel())
+    k = k[np.argsort(far.ravel()[k], kind="stable")][:TONE_PEAKS]
+
+    def dips(at: int) -> bool:
+        by, bx = int(dy.ravel()[at]), int(dx.ravel()[at])
+        steps = int(max(abs(by), abs(bx)))
+        path = [ncc[hh + round(by * t / steps), ww + round(bx * t / steps)] for t in range(1, steps)]
+        return bool(path) and min(path) <= TONE_DIP
+
+    if not any(dips(int(at)) for at in k):
+        return None
+    good = (ncc >= TONE_REPEAT) & (far >= least)
+    order = np.argsort(far[good], kind="stable")[:TONE_SHIFTS]
+    shifts = list(zip(dy[good][order].tolist(), dx[good][order].tolist()))
+    return (x0, y0, x1, y1), shifts
+
+
+def _closed(hole: np.ndarray) -> np.ndarray:
+    """*hole* (bool) with what it encloses: the counters of its glyphs (the white inside a ringed glyph's loops)."""
+    return fill_holes(hole.astype(np.uint8) * 255) > 0
+
+
+def fill_tone(image: np.ndarray, hole: np.ndarray, scale: float = 1.0) -> bool:
+    """Paint *hole* (bool, the page) in place from the pattern round it, when that ground repeats itself
+    (`tone_shifts`): each pixel of the hole takes the pixel at the nearest shift the pattern repeats at that is ground
+    or already painted (from the hole's edge inwards: the nearest `TONE_NEAR` shifts again and again, then the
+    others), so a screentone's dots go on through where the lettering was. LaMa made rows of stripes of a dot tone
+    round lettering with a white ring, a rectangle of it clearly seen at every size. The hole is taken `TONE_GROW` px
+    wider (the ring's anti-aliasing, lighter than the tone, is no ground of it), with what it encloses (the counters of
+    ringed glyphs, white like their ring). Whether all of it was painted (nothing is painted otherwise)."""
+    grown = cv2.dilate(hole.astype(np.uint8), np.ones((2 * TONE_GROW + 1,) * 2, np.uint8)) > 0
+    found = tone_shifts(image, grown, scale)
+    if found is None:
+        return False
+    (x0, y0, x1, y1), shifts = found
+    part = image[y0:y1, x0:x1]
+    taken = _closed(grown[y0:y1, x0:x1])
+    source = ~(cv2.dilate(taken.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+    painted = part.copy()
+    ys, xs = np.nonzero(taken)
+    hh, ww = taken.shape
+
+    def paint(sy: int, sx: int) -> bool:
+        nonlocal ys, xs
+        py, px_ = ys + sy, xs + sx
+        ok = (py >= 0) & (py < hh) & (px_ >= 0) & (px_ < ww)
+        ok[ok] = source[py[ok], px_[ok]]
+        if not ok.any():
+            return False
+        painted[ys[ok], xs[ok]] = painted[py[ok], px_[ok]]
+        source[ys[ok], xs[ok]] = True
+        ys, xs = ys[~ok], xs[~ok]
+        return True
+
+    while ys.size and any([paint(sy, sx) for sy, sx in shifts[:TONE_NEAR]]):
+        pass
+    for sy, sx in shifts[TONE_NEAR:]:
+        if not ys.size:
+            break
+        paint(sy, sx)
+    if ys.size:
+        return False
+    part[taken] = painted[taken]
+    return True
+
+
 def on_paper(image: np.ndarray, region: TextRegion) -> bool:
     """Whether a layout model's bubble that the classical detectors could not close (tier 2 or 3) has paper under its
     lettering after all: the ground of its lettering box, all ink (`OUTLINE_LEVEL`, grown a little) left out, is one
@@ -573,7 +697,7 @@ class ArtEraser:
         self.setting = setting
         self.fallback = fallback
         self.failed = False  # LaMa could not run: `erase_region` does it all from then on
-        self.counts = {"art": 0, "plain": 0, "weak": 0, "ground": 0}  # what the regions went to
+        self.counts = {"art": 0, "plain": 0, "weak": 0, "ground": 0, "tone": 0}  # what the regions went to
         self._model: Any = None
         self._checked = False
         self._release_asked = False  # a release that came while the model was at work: done once it is free
@@ -690,6 +814,9 @@ class ArtEraser:
             wider = art_mask(image, region)
             if wider is not None:
                 full = full | wider
+        if TONE_FILL and fill_tone(image, full, scale):  # a screentone, a hatching: painted on from round the hole
+            self.counts["tone"] += 1
+            return paper_colour(*self._crop_mask(image, region), dark)
         x0, y0, x1, y1 = box_of(image, region)
         wx0, wy0, wx1, wy1 = window(image.shape, x0, y0, y1 - y0, x1 - x0)
         part, hole = image[wy0:wy1, wx0:wx1], full[wy0:wy1, wx0:wx1]
