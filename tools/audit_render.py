@@ -60,7 +60,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 3
+VERSION = 4
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
