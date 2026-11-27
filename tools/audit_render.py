@@ -4,12 +4,16 @@ Pages are processed as the program processes them - detection, the three readers
 a stand-in translator in place of the model (`Canned`: on the sample set the professional English of the gold box a
 region matches, in memory only; elsewhere invented English with that English's word lengths, as long as a made-up
 text's line, else 2.39 characters for each Japanese one, the dataset's mean; no model, no network), each at its own
-size and scaled down as a viewer shows it (a page fitted into ``SMALL_HEIGHT`` px of height, area resampling), and
-every lettered region is measured:
+size and scaled down as a viewer shows it (a page fitted into ``SMALL_HEIGHT`` px of height, area resampling) - and
+for every made-up page and 40 pages of the sample set also degraded as a viewer may hand it over (`DEGRADED`: JPEG
+at quality 70, then a cubic down to that height; and the same softened by a 0.6 px gaussian) -, and every lettered
+region is measured:
 
 * ``resid``: pixels of the original lettering inside the erased area or the bubble's closed interior that the erase
   moved less than half the way to the paper (pieces of glyph size, not lines, and not a line the erased page keeps:
   the outline, a tail, hair), and in how many specks;
+* ``ghost``: pixels of a bubble's flat light paper that the erased page has darker than that paper, whatever made
+  them (a glyph half taken, a grey ghost of it, a stroke LaMa drew), LaMa's regions included;
 * ``line_lost``: pixels of lines (the bubble's outline, a tail, the drawing) round the region that the erase made light;
 * ``ink_on_line`` / ``ink_out`` / ``ink_other``: lettering pixels on such a line, outside the bubble's interior (a
   closed light area round the text), and on another region's interior or lettering;
@@ -21,7 +25,8 @@ every lettered region is measured:
 A region whose measure crosses its threshold gets a reason code (`CODES`). The made-up pages (`synthetic_pages`:
 the layouts of tools/make_sample_page.py and risky ones drawn here - tall narrow bubbles, bubbles joined or cut by
 the page's edge, text on tone or white on black, tails crossing text, very small and very large characters, map
-symbols, clothing patterns, sound effects) also carry exact layers (the lettering, the outlines, the interiors), so
+symbols, clothing patterns, sound effects, lettering that touches its outline or runs over it, heavy glyphs that
+touch each other, long bars and dots) also carry exact layers (the lettering, the outlines, the interiors), so
 their regions are measured against the truth as well (``t_*``).
 
     python tools/audit_render.py run --shard 0 --of 16 --out audit-0.json [--crops DIR] [--sets openmantra,synthetic]
@@ -55,8 +60,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 2
+VERSION = 3
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
+# the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
+# SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
+# Every made-up page and DEGRADED_PAGES pages of the sample set (a fixed draw) get them
+DEGRADED = ("jpeg", "blur")
+JPEG_QUALITY = 70
+BLUR_SIGMA = 0.6
+DEGRADED_PAGES = 40
+DEGRADED_SEED = 70
 EN_PER_JA = 2.39  # characters of professional English per Japanese character in OpenMantra
 INK_DARK = 128  # an original pixel darker than this is ink (lettering, outline or drawing)
 STAYS_DARK = 150  # an erased pixel still darker than this is lettering left
@@ -66,6 +79,7 @@ LINE_DARK = 110  # a line pixel counts when it was darker than this
 LINE_GLYPHS = 2.5  # a dark piece longer than this many glyphs that is not inside the text box is a line
 INSIDE_TEXT = 0.6  # of a piece's pixels inside the text box (grown by a third of a glyph): lettering
 HALF_WAY = 0.5  # an erased pixel that went less than this share of the way from the original to the ground is left
+LINE_FAINT = 200  # an erased pixel darker than this still joins a line the page keeps (a thin outline's grey edge)
 CONTRAST = 60  # levels between the lettering and its ground under which nothing is judged left
 SOLID = 0.25  # a dark area still there after an opening of this many glyphs is a fill, not a line
 TEXTURED = 25  # levels of deviation of a ground above which it is a tone or a drawing (compared blurred)
@@ -75,6 +89,9 @@ OUTLINED = 0.3  # of the rim round a closed light area that must be ink for it t
 # reason codes and their thresholds
 RESID_PX = 6  # dark lettering pixels left in a region after its erase ...
 RESID_SHARE = 0.01  # ... and this share of its lettering's pixels
+GHOST_PX = 8  # pixels of a bubble's paper darker than the paper by GHOST_DROP after the erase ...
+GHOST_DROP = 40
+FLAT_STD = 20  # ... where the interior's paper away from the lettering deviates by no more than this (no tone)
 LINE_LOST_PX = 12  # line pixels round a region on paper made light by the erase
 ART_LOST_PX = 60  # the same for a region on the drawing (LaMa fills a hole there on purpose)
 INK_ON_LINE_PX = 8  # lettering pixels on a line of the original
@@ -88,6 +105,8 @@ NO_GOLD_SHARE = 0.3  # a region's text box overlaps no gold or made-up text box 
 
 CODES = {
     "RESIDUE": "specks of the original lettering left after the erase (inside the erased area or the bubble)",
+    "GHOST": "marks on the bubble's flat paper after the erase, whatever made them (also where LaMa erased)",
+    "LAMA_BUBBLE": "erased by LaMa although its lettering sits in a bubble's closed interior on flat light paper",
     "LINE_CUT": "outline, tail or drawing lines erased round a region on paper",
     "ART_CUT": "many lines erased round a region on the drawing (LaMa)",
     "INK_ON_LINE": "lettering drawn on an outline or a line of the drawing",
@@ -413,7 +432,7 @@ class Drawn:
 
 
 def layout(n: int, font_path: str) -> Drawn:
-    """Made-up layout *n* (1 to 16), each built round one risk."""
+    """Made-up layout *n* (1 to 17), each built round one risk."""
     p = Drawn(1000 + n, font_path)
     lines = list(LINES)
     p.rng.shuffle(lines)
@@ -596,6 +615,23 @@ def layout(n: int, font_path: str) -> Drawn:
         for k, (cx, cy, rx, ry) in enumerate(spots):
             b = p.bubble(cx, cy, rx, ry, tail=(cx + 40, cy + ry + 70) if k % 2 else None)
             c(lines[k] + (lines[k + 8] if k % 3 == 0 else ""), cx, cy, 27, 6, weight=500, bubble=b, case="dense")
+    elif n == 17:  # lettering that touches its outline or runs over it, glyphs that touch each other, long bars, dots
+        tr, tl, bt = p.frame3()
+        b = p.bubble(tr[0] + 110, tr[1] + 300, 21, 230, shape="round")
+        c("ふざけんじゃねえ", tr[0] + 110, tr[1] + 300, 36, 12, weight=900, bubble=b, case="touch-outline")
+        b = p.bubble(tr[0] + 320, tr[1] + 300, 62, 235)
+        c("うわあああ︱︱︱", tr[0] + 320, tr[1] + 300, 40, 12, weight=900, bubble=b, case="tight-bar",
+          rows_gap=0.86)
+        b = p.bubble(tl[0] + 200, tl[1] + 300, 140, 150)
+        c(lines[0] + lines[1], tl[0] + 200, tl[1] + 300, 30, 10, weight=600, bubble=b, case="over-outline")
+        b = p.bubble(tl[0] + 430, tl[1] + 330, 70, 170)
+        c("まさか︙︙", tl[0] + 430, tl[1] + 330, 30, 12, weight=600, bubble=b, case="dots")
+        b = p.bubble(bt[0] + 120, bt[1] + 330, 15, 190, shape="round")
+        c("待ってくれよ", bt[0] + 120, bt[1] + 330, 26, 12, weight=800, bubble=b, case="touch-outline")
+        b = p.bubble(bt[0] + 330, bt[1] + 330, 52, 150)
+        c("なにっ⁉", bt[0] + 330, bt[1] + 330, 44, 12, weight=900, bubble=b, case="heavy-marks")
+        b = p.bubble(bt[0] + 700, bt[1] + 330, 150, 200)
+        c(lines[2] + lines[3], bt[0] + 700, bt[1] + 330, 28, 6, weight=500, bubble=b, case="normal")
     else:  # 16: narrow bubbles with heavy short columns at the sample set's size of characters
         tr, tl, bt = p.frame3()
         cols = ((tr[0] + 100, 34, 22), (tr[0] + 250, 38, 24), (tr[0] + 400, 42, 26), (tl[0] + 120, 36, 24),
@@ -610,12 +646,12 @@ def layout(n: int, font_path: str) -> Drawn:
     return p
 
 
-LAYOUTS = 16
+LAYOUTS = 17
 SAMPLE_SEEDS = (0, 1, 2, 3)  # tools/make_sample_page.py's own page, at these seeds
 
 
 def synthetic_page(name: str, models_dir: Path) -> dict[str, Any]:
-    """A made-up page by name ("L01".."L16", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
+    """A made-up page by name ("L01".."L17", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
     (None for make_sample_page's) and its truth."""
     import numpy as np
 
@@ -635,15 +671,18 @@ def synthetic_page(name: str, models_dir: Path) -> dict[str, Any]:
 
 # ====================================================================== the pages to do
 def items(sets: Sequence[str], scales: Sequence[str], root: Path) -> list[str]:
-    """Every work item, in a fixed order: "om:<title 1-5>:<page index>@<scale>" and "syn:<name>@<scale>"."""
+    """Every work item, in a fixed order: "om:<title 1-5>:<page index>@<scale>" and "syn:<name>@<scale>"; a degraded
+    scale (`DEGRADED`) for every made-up page and `DEGRADED_PAGES` pages of the sample set, the same ones each time."""
     out: list[str] = []
     if "openmantra" in sets:
         import openmantra
 
         pages = openmantra.load(root)
         names = openmantra.series_names(pages)
-        for p in pages:
-            out.extend(f"om:{names.index(p.series) + 1}:{p.index}@{s}" for s in scales)
+        keys = [f"om:{names.index(p.series) + 1}:{p.index}" for p in pages]
+        some = set(random.Random(DEGRADED_SEED).sample(sorted(keys), min(DEGRADED_PAGES, len(keys))))
+        for key in keys:
+            out.extend(f"{key}@{s}" for s in scales if s not in DEGRADED or key in some)
     if "synthetic" in sets:
         names = [f"L{n:02d}" for n in range(1, LAYOUTS + 1)] + [f"S{s}" for s in SAMPLE_SEEDS]
         out.extend(f"syn:{n}@{s}" for n in names for s in scales)
@@ -937,6 +976,21 @@ def _interior(O: Any, letters: Any, tb: Box, win: Box) -> Any:
     return out
 
 
+def _filled(mask: Any, win: Box) -> Any:
+    """*mask* with its holes in *win* filled (what it encloses: lettering pieces, a symbol, the drawing inside)."""
+    import numpy as np
+    import cv2
+
+    x0, y0, x1, y1 = win
+    sub = mask[y0:y1, x0:x1]
+    n, labels = cv2.connectedComponents((~sub).astype(np.uint8), connectivity=4)
+    edge = set(np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])).tolist())
+    holes = ~sub & ~np.isin(labels, list(edge))
+    out = mask.copy()
+    out[y0:y1, x0:x1] |= holes
+    return out
+
+
 def _specks(mask: Any) -> int:
     import numpy as np
     import cv2
@@ -1074,13 +1128,38 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             dom = letters & zone
             ground = sum(paper) / 3 if paper else (0.0 if dark_ground else 255.0)
             left = _left(E, O, dom, ground, 0.0)
-            still = (E > 255 - STAYS_DARK) if dark_ground else (E < STAYS_DARK)
+            still = (E > 255 - LINE_FAINT) if dark_ground else (E < LINE_FAINT)
             left &= ~_long_pieces(still, win, LINE_GLYPHS * g)
             m["letter_px"] = int(dom.sum())
             m["resid_px"] = int(left.sum())
             m["resid_specks"] = _specks(left)
             if m["resid_px"] >= max(RESID_PX, RESID_SHARE * m["letter_px"]) and not row["inpainted"]:
                 codes.append("RESIDUE")
+            # marks on a bubble's flat light paper after the erase, whatever made them (lettering half taken, a
+            # grey ghost of it, a stroke LaMa drew): darker than the paper by GHOST_DROP, a quarter glyph inside the
+            # outline (where LaMa may reshape its edge), off the lines the bubble lets through (hair, a tail) and
+            # every line the page keeps; LaMa's regions too
+            if inter is not None and light and not dark_ground:
+                k = max(5, int(g / 2) | 1)
+                core = cv2.erode(_filled(inter, win).astype(np.uint8),
+                                 cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0
+                bare = core & ~(cv2.dilate((letters | lines_).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
+                flat = _ground(O, bare)
+                if flat is not None and flat[1] <= FLAT_STD:
+                    drawing = cv2.dilate(lines_.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+                    # (the lettering's own pixels, or ones the erase made darker: not a thin line or a symbol of the
+                    # bubble that was there before and is there still)
+                    made = cv2.dilate(letters.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+                    made |= E < O - GHOST_DROP / 2
+                    marked = E < flat[0] - GHOST_DROP
+                    ghost = (core & ~drawing & made & marked & ~_long_pieces(still, win, LINE_GLYPHS * g)
+                             & ~_long_pieces(marked, win, LINE_GLYPHS * g))
+                    m["ghost_px"] = int(ghost.sum())
+                    m["ghost_specks"] = _specks(ghost)
+                    if m["ghost_px"] >= GHOST_PX:
+                        codes.append("GHOST")
+                    if row["inpainted"]:
+                        codes.append("LAMA_BUBBLE")
             near = lines_ & _box_mask((h, w), _grow(r.bbox, 3, w, h))
             lost = near & (O < LINE_DARK) & (E >= LIGHTENED) & (E - O >= LIGHTER)
             m["line_px"] = int((near & (O < LINE_DARK)).sum())
@@ -1254,11 +1333,20 @@ def open_item(item: str, root: Path, models_dir: Path) -> dict[str, Any]:
         got["kind"] = "synthetic"
         for t in got["texts"]:
             t["en_len"] = round(EN_PER_JA * t["chars"])
-    if scale == "small":
+    if scale == "small" or scale in DEGRADED:
         h, w = got["rgb"].shape[:2]
         f = SMALL_HEIGHT / h
         size = (max(1, round(w * f)), SMALL_HEIGHT)
-        got["rgb"] = cv2.resize(got["rgb"], size, interpolation=cv2.INTER_AREA)
+        if scale in DEGRADED:  # as a viewer may hand a page over: compressed, then resampled by a cubic, softened
+            _ok, data = cv2.imencode(".jpg", cv2.cvtColor(got["rgb"], cv2.COLOR_RGB2BGR),
+                                     [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            rgb = cv2.cvtColor(cv2.imdecode(data, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            rgb = cv2.resize(rgb, size, interpolation=cv2.INTER_CUBIC)
+            if scale == "blur":
+                rgb = cv2.GaussianBlur(rgb, (0, 0), BLUR_SIGMA)
+            got["rgb"] = np.ascontiguousarray(rgb)
+        else:
+            got["rgb"] = cv2.resize(got["rgb"], size, interpolation=cv2.INTER_AREA)
         if got["layers"] is not None:
             lay = got["layers"]
             got["layers"] = {"text": cv2.resize(lay["text"], size, interpolation=cv2.INTER_AREA),
@@ -1442,9 +1530,10 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="process this shard's pages and write its numbers")
     run.add_argument("--shard", type=int, default=0)
     run.add_argument("--of", type=int, default=1)
-    run.add_argument("--only", help="items by name, comma-separated (om:<title>:<page>, syn:<name>; @full or @small)")
+    run.add_argument("--only", help="items by name, comma-separated (om:<title>:<page>, syn:<name>; "
+                                    "@full, @small, @jpeg or @blur)")
     run.add_argument("--sets", default="openmantra,synthetic")
-    run.add_argument("--scales", default="full,small")
+    run.add_argument("--scales", default="full,small,jpeg,blur")
     run.add_argument("--root", type=Path, default=None, help="the OpenMantra folder (tools/openmantra.py's default)")
     run.add_argument("--out", type=Path, required=True)
     run.add_argument("--crops", type=Path, help="pictures of the made-up pages' flagged regions (scratch folder)")
@@ -1452,7 +1541,7 @@ def main(argv: list[str] | None = None) -> int:
     lst = sub.add_parser("list", help="the items and the shard each goes to")
     lst.add_argument("--of", type=int, default=16)
     lst.add_argument("--sets", default="openmantra,synthetic")
-    lst.add_argument("--scales", default="full,small")
+    lst.add_argument("--scales", default="full,small,jpeg,blur")
     lst.add_argument("--root", type=Path, default=None)
     mg = sub.add_parser("merge", help="join the shards' files into one table")
     mg.add_argument("files", nargs="+")
