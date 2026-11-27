@@ -1,13 +1,15 @@
 """DEVELOPER TOOL, NOT PART OF THE APPLICATION: an audit of the lettered page, numbers only.
 
 Pages are processed as the program processes them - detection, the three readers, the erase, the typesetting - with
-a made-up translator in place of the model (`Canned`: invented English as long as the professional line of the gold
-box a region matches, else 2.39 characters for each Japanese one, the dataset's mean; no model, no network), each at
-its own size and scaled down as a viewer shows it (a page fitted into ``SMALL_HEIGHT`` px of height, area
-resampling), and every lettered region is measured:
+a stand-in translator in place of the model (`Canned`: on the sample set the professional English of the gold box a
+region matches, in memory only; elsewhere invented English with that English's word lengths, as long as a made-up
+text's line, else 2.39 characters for each Japanese one, the dataset's mean; no model, no network), each at its own
+size and scaled down as a viewer shows it (a page fitted into ``SMALL_HEIGHT`` px of height, area resampling), and
+every lettered region is measured:
 
-* ``resid``: dark pixels of the original lettering left inside the region after the erase (pieces of glyph size,
-  not lines), and in how many specks;
+* ``resid``: pixels of the original lettering inside the erased area or the bubble's closed interior that the erase
+  moved less than half the way to the paper (pieces of glyph size, not lines, and not a line the erased page keeps:
+  the outline, a tail, hair), and in how many specks;
 * ``line_lost``: pixels of lines (the bubble's outline, a tail, the drawing) round the region that the erase made light;
 * ``ink_on_line`` / ``ink_out`` / ``ink_other``: lettering pixels on such a line, outside the bubble's interior (a
   closed light area round the text), and on another region's interior or lettering;
@@ -53,7 +55,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 1
+VERSION = 2
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 EN_PER_JA = 2.39  # characters of professional English per Japanese character in OpenMantra
 INK_DARK = 128  # an original pixel darker than this is ink (lettering, outline or drawing)
@@ -63,6 +65,12 @@ LIGHTER = 80
 LINE_DARK = 110  # a line pixel counts when it was darker than this
 LINE_GLYPHS = 2.5  # a dark piece longer than this many glyphs that is not inside the text box is a line
 INSIDE_TEXT = 0.6  # of a piece's pixels inside the text box (grown by a third of a glyph): lettering
+HALF_WAY = 0.5  # an erased pixel that went less than this share of the way from the original to the ground is left
+CONTRAST = 60  # levels between the lettering and its ground under which nothing is judged left
+SOLID = 0.25  # a dark area still there after an opening of this many glyphs is a fill, not a line
+TEXTURED = 25  # levels of deviation of a ground above which it is a tone or a drawing (compared blurred)
+DARK_KINDS = ("dark-bubble", "text-dark", "text-on-dark")  # light lettering on a dark ground
+OUTLINED = 0.3  # of the rim round a closed light area that must be ink for it to be a bubble's interior
 
 # reason codes and their thresholds
 RESID_PX = 6  # dark lettering pixels left in a region after its erase ...
@@ -79,7 +87,7 @@ LOW_AGREEMENT = 0.8  # OCR confidence under this, or the readers split
 NO_GOLD_SHARE = 0.3  # a region's text box overlaps no gold or made-up text box by this share of itself
 
 CODES = {
-    "RESIDUE": "dark specks of the original lettering left after the erase",
+    "RESIDUE": "specks of the original lettering left after the erase (inside the erased area or the bubble)",
     "LINE_CUT": "outline, tail or drawing lines erased round a region on paper",
     "ART_CUT": "many lines erased round a region on the drawing (LaMa)",
     "INK_ON_LINE": "lettering drawn on an outline or a line of the drawing",
@@ -651,15 +659,36 @@ WORDS = ("I", "you", "we", "it", "the", "a", "to", "and", "of", "is", "that", "w
          "really", "never", "always", "there", "here", "about", "think", "know", "want", "going", "right", "little",
          "something", "everyone", "nothing", "together", "remember", "tonight", "yesterday", "already", "maybe",
          "please", "wait", "come", "back", "home", "school", "friend", "brother", "teacher", "morning", "should",
-         "would", "could", "because", "though", "anyway", "seriously", "probably", "important", "different")
+         "would", "could", "because", "though", "anyway", "seriously", "probably", "important", "different",
+         "no", "so", "me", "he", "do", "my", "on", "in", "but", "not", "now", "can", "she", "was", "just", "like",
+         "well", "everything", "understand", "absolutely", "definitely", "comfortable", "interesting",
+         "unbelievable", "nevertheless")
+# the share of the words of each length (12: 12 letters or more) in OpenMantra's professional English, which the
+# invented English follows (numbers only; a vocabulary of long words hyphenates and shrinks twice as often)
+WORD_LENGTHS = {1: 0.053, 2: 0.169, 3: 0.234, 4: 0.222, 5: 0.116, 6: 0.092, 7: 0.049, 8: 0.034, 9: 0.018, 10: 0.007,
+                11: 0.004, 12: 0.004}
 
 
 def canned(n: int, seed: str) -> str:
-    """Invented English of about *n* characters, the same for the same *seed* (tools/room_eval.py's)."""
+    """Invented English of about *n* characters (never a word more), its words as long as the professional English's
+    (`WORD_LENGTHS`), the same for the same *seed*."""
     rnd = random.Random(seed)
+    by_len: dict[int, list[str]] = {}
+    for word in WORDS:
+        by_len.setdefault(min(12, len(word)), []).append(word)
+    lengths = sorted(WORD_LENGTHS)
+    weights = [WORD_LENGTHS[k] for k in lengths]
+    n = max(2, n)
     words: list[str] = []
-    while len(" ".join(words)) < max(2, n):
-        words.append(rnd.choice(WORDS))
+    while True:
+        room = n - len(" ".join(words)) - (1 if words else 0)
+        if room <= 0:
+            break
+        size = rnd.choices(lengths, weights)[0]
+        if size > room + 2:  # the last word: one that ends the text about where the line's English ends
+            words.append(rnd.choice(by_len[max(1, min(12, room))]))
+            break
+        words.append(rnd.choice(by_len[size]))
     text = " ".join(words)
     if len(words) >= 6:
         cut = len(words) // 2
@@ -672,15 +701,17 @@ def cjk(text: str) -> int:
 
 
 class Canned:
-    """A translator that answers each line with invented English (`canned`) as long as the English the line's
-    region should get (`lengths`, set per page from the gold or made-up texts it matches), else EN_PER_JA times its
-    Japanese characters."""
+    """A translator that answers each line of the sample set with the professional English of the gold box its
+    region matches (`gold_of`, set per page; in memory only, never in the output), and every other line with
+    invented English (`canned`) as long as the English the line's region should get (`length_of`: a made-up text's),
+    else EN_PER_JA times its Japanese characters."""
 
     name = "canned"
 
     def __init__(self) -> None:
         self.regions: list[Any] = []
         self.length_of: Any = None
+        self.gold_of: Any = None
         self.key = ""
 
     def translate_page(self, texts: Sequence[str], context: Sequence[tuple[str, str]] = (), notes: str = "",
@@ -695,6 +726,10 @@ class Canned:
                     used.add(k)
                     region = r
                     break
+            gold = self.gold_of(region) if region is not None and self.gold_of is not None else ""
+            if gold:  # (the sample set: the professional line itself, in memory only)
+                out.append(gold)
+                continue
             n = self.length_of(region) if region is not None and self.length_of is not None else 0
             n = n or max(2, round(EN_PER_JA * max(1, cjk(t))))
             seed = f"{self.key}/{region.text_box if region is not None else len(out)}"
@@ -894,6 +929,9 @@ def _interior(O: Any, letters: Any, tb: Box, win: Box) -> Any:
     sel = np.isin(labels, list(ids))
     if sel[0, :].any() or sel[-1, :].any() or sel[:, 0].any() or sel[:, -1].any():
         return None
+    rim = (cv2.dilate(sel.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~sel
+    if rim.any() and float((O[y0:y1, x0:x1][rim] < INK_DARK).mean()) < OUTLINED:
+        return None  # (closed by no outline: a gradient's or a tone's light part)
     out = np.zeros(O.shape, bool)
     out[y0:y1, x0:x1] = sel
     return out
@@ -907,6 +945,75 @@ def _specks(mask: Any) -> int:
         return 0
     n, _l, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
     return int(sum(1 for i in range(1, n) if stats[i, 4] >= 2))
+
+
+def _long_pieces(mask: Any, win: Box, length: float) -> Any:
+    """The pieces of *mask* in *win* longer than *length* (page-sized): lines kept on the erased page."""
+    import numpy as np
+    import cv2
+
+    x0, y0, x1, y1 = win
+    out = np.zeros(mask.shape, bool)
+    sub = mask[y0:y1, x0:x1].astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(sub, connectivity=8)
+    if n > 1:
+        keep = np.zeros(n, bool)
+        keep[1:] = np.maximum(stats[1:, 2], stats[1:, 3]) > length
+        out[y0:y1, x0:x1] = keep[labels]
+    return out
+
+
+def _solid(mask: Any, g: float, win: Box) -> Any:
+    """The parts of *mask* in *win* that an opening of `SOLID` glyphs keeps: fills (a black ground), not lines."""
+    import numpy as np
+    import cv2
+
+    k = max(3, int(round(SOLID * g)) | 1)
+    x0, y0, x1, y1 = win
+    out = np.zeros(mask.shape, bool)
+    sub = mask[y0:y1, x0:x1].astype(np.uint8)
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    out[y0:y1, x0:x1] = cv2.dilate(cv2.morphologyEx(sub, cv2.MORPH_OPEN, ker), np.ones((3, 3), np.uint8)) > 0
+    return out
+
+
+def _ground(O: Any, ring: Any) -> tuple[float, float] | None:
+    """The ground's mean and deviation over *ring*, None where it has too few pixels."""
+    if int(ring.sum()) < 20:
+        return None
+    v = O[ring]
+    return float(v.mean()), float(v.std())
+
+
+def _left(E: Any, ink: float | Any, dom: Any, ground: float, std: float) -> Any:
+    """The pixels of *dom* still nearer the lettering's ink (a level, or the original's pixels) than half the way
+    to the *ground*; on a textured ground (a tone) compared blurred, as the eye sees it."""
+    import numpy as np
+    import cv2
+
+    full = np.abs(ground - ink)
+    seen = cv2.blur(E.astype(np.float32), (5, 5)) if std > TEXTURED else E
+    return dom & (full >= CONTRAST) & (np.abs(seen - ink) < HALF_WAY * full)
+
+
+def _truth_left(O: Any, E: Any, T: Any, Lo: Any, inter: Any, t: dict[str, Any], tm: Any) -> Any:
+    """The made-up text *t*'s pixels *tm* left after the erase: nearer its ink than half the way to the ground
+    round its text box (a ring half a glyph to a glyph beyond it, inside its bubble when it has one, off every
+    lettering and outline; compared blurred on a tone)."""
+    import numpy as np
+    import cv2
+
+    h, w = O.shape
+    g = float(t.get("size") or 15)
+    tb = t["text_box"]
+    ring = _box_mask((h, w), _grow(tb, g, w, h)) & ~_box_mask((h, w), _grow(tb, g / 2, w, h))
+    ring &= ~(cv2.dilate((T | Lo).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
+    if t.get("bubble"):
+        ring &= inter == t["bubble"]
+    got = _ground(O, ring)
+    ink = float(t.get("colour", 0))
+    ground, std = got if got is not None else (255.0 - ink, 0.0)
+    return _left(E, ink, tm, ground, std)
 
 
 def _hyphens(lines: Sequence[str]) -> int:
@@ -944,19 +1051,31 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             "inpainted": r.inpainted is not None, "angle": round(float(r.angle), 1), "codes": [], "m": {}}
         m = row["m"]
         codes = row["codes"]
-        letters, lines_ = _pieces(dark, tbg, g, win)
         before = rec.before.get(id(r))
         paper = rec.paper.get(id(r))
+        # light lettering on a dark ground (the paper the erase took, else the region's kind): its pieces are the
+        # light ones, its interior the dark area round it, and the ground itself (a fill) is no line
+        dark_ground = sum(paper) / 3 < 100 if paper else r.kind in DARK_KINDS
+        inkmask = (O > 255 - INK_DARK) if dark_ground else dark
+        letters, lines_ = _pieces(inkmask, tbg, g, win)
+        # (lettering on a fill - a black ground, a gradient's dark end - is no lettering on a line)
+        thin = _long_pieces(lines_ & ~_solid(inkmask, g, win), win, LINE_GLYPHS * g)
+        inter = _interior(255 - O if dark_ground else O, letters, tb, win)
         if before is not None:
             mb = _page_mask((h, w), before[0], before[1])
             row["paper"] = list(paper) if paper else None
             light = paper is not None and sum(paper) / 3 >= 200
-            dom = letters & (mb | _box_mask((h, w), tbg))
-            if r.kind in ("dark-bubble", "text-dark") or (paper is not None and sum(paper) / 3 < 100):
-                dom = (O[:, :] > 255 - INK_DARK) & mb & _box_mask((h, w), tbg)
-                left = dom & (E > 255 - STAYS_DARK)
-            else:
-                left = dom & (E < STAYS_DARK)
+            # the original's lettering inside the erased area or the bubble's closed interior (not the text box's
+            # corners beyond the bubble: a tone, a hatching, the outline), not moved half the way to the paper, and
+            # not a piece of a line the erased page still has (the outline, a tail, hair: kept on purpose)
+            zone = mb.copy()
+            if inter is not None:
+                zone |= cv2.erode(inter.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+            dom = letters & zone
+            ground = sum(paper) / 3 if paper else (0.0 if dark_ground else 255.0)
+            left = _left(E, O, dom, ground, 0.0)
+            still = (E > 255 - STAYS_DARK) if dark_ground else (E < STAYS_DARK)
+            left &= ~_long_pieces(still, win, LINE_GLYPHS * g)
             m["letter_px"] = int(dom.sum())
             m["resid_px"] = int(left.sum())
             m["resid_specks"] = _specks(left)
@@ -981,15 +1100,15 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                     m["box_excess"] = round(_area(tb) / max(1.0, _area(ib)), 2)
                     if cover < BOX_COVER:
                         codes.append("BOX_SMALL")
-                    on_page = r.kind not in ("bubble", "dark-bubble")  # (in a bubble the box moves nothing)
+                    # (in a bubble the box moves nothing: one found as a bubble, or a closed interior round it)
+                    on_page = r.kind not in ("bubble", "dark-bubble") and inter is None
                     if on_page and m["box_excess"] > BOX_EXCESS and _area(tb) - _area(ib) > 8 * g * g:
                         codes.append("BOX_BIG")
-        inter = _interior(O, letters, tb, win)
         interiors[id(r)] = inter
         if id(r) in inks:
             ink = inks[id(r)]
             m["ink_px"] = int(ink.sum())
-            on_line = ink & (cv2.dilate(lines_.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+            on_line = ink & (cv2.dilate(thin.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
             m["ink_on_line"] = int(on_line.sum())
             if m["ink_on_line"] >= INK_ON_LINE_PX:
                 codes.append("INK_ON_LINE")
@@ -1043,7 +1162,7 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             t = truth[row["truth"]]
             tm = T & _box_mask((h, w), _grow(t["text_box"], 2, w, h))
             tm &= _box_mask((h, w), r.bbox)
-            left = tm & ((E > 255 - STAYS_DARK) if t["colour"] == 255 else (E < STAYS_DARK))
+            left = _truth_left(O, E, T, Lo, layers["inter"], t, tm)
             m["t_letter_px"] = int(tm.sum())
             m["t_resid_px"] = int(left.sum())
             m["t_resid_specks"] = _specks(left)
@@ -1085,7 +1204,7 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
     if T is not None:  # every made-up text's pixels left after all the erases, whatever region took it
         for t in truth:
             tm = T & _box_mask((h, w), _grow(t["text_box"], 2, w, h))
-            left = tm & ((E > 255 - STAYS_DARK) if t["colour"] == 255 else (E < STAYS_DARK))
+            left = _truth_left(O, E, T, Lo, layers["inter"], t, tm)
             n_left, n_all = int(left.sum()), int(tm.sum())
             if n_left >= max(RESID_PX, RESID_SHARE * n_all):
                 page_codes.append({"code": "T_LEFT", "truth": t["id"], "box": t["text_box"], "case": t.get("case", ""),
@@ -1127,8 +1246,8 @@ def open_item(item: str, root: Path, models_dir: Path) -> dict[str, Any]:
         series = openmantra.series_names(pages)[int(title) - 1]
         page = next(p for p in pages if p.series == series and p.index == int(index))
         rgb = np.asarray(page.open())
-        texts = [{"id": k, "text_box": list(b.box), "en_len": len(b.en), "worded": worded(b.ja), "case": "gold",
-                  "colour": 0, "bubble": 0} for k, b in enumerate(page.bubbles)]
+        texts = [{"id": k, "text_box": list(b.box), "en_len": len(b.en), "en": " ".join(b.en.split()),
+                  "worded": worded(b.ja), "case": "gold", "colour": 0, "bubble": 0} for k, b in enumerate(page.bubbles)]
         got = {"rgb": rgb, "layers": None, "texts": texts, "bait": [], "kind": "openmantra"}
     else:
         got = synthetic_page(name.split(":", 1)[1], models_dir)
@@ -1202,7 +1321,12 @@ def run_item(pipe: Any, translator: Canned, rec: Recorder, item: str, root: Path
             return int(texts[pairs[0][0]].get("en_len") or 0)
         return 0
 
+    def gold_of(region: Any) -> str:
+        pairs = match([t["text_box"] for t in texts], [(region.bbox, region.text_box)])
+        return str(texts[pairs[0][0]].get("en") or "") if pairs else ""
+
     translator.length_of = length_of
+    translator.gold_of = gold_of
     t0 = time.monotonic()
     res = pipe.process(Image.fromarray(rgb), translate=True, use_cache=False)
     seconds = time.monotonic() - t0
