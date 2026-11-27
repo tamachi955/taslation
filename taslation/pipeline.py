@@ -2911,6 +2911,11 @@ class Pipeline:
         for r in model:  # a classical region two model regions claim joined two bubbles: neither takes its shape
             if r.after.adopted is not None and claimed[id(r.after.adopted)] > 1:
                 r.after = self.shaper.rebuilt(rgb, r, ())
+        for r in model:  # a bubble with no shape of its own on paper closed round it: that paper is its room
+            if r.after.tier == 3 and r.after.kind in ("bubble", "dark-bubble"):
+                room = artwork.closed_room(rgb, r.after, self.page_scale(rgb))
+                if room is not None:
+                    r.after.mask = room
         return [*model, *classical]
 
     def _detect_classical(self, rgb: np.ndarray, cancel: threading.Event | None = None) -> list[TextRegion]:

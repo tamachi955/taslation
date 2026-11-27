@@ -1105,6 +1105,7 @@ with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change
   and the translation is set in the space that is freed. When the drawing is close, the translation gets smaller, and small bits of drawing mistaken for parts of letters are erased with them.
   Text that runs into busy drawing of the same darkness is missed by the classical detection. With `translate_sfx = false`,
   hand-drawn sound effects are left as drawn. The layout model, its licence and what its card says of its training data are in `docs/THIRD_PARTY.md`.
+  A bubble the layout model found and the classical detection could not outline has its translation set on the paper closed round its lettering, inside the bubble's outline, where there is such paper; elsewhere in the box the model found. Inside the outline, the translation of a narrow bubble is smaller.
 * Bubbles that touch or overlap and form one white area are cut apart where they narrow, or where the outline turns sharply inward from both sides, and each is translated on its own.
   This also holds when the two texts sit offset from each other, as long as they are set further apart than the lines within each.
   A single bubble with two sets of columns stays one region (`split_joined_bubbles`, which can also be changed in the book's settings).

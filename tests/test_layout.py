@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import pytest
 
@@ -99,6 +100,38 @@ def test_lettering_on_a_white_area_takes_the_area_as_a_second_choice():
     model = region(110, 110, 290, 290, "bubble", text_box=(150, 150, 250, 250), from_model=True)
     shaped = Shaper().rebuilt(page, model, [])
     assert shaped.tier in (1, 2) and shaped.mask[90, 90] == 255 and shaped.mask[2, 2] == 0
+
+
+def _grey_bubble(closed: bool = True) -> np.ndarray:
+    """An oval bubble of light grey paper (lighter than an outline, not as white as a white area's) outlined on a
+    hatching, two columns of lettering in it; where *closed* is False its outline is open to the hatching."""
+    page = np.full((900, 700, 3), 255, np.uint8)
+    page[::5] = 60
+    cv2.ellipse(page, (350, 450), (130, 190), 0, 0, 360, (0, 0, 0), 3)
+    cv2.ellipse(page, (350, 450), (127, 187), 0, 0, 360, (220, 220, 220), -1)
+    for x in (310, 370):
+        for y in range(330, 570, 40):
+            page[y:y + 26, x:x + 22] = 0
+    if not closed:
+        page[430:470, 216:226] = 220
+    return page
+
+
+@pytest.mark.parametrize("closed", [True, False])
+def test_a_bubble_with_no_shape_of_its_own_takes_the_paper_closed_round_it_as_its_room(settings, closed):
+    page = _grey_bubble(closed)
+    boxes = [box(220, 260, 480, 640, BUBBLE), box(290, 300, 410, 600)]
+    model = model_regions(page, boxes)[0]
+    assert Shaper().rebuilt(page, model, []).tier == 3  # (no white area: the plain box is its mask)
+    p = _models(settings, FakeLayout(boxes))
+    p._detect_classical = lambda rgb: []
+    shaped = p._detect(page)[0].after
+    assert shaped.tier == 3 and shaped.mask.shape == (380, 260)
+    if closed:  # within its outline, the lettering's place too, not its box's corners nor the hatching
+        assert shaped.mask[0, 0] == 0 and shaped.mask[1, 130] == 0 and shaped.mask[190, 130] == 255
+        assert shaped.mask[80, 100] == 255 and shaped.mask[190, 1] == 0
+    else:  # paper open to the page: the plain box as before
+        assert (shaped.mask == 255).all()
 
 
 # ------------------------------------------------------------------ in the pipeline, on stand-ins

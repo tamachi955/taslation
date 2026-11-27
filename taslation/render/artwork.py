@@ -11,15 +11,16 @@ in pixels are taken at the scale of the region's page (`pagescale`: a page shown
 its ring, reach and bands shrunk with it).
 
 A model "bubble" that the classical detectors could not close is judged here too: with its plain box as the mask (tier
-3) unless it lies on paper closed all round, with a white area (tier 2) when its ground is not flat; one that has paper
-between its strokes after all (`on_paper`: an open or a thin outline) goes back to the paper fill. So does lettering
-on paper closed all round (`closed_interior`: a bubble, whatever found it, a white area the layout model called text on
-the page), judged on that paper alone, never on a ring that crosses the bubble's outline: round a tall narrow bubble's
-column the ring always reached the outline, and the inpainting left grey ghosts of the glyphs on its paper. So does
-lettering whose ground right round it is one flat colour or a smooth shading (`plain_ground`: a black or white panel, a gradient), where the model only
-blotches what a fill paints as it was: its hole, ring and all, is painted with that ground (`fill_ground`) first. So is
-the hole of outlined lettering on a flat ground, which is no art (`FLAT_RINGS`): the paper fill took a thick white ring
-for paper and left it.
+3; or the paper closed round its lettering, the room it is set in, `closed_room`) unless it lies on paper closed all
+round, with a white area (tier 2) when its ground is not flat; one that has paper between its strokes after all
+(`on_paper`: an open or a thin outline) goes back to the paper fill. So does lettering on paper closed all round
+(`closed_interior`: a bubble, whatever found it, a white area the layout model called text on the page), judged
+on that paper alone, never on a ring that crosses the bubble's outline: round a tall narrow bubble's column the ring
+always reached the outline, and the inpainting left grey ghosts of the glyphs on its paper. So does lettering whose
+ground right round it is one flat colour or a smooth shading (`plain_ground`: a black or white panel, a gradient),
+where the model only blotches what a fill paints as it was: its hole, ring and all, is painted with that ground
+(`fill_ground`) first. So is the hole of outlined lettering on a flat ground, which is no art (`FLAT_RINGS`): the paper
+fill took a thick white ring for paper and left it.
 
 A rectangle the reader drew, or a region they resized or moved, is judged as a detected region is (`drawn_on_art`): on
 the drawing - a gradient, a tone or hatching the paper fill took for paper too - its lettering comes here, and where the
@@ -102,6 +103,10 @@ THROUGH_CORE = 0.3  # ... this much of a glyph along its edge (the outline's, an
 THROUGH_SHARE = 0.015  # ... this share of the hole at the least, is the drawing seen through the bubble (`see_through`)
 THROUGH_LEVEL = 170  # grey level under which that ink is followed: the dark threshold (140) and a thin line's
 #                      anti-aliasing (`erase.LINK_LEVELS`)
+ROOM_HOLD = 0.8  # of a model bubble's text box at the least: the paper closed round it, its holes filled, that is
+#                  its room (`closed_room`; less holds part of its lettering: the paper between the lines of a
+#                  bubble drawn see-through, where the translation came out tiny) ...
+ROOM_IN = 7  # ... drawn in by an ellipse this wide (px at the page's scale), as a white area's (tier 2)
 TONE_FILL = True  # a hole on a ground that repeats itself (a screentone, a hatching) is painted from it (`fill_tone`)
 TONE_BAND = 24  # px of ground round the hole its repeats are measured on (`tone_shifts`) ...
 TONE_REPEAT, TONE_DIP = 0.8, 0.3  # ... where it repeats (normalised autocorrelation), after falling under this
@@ -290,6 +295,30 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     if found is None and open_:
         found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE)
     return found
+
+
+def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np.ndarray | None:
+    """The room of a model bubble with no shape of its own (tier 3, whose mask is its plain box), as a mask of its
+    box: the paper closed round its lettering (`closed_interior`), its holes (the lettering) filled, within the box,
+    drawn in by `ROOM_IN` - where its translation is set, as in a white area's (tier 2), not over the outline and past
+    it where the box's corners reach. None where there is no such paper, or it holds less than `ROOM_HOLD` of the
+    text box. Pixels at the page's *scale* (`pagescale`)."""
+    closed = closed_interior(image, box_of(image, region), region.dark, scale)
+    if closed is None:
+        return None
+    (wx0, wy0, wx1, wy1), inside, _far = closed
+    x0, y0, x1, y1 = max(region.x0, wx0), max(region.y0, wy0), min(region.x1, wx1), min(region.y1, wy1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    room = np.zeros((region.height, region.width), np.uint8)
+    filled = fill_holes(inside.astype(np.uint8) * 255)
+    room[y0 - region.y0:y1 - region.y0, x0 - region.x0:x1 - region.x0] = filled[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
+    tx0, ty0, tx1, ty1 = region.text_box
+    held = room[max(0, ty0 - region.y0):max(0, ty1 - region.y0), max(0, tx0 - region.x0):max(0, tx1 - region.x0)]
+    if not held.size or cv2.countNonZero(held) < ROOM_HOLD * held.size:
+        return None
+    room = cv2.erode(room, pagescale.disc(ROOM_IN, scale))
+    return room if cv2.countNonZero(room) else None
 
 
 def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, scale: float, reach: float
