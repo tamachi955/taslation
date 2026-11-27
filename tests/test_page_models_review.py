@@ -549,6 +549,35 @@ def test_a_plain_box_is_painted_out_only_where_its_characters_were_read():
     assert (r.mask == 255).all()  # its own mask, where the translation is set, is untouched
 
 
+def test_a_plain_box_takes_the_whole_of_a_glyph_its_character_box_cut_off():
+    """The reading's box of a character holds most of its glyph but not all: the rest goes too, not a speck left past
+    the box; a line the lettering crosses, running on far past the boxes, stays past them."""
+    page = np.full((300, 300, 3), 255, np.uint8)
+    cv2.rectangle(page, (102, 100), (118, 131), (0, 0, 0), 3)  # a glyph whose box (below) misses its last 7 px
+    page[160:180, 100:120] = 0  # another character
+    page[169:171, 40:260] = 0  # a line of the drawing through it, far past the boxes
+    r = region(50, 50, 250, 250, "bubble", from_model=True, tier=3, glyph=20.0)
+    r.char_boxes = [(100, 98, 120, 122), (100, 160, 120, 180)]
+    Pipeline._paper_erase(page, r)
+    assert (page[96:136, 98:122] > 200).all()  # the whole glyph
+    assert (page[169:171, 40:90] == 0).all() and (page[169:171, 130:260] == 0).all()  # the line past the boxes
+
+
+def test_a_strand_of_hair_between_two_columns_is_no_glyph_their_boxes_cut_off():
+    """A thin piece the characters' grown boxes take part of, lying within half a glyph of them but three glyphs long
+    (a strand of hair between two columns of a bubble drawn see-through), stays past the boxes; a glyph's end goes."""
+    page = np.full((300, 300, 3), 255, np.uint8)
+    page[140:200, 122:124] = 0  # the strand, along the first column's grown boxes (their edge at x 123)
+    page[100:131, 132:134] = 0  # a glyph's stroke the second column's box (from y 98 to 122, grown) cut off
+    r = region(50, 50, 250, 250, "bubble", from_model=True, tier=3, glyph=20.0)
+    mask = np.zeros((200, 200), np.uint8)
+    mask[95 - 50:205 - 50, 97 - 50:123 - 50] = 255  # the first column's characters, grown
+    mask[95 - 50:125 - 50, 127 - 50:153 - 50] = 255  # the second column's first character, grown
+    whole = Pipeline._whole_glyphs(page, r, mask)
+    assert not whole[140 - 50:200 - 50, 123 - 50].any()  # the strand past the boxes stays
+    assert whole[125 - 50:131 - 50, 132 - 50:134 - 50].all()  # the stroke's end goes
+
+
 def test_an_unclosed_bubble_on_paper_loses_the_ruby_its_reading_left_out():
     """A model bubble the detectors could not close, with paper under its lettering (`artwork.on_paper`): the
     lettering its text box holds that the reading's characters leave out (ruby beside a column) goes too; the open

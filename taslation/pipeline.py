@@ -179,6 +179,8 @@ GLYPH_REACH_ERASE = 4.0  # glyphs: ink a bubble's text box holds outside its mas
 EDGE_KEEP = 4  # ... and off the box's edge by this many px (there, it is the outline)
 LEFT_OUT_LEAST = 8  # px of a piece at 24 px glyphs, at the least (with the glyph's square)
 CHAR_GROW = 0.15  # of a glyph: how far past the reading's character box the lettering of a plain box is painted out
+WHOLE_GLYPH = 0.5  # ... and the rest of a dark piece it holds part of that lies within this much of a glyph past it
+WHOLE_SIZE = 2.0  # ... and is no longer than this many glyphs (`Pipeline._whole_glyphs`; a strand of hair is longer)
 LOOSE_KINDS = ("text", "text-dark")  # lettering with nothing round it (a closed block is "text-on-page", "text-on-dark")
 ON_ART_KINDS = ("text", "text-dark", "text-on-page", "text-on-dark")  # lettering set on the page's ground
 DISPLAY_KIND = "shout"  # (one of `UNCAPPED_KINDS`) the kind display lettering on the art is capped as
@@ -5138,7 +5140,9 @@ class Pipeline:
                      dark_threshold: int = 140, dark: bool = False) -> tuple[int, int, int]:
         """`erase_region`; for a model region with no shape of its own (tier 3: its plain box, which holds the drawing
         as much as the lettering) only the lettering is painted out: where its reading found characters (`char_boxes`,
-        a little grown), as lettering set on the page is, never the box; a model bubble's with paper under its lettering
+        a little grown, and the rest of a glyph a box cut off: `_whole_glyphs`), as lettering set on the page is, never
+        the box, and a bubble's on the drawing (`artwork.on_art`) keeps the straight lines through its lettering box
+        (`artwork._keep_lines`); a model bubble's with paper under its lettering
         (`artwork.on_paper`) also loses the lettering its text box holds that the characters leave out (`_left_out`:
         ruby beside a column). A model bubble with a classical shape also loses
         the lettering its text box holds that the shape left out (`_left_out`): a large glyph, a line by the outline.
@@ -5171,6 +5175,8 @@ class Pipeline:
         for x0, y0, x1, y1 in (() if region.char_quads else region.char_boxes):
             mask[max(0, y0 - grow - region.y0):max(0, y1 + grow - region.y0),
                  max(0, x0 - grow - region.x0):max(0, x1 + grow - region.x0)] = 255
+        if region.char_boxes:
+            mask = Pipeline._whole_glyphs(image, region, mask, dark_threshold, dark)
         q.mask = mask if region.char_boxes else region.mask
         if region.char_boxes and region.kind in ("bubble", "dark-bubble") and artwork.on_paper(image, region):
             # a bubble with paper under its lettering after all: the lettering its text box holds that the reading's
@@ -5181,7 +5187,45 @@ class Pipeline:
             extra = Pipeline._left_out(image, read, dark_threshold, dark)
             if extra is not None:
                 q.mask = np.where(extra, np.uint8(255), mask)
-        return erase_region(image, q, mode, white_threshold, dark_threshold, dark)
+        # a bubble on the drawing (no paper closed round it, or the drawing seen through it): the straight lines through
+        # its lettering box stay, as lettering set on the page keeps those through its box (`artwork._keep_lines`)
+        kept = (artwork._keep_lines(image, region, dark, dark_threshold)
+                if region.kind in ("bubble", "dark-bubble") and artwork.on_art(image, region) else None)
+        bg = erase_region(image, q, mode, white_threshold, dark_threshold, dark)
+        artwork._put_back(image, kept)
+        return bg
+
+    @staticmethod
+    def _whole_glyphs(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark_threshold: int = 140,
+                      dark: bool = False) -> np.ndarray:
+        """*mask* (uint8, the region's box: the reading's characters grown) with the rest of each dark piece it holds
+        part of that lies wholly within `WHOLE_GLYPH` of a glyph of it and is no longer than `WHOLE_SIZE` glyphs, and
+        its anti-aliasing: the end of a glyph its character box cut off, which the paper fill left as a speck past the
+        box. A piece that runs on further, joined `LINK_LEVELS` past the dark threshold too (a line of the drawing the
+        lettering crosses, the outline, one that leaves the box), or a longer one (a strand of hair between two
+        columns) stays as it is past the boxes."""
+        crop = image[region.y0:region.y1, region.x0:region.x1]
+        gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
+        if gray.shape != mask.shape:
+            return mask
+        if dark:
+            gray = 255 - gray
+        ink = gray < dark_threshold
+        n, labels, stats, _ = cv2.connectedComponentsWithStats((gray < dark_threshold + LINK_LEVELS).astype(np.uint8),
+                                                                connectivity=8)
+        glyph = region.glyph or 20.0 * pagescale.of(region)
+        reach = max(1, int(WHOLE_GLYPH * glyph))
+        near = cv2.dilate((mask > 0).astype(np.uint8), np.ones((2 * reach + 1,) * 2, np.uint8)) > 0
+        near[0, :] = near[-1, :] = near[:, 0] = near[:, -1] = False  # (what leaves the box runs on past it)
+        whole = np.bincount(labels[(mask > 0) & ink], minlength=n) > 0
+        whole &= np.bincount(labels[~near & (labels > 0)], minlength=n) == 0
+        whole &= np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT]) <= WHOLE_SIZE * glyph
+        whole[0] = False
+        rest = whole[labels] & (mask == 0)
+        if not rest.any():
+            return mask
+        rest = cv2.dilate(rest.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        return np.where(rest, np.uint8(255), mask)
 
     @staticmethod
     def _left_out(image: np.ndarray, region: TextRegion, dark_threshold: int = 140, dark: bool = False) -> np.ndarray | None:

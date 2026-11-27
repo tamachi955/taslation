@@ -94,6 +94,13 @@ CLOSED_SHARE = 0.9  # ... which holds this share of the light pixels in the box 
 CLOSED_PAPER = 0.03  # ... and of the box's area at least this much paper clear of the ink (`closed_interior`; the
 #                      white rings of outlined lettering closed on the made-up layouts' tones and gradients had none)
 PAPER_SURE = 0.95  # ... and a rectangle whose own ground, white (`RINGED` or lighter), is this even lies on a bubble's
+THROUGH_HOLE = 0.15  # of a glyph past the reading's characters: the hole of a plain box's lettering (as
+#                      `pipeline.CHAR_GROW`); the ink joined to it (`THROUGH_LEVEL`) that runs on past ...
+THROUGH_GROW = 0.45  # ... this much of a glyph, inside the paper closed round it less a band of ...
+THROUGH_CORE = 0.3  # ... this much of a glyph along its edge (the outline's, and where it touches a glyph) ...
+THROUGH_SHARE = 0.015  # ... this share of the hole at the least, is the drawing seen through the bubble (`see_through`)
+THROUGH_LEVEL = 170  # grey level under which that ink is followed: the dark threshold (140) and a thin line's
+#                      anti-aliasing (`erase.LINK_LEVELS`)
 TONE_FILL = True  # a hole on a ground that repeats itself (a screentone, a hatching) is painted from it (`fill_tone`)
 TONE_BAND = 24  # px of ground round the hole its repeats are measured on (`tone_shifts`) ...
 TONE_REPEAT, TONE_DIP = 0.8, 0.3  # ... where it repeats (normalised autocorrelation), after falling under this
@@ -202,10 +209,12 @@ def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> 
     """Whether *region* is lettering on the page whose ground, in a ring round its box, is not one flat colour; a
     bubble the classical detectors could not close, and a rectangle of the reader's (`drawn_on_art`), are judged as
     the module's docstring says. Lettering on paper closed all round (`closed_interior`) is judged within that paper
-    (`_ring_not_flat`), and a model bubble with no shape of its own is on the art only off such paper."""
+    (`_ring_not_flat`), and a model bubble with no shape of its own is on the art off such paper, or where the drawing
+    shows through it (`see_through`)."""
     if region.kind in ("bubble", "dark-bubble"):
         if region.tier == 3:
-            return closed_interior(image, box_of(image, region), region.dark, pagescale.of(region)) is None
+            closed = closed_interior(image, box_of(image, region), region.dark, pagescale.of(region))
+            return closed is None or see_through(image, region, closed)
         if region.tier != 2:
             return False
     elif region.kind in MANUAL_KINDS:
@@ -301,6 +310,50 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     if int(far.sum()) < CLOSED_PAPER * bw * bh:
         return None
     return (wx0, wy0, wx1, wy1), inside, far
+
+
+def _char_hole(region: TextRegion, shape: tuple[int, ...], x0: int, y0: int, grow: int) -> np.ndarray:
+    """The reading's characters of *region* (`char_boxes`), each grown by *grow* px, as a bool mask of *shape* whose
+    corner lies at (*x0*, *y0*) on the page."""
+    hole = np.zeros(shape[:2], bool)
+    for cx0, cy0, cx1, cy1 in region.char_boxes:
+        hole[max(0, cy0 - grow - y0):max(0, cy1 + grow - y0), max(0, cx0 - grow - x0):max(0, cx1 + grow - x0)] = True
+    return hole
+
+
+def see_through(image: np.ndarray, region: TextRegion,
+                closed: tuple[tuple[int, int, int, int], np.ndarray, np.ndarray]) -> bool:
+    """Whether the drawing shows through the paper closed round a model bubble's lettering (*closed*, from
+    `closed_interior`): a bubble drawn see-through over hair, a hand, a gun, a caption box over a flower - lettering on
+    the drawing, whose lines the paper fill cut (white boxes over them, ends of glyphs left outside the boxes). Its
+    lines cross the lettering: the ink joined to the hole of its characters (`THROUGH_HOLE`, at `THROUGH_LEVEL`) runs on
+    past them (`THROUGH_GROW`) inside that paper - the light pixels the hole holds and those joined to them, the strokes
+    between them closed over (a disc of a glyph) - away from its edge (`THROUGH_CORE`), over `THROUGH_SHARE` of the
+    hole. A white bubble's lettering runs on nowhere, and its outline, however close, lies on that edge (a bubble with
+    a white rim round its outline, a bubble in a white panel); on the audit's cached sample pages none of the 415
+    closed bubbles but one drawn see-through has any of it. Without the reading's characters: no."""
+    if not region.char_boxes:
+        return False
+    (wx0, wy0, wx1, wy1), inside, _far = closed
+    gray = cv2.cvtColor(np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3]), cv2.COLOR_RGB2GRAY)
+    if region.dark:
+        gray = 255 - gray
+    glyph = float(region.glyph or 20.0 * pagescale.of(region))
+    hole = _char_hole(region, gray.shape, wx0, wy0, max(2, int(THROUGH_HOLE * glyph)))
+    if not hole.any():
+        return False
+    _n, labels = cv2.connectedComponents((gray >= OUTLINE_LEVEL).astype(np.uint8), connectivity=4)
+    seeds = np.unique(labels[hole & inside])
+    own = np.isin(labels, seeds[seeds > 0]) & inside  # the paper the lettering lies on (not a white rim beyond)
+    disc = lambda r: pagescale.disc(2 * r + 1, 1.0)  # noqa: E731 - (radii in px of the page, glyphs already at its scale)
+    paper = fill_holes(cv2.morphologyEx(own.astype(np.uint8) * 255, cv2.MORPH_CLOSE, disc(int(glyph) // 2))) > 0
+    core = cv2.erode(paper.astype(np.uint8), disc(max(1, int(THROUGH_CORE * glyph)))) > 0
+    ink = gray < THROUGH_LEVEL
+    _k, parts = cv2.connectedComponents(ink.astype(np.uint8), connectivity=8)
+    joined = np.unique(parts[hole & ink])
+    on = np.isin(parts, joined[joined > 0]) & core & ~_char_hole(region, gray.shape, wx0, wy0,
+                                                                  max(2, int(THROUGH_GROW * glyph)))
+    return int(on.sum()) >= THROUGH_SHARE * int(hole.sum())
 
 
 def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
@@ -696,8 +749,15 @@ def _keep_lines(image: np.ndarray, region: TextRegion, dark: bool, dark_threshol
     """The straight lines of the drawing that run through the box of lettering set on the page (`erase.line_pixels`:
     a bubble's tail crossing it) and their pixels as they are, to be put back (`_put_back`) after a fill that took
     them with the lettering's ring; the paper fill keeps them too. (Left out of the hole, they made the ground fitted
-    round it darker.)"""
-    if dark or region.kind not in ART_KINDS:
+    round it darker.) So are those through the lettering box of a model bubble with no shape of its own (tier 3) on
+    the drawing (`on_art`: no paper closed round it, or the drawing seen through it): its plain box holds the drawing."""
+    if dark:
+        return None
+    if region.kind in ("bubble", "dark-bubble") and region.tier == 3:
+        lettering = copy.copy(region)
+        lettering.x0, lettering.y0, lettering.x1, lettering.y1 = box_of(image, region)
+        region = lettering
+    elif region.kind not in ART_KINDS:
         return None
     found = line_pixels(image, region, dark_threshold)
     if found is None:

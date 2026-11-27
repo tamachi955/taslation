@@ -266,6 +266,52 @@ def test_white_rings_closed_on_the_drawing_are_no_paper():
     assert on_art(page, region("text-on-page", box))
 
 
+def bubble_with_column(through=False, touching=False, rim=False):
+    """A white bubble closed all round, a column of seven glyphs in it and the reading's characters, as a model bubble
+    with no shape of its own (tier 3): *through*, a line of the drawing seen through the bubble crosses the column and
+    ends inside it (hair); *touching*, the last glyph is joined to the outline; *rim*, the bubble lies on a dark ground
+    with a white rim round its outline."""
+    page = flat(40 if rim else 255, (600, 400))
+    if not rim:
+        page[::5] = 60  # a hatching round the bubble
+    if rim:
+        cv2.ellipse(page, (200, 290), (68, 123), 0, 0, 360, (255, 255, 255), -1)
+    cv2.ellipse(page, (200, 290), (60, 115), 0, 0, 360, (255, 255, 255), -1)
+    cv2.ellipse(page, (200, 290), (60, 115), 0, 0, 360, (0, 0, 0), 3)
+    column = [(188, y, 212, y + 24) for y in range(190, 380, 30)]
+    for x0, y0, x1, y1 in column:
+        cv2.rectangle(page, (x0 + 2, y0 + 2), (x1 - 3, y1 - 3), (0, 0, 0), 3)
+    if through:
+        cv2.line(page, (150, 250), (250, 320), (0, 0, 0), 2)
+    if touching:
+        cv2.line(page, (200, 391), (200, 406), (0, 0, 0), 2)
+    r = region("bubble", (182, 186, 218, 398), tier=3, from_model=True, glyph=24.0)
+    r.char_boxes = column
+    return page, r
+
+
+@pytest.mark.parametrize("touching, rim", [(False, False), (True, False), (False, True)])
+def test_a_white_bubble_the_detectors_could_not_shape_stays_with_the_paper_fill(touching, rim):
+    """Paper closed round the lettering of a model bubble with no shape of its own is the bubble's: no ink joined to
+    its lettering runs on into it - a glyph joined to the outline, a white rim round the outline, are its edge."""
+    page, r = bubble_with_column(touching=touching, rim=rim)
+    found = artwork.closed_interior(page, artwork.box_of(page, r))
+    assert found is not None and not artwork.see_through(page, r, found)
+    assert not on_art(page, r)
+
+
+def test_a_model_bubble_the_drawing_shows_through_is_on_the_art():
+    """A bubble drawn see-through over the drawing: closed all round, but a line of the drawing crosses its lettering
+    and runs on inside its paper (hair, a hand, a gun) - lettering on the drawing, whose lines the paper fill cut, not
+    closed paper (it goes to the inpainting where that runs)."""
+    page, r = bubble_with_column(through=True)
+    found = artwork.closed_interior(page, artwork.box_of(page, r))
+    assert found is not None and artwork.see_through(page, r, found)
+    assert on_art(page, r)
+    r.char_boxes = []
+    assert not artwork.see_through(page, r, found)  # (without the reading's characters: no)
+
+
 @pytest.mark.parametrize("kind", ["manual", "manual-dark"])
 def test_a_readers_rectangle_goes_by_its_ground_as_a_detected_region(kind):
     """(tests/test_drawn_on_art.py: in a bubble, out of one, on a flat box.)"""
