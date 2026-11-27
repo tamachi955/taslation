@@ -2,19 +2,28 @@
 table (ids, order, what this checkout has, texts that fit the frame), the scenes picked and numbered as the GIF is
 made, every card line and step following sentences of docs/MANUAL.md that still stand word for word (or marked as the
 tool's own words; nothing quotes the README), nothing that compares or boasts, the version on the title card and the
-credit on every frame with a page, the 5 MB limit, a GIF of made-up frames and one of a recording (deleted once the GIF
-is written), no page text in a recording's facts; and of ``record``: what it refuses before anything starts, the
-stand-in run it asks for (its own scenario, the stand-in sharp at once, a port of its own for the translator), the
-check of each frame (another program's window or pixels: refused, and enough of them in a row stop the run), where
-TASlation's own windows draw, and the scenes' loop on made-up objects."""
+credit on every frame with a page, the panes and the right pane's foot outlined in their scenes, the 5 MB limit and
+the fit to the size of the GIF it replaces, a GIF of made-up frames and one of a recording (deleted once the GIF is
+written), no page text in a recording's facts; and of ``record``: what it refuses before anything starts (no clean
+place for the stand-in among the other programs' windows too), the stand-in run it asks for (its own scenario, the
+stand-in sharp at once on its monitor, a port of its own for the translator, TASlation starting editing and asking
+for the viewer), the screen's windows looked at while it runs (another program's window on the stand-in, the
+foreground come to ours from another program's: the take given up), what could take the foreground acting only
+while one of ours has it, messages posted to TASlation's own windows only, the check of each frame (another
+program's window or pixels: refused, and enough of them in a row stop the run; the chooser's frames on the window
+checks alone), where TASlation's own windows draw, and the scenes acted on made-up objects: the viewer chooser, and
+the scenes after it on a made-up TASlation answering the messages posted to it."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -26,7 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import intro_video as iv  # noqa: E402
 import promo_video as pv  # noqa: E402
 
-ORDER = ("turn", "panes", "original", "edit")
+ORDER = ("chooser", "reader", "turn", "panes", "foot", "language", "original", "edit")
 
 
 def quick(**kw) -> iv.Options:
@@ -125,16 +134,23 @@ def test_a_changed_sentence_makes_its_line_stale():
     assert "no longer says 'There is no account to make and no limit on the pages it translates.'" in stale[0]
     edited = dict(docs, **{iv.MANUAL: docs[iv.MANUAL].replace("switches editing off, and unchecked again, on",
                                                               "switches editing off")})
-    assert [s.split(":")[0] for s in stale_lines(facts, edited)] == ["step edit"]
+    assert [s.split(":")[0] for s in stale_lines(facts, edited)] == ["step reader"]
+    clicked = dict(docs, **{iv.MANUAL: docs[iv.MANUAL].replace("A double click opens the region editor beside it.",
+                                                               "A click opens the region editor beside it.")})
+    assert [s.split(":")[0] for s in stale_lines(facts, clicked)] == ["step edit"]
 
 
 def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypatch):
     assert all(scene.present() for scene in iv.SCENES)
     assert (ROOT / "taslation" / "panes.py").is_file() and (ROOT / "taslation" / "ui" / "see_edit.py").is_file()
+    assert (ROOT / "taslation" / "ui" / "see_menu.py").is_file()
     monkeypatch.setattr(iv, "has_module", lambda name: name != "taslation.ui.see_edit")
-    assert iv.scene_of("edit").present() is False and iv.scene_of("panes").present() is True
+    assert iv.scene_of("edit").present() is False and iv.scene_of("reader").present() is False
+    assert iv.scene_of("panes").present() is True and iv.scene_of("chooser").present() is True
     made_up = [entry["id"] for entry in iv.sample_source(seconds=0.5, fps=2.0).meta["scenes"]]
-    assert made_up == ["turn", "panes", "original"]  # (the sample: what this checkout has)
+    assert made_up == ["chooser", "turn", "panes", "foot", "language", "original"]  # (what this checkout has)
+    monkeypatch.setattr(iv, "has_module", lambda name: name != "taslation.ui.see_menu")
+    assert iv.scene_of("chooser").present() is False and iv.scene_of("edit").present() is True
 
 
 def test_the_scenes_are_numbered_as_the_gif_is_made():
@@ -259,6 +275,24 @@ def test_a_scene_frame_draws_the_picture_the_pointer_and_the_panes_outlined():
     assert iv.Painter(other, opts).state(turn, 10.0)[4] == ()  # (outlined in that scene only)
 
 
+def test_the_right_panes_foot_is_outlined_in_its_own_scene():
+    source = small_sample(("panes", "foot"), seconds=2.0, fps=4.0)
+    opts = quick()
+    painter = iv.Painter(source, opts)
+    parts = {p.id: p for p in iv.plan(source, opts) if p.kind == "scene"}
+    key = painter.state(parts["foot"], parts["foot"].ms / 2)
+    assert len(key[4]) == 1  # (the foot alone: not the panes)
+    x0, y0, x1, y1 = key[4][0]
+    panes = painter.state(parts["panes"], parts["panes"].ms / 2)[4]
+    right = panes[1]
+    assert right[0] <= x0 and x1 <= right[2] and right[1] < y0 and y1 <= right[3] + 1  # (the lower part of the right)
+    image = painter.draw(parts["foot"], key)
+    assert np.abs(np.asarray(image)[y0 - 4, (x0 + x1) // 2].astype(int) - iv.AMBER).max() <= 40
+    source.meta["foot"] = [[source.meta["foot"][0][0], -1, -1, -1, -1]]  # (no foot on show)
+    source.index()
+    assert iv.Painter(source, opts).state(parts["foot"], parts["foot"].ms / 2)[4] == ()
+
+
 # ---------------------------------------------------------------------------------------------------- the GIF
 def test_a_gif_of_made_up_frames(tmp_path):
     out = tmp_path / "sample.gif"
@@ -285,6 +319,33 @@ def test_a_gif_over_the_limit_is_refused_and_says_which_scenes_take_the_most(tmp
     report = iv.render(small_sample(), out, quick(limit=1000, allow_large=True))
     assert out.exists() and report["over_by"] > 0
     assert iv.GIF_LIMIT == 5_000_000
+
+
+def test_the_gif_is_fitted_to_the_size_of_the_one_it_replaces(tmp_path, capsys, monkeypatch):
+    assert iv.AIM_BYTES == 654_681 <= iv.GIF_LIMIT  # (the README's recording before this one)
+    assert iv.FIT_LADDER[0] == (iv.STILL_FPS, iv.COLOURS, iv.RENDER_FPS)
+    assert all(a[0] >= b[0] and a[1] >= b[1] and a[2] >= b[2] for a, b in zip(iv.FIT_LADDER, iv.FIT_LADDER[1:]))
+    out = tmp_path / "fit.gif"
+    report = iv.fit_render(small_sample(("turn",)), out, quick(), aim=10 ** 8)
+    first = dict(zip(("still_fps", "colours", "fps"), iv.FIT_LADDER[0]))
+    assert report["fit"]["chose"] == first and len(report["fit"]["tried"]) == 1
+    assert report["fps"] == iv.RENDER_FPS and out.stat().st_size == report["bytes"] <= 10 ** 8
+    out.unlink()
+    with pytest.raises(iv.TooLarge) as refused:
+        iv.fit_render(small_sample(("turn",)), out, quick(), aim=500)  # (none of the settings keeps it so small)
+    fit = refused.value.report["fit"]
+    assert fit["chose"] is None and [(t["still_fps"], t["colours"], t["fps"]) for t in fit["tried"]] == \
+        list(iv.FIT_LADDER)
+    assert all(t["bytes"] > 500 for t in fit["tried"]) and not out.exists()
+    assert not (tmp_path / "fit.part.gif").exists()
+    made_up = iv.sample_source
+    monkeypatch.setattr(iv, "sample_source", lambda: made_up(["turn"], seconds=1.0, fps=3.0))  # (one short scene)
+    assert iv.main(["render", "--sample", "--out", str(out), "--title-seconds", "0.5", "--card-seconds", "0.5",
+                    "--fit", "500"]) == 1
+    said = json.loads(capsys.readouterr().out)
+    assert said["refused"] is not None and said["fit"]["aim"] == 500 and not out.exists()
+    assert iv.parse(["render", "--sample", "--out", "x.gif", "--fit"]).fit == iv.AIM_BYTES
+    assert iv.parse(["render", "--sample", "--out", "x.gif"]).fit is None
 
 
 def test_the_gifs_images_are_read_back_with_their_times_and_bytes(tmp_path):
@@ -433,16 +494,67 @@ def test_record_refuses_before_anything_starts(tmp_path, monkeypatch):
     assert not started and not (tmp_path / "intro.zip").exists()
 
 
+def test_record_refuses_where_another_programs_window_lies_on_the_stand_ins_place(tmp_path, monkeypatch):
+    started = []
+    monkeypatch.setitem(sys.modules, "standin_e2e", None)  # (an import of the stand-in run would fail loudly)
+    monkeypatch.setitem(sys.modules, "demo_video", None)
+    monkeypatch.setattr(iv, "Run", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(iv, "monitor_areas", lambda: [((0, 0, 1920, 1040), True), ((1920, 0, 3840, 1040), False)])
+    shown = [iv.Shown(7, 4242, (3420 + iv.PLACE_MARGIN - 2, 100, 3600, 300))]  # (within the margin of its right side)
+    monkeypatch.setattr(iv, "windows_now", lambda: list(shown))
+    with pytest.raises(SystemExit) as refused:
+        iv.main(record_args(tmp_path))
+    assert "no clean place" in str(refused.value) and "monitor 2" in str(refused.value)
+    assert "nothing was started" in str(refused.value)
+    with pytest.raises(SystemExit) as missing:
+        iv.main(record_args(tmp_path, "--standin-monitor", "3"))
+    assert "no monitor 3" in str(missing.value)
+    assert not started and not (tmp_path / "intro.zip").exists() and not (tmp_path / "intro-run").exists()
+    shown[:] = [iv.Shown(7, 4242, (3420 + iv.PLACE_MARGIN, 100, 3600, 300)),  # (past the margin)
+                iv.Shown(8, os.getpid(), (1920, 0, 2500, 500)),  # (ours)
+                iv.Shown(9, 4243, (0, 0, 3840, 1080), desktop=True)]  # (the desktop's own)
+    assert iv.clean_place(iv.parse(record_args(tmp_path))) == (1920, 0, 3420, 900)
+
+
+def test_the_stand_ins_place_is_the_top_left_of_its_monitors_work_area():
+    areas = [((0, 0, 1920, 1040), True), ((1920, 0, 3840, 1040), False)]
+    assert iv.planned_place("1500x900", 2, areas) == (1920, 0, 3420, 900)
+    assert iv.planned_place("2500x1200", 1, areas) == (0, 0, 1920, 1040)  # (no larger than its work area)
+    with pytest.raises(SystemExit):
+        iv.planned_place("1500x900", 0, areas)
+    assert iv.STANDIN_MONITOR == 2 and iv.parse(["record", "--out", "x.zip"]).standin_monitor == 2
+
+
+def test_only_the_windows_of_other_programs_that_meet_a_place_are_found():
+    me = os.getpid()
+    shown = [iv.Shown(1, me, (0, 0, 100, 100)), iv.Shown(2, 4242, (90, 90, 200, 200)),
+             iv.Shown(3, 4242, (100, 0, 200, 50)), iv.Shown(4, 4243, (0, 0, 3000, 2000), desktop=True)]
+    found = iv.foreign_windows([(0, 0, 100, 100)], {me}, shown)
+    assert [w.hwnd for w in found] == [2]  # (ours, one only touching its edge, the desktop's own: left out)
+    assert iv.foreign_windows([(0, 0, 100, 100)], {me, 4242}, shown) == []
+    assert [w.hwnd for w in iv.foreign_windows([(0, 0, 100, 100), (150, 10, 160, 20)], {me}, shown)] == [2, 3]
+
+
 def test_the_stand_in_run_it_asks_for():
     args = iv.parse(["record", "--out", "x.zip"])
     assert args.start_ollama == iv.RECORD_PORT == 11435 and args.fps == iv.RECORD_FPS
     argv = iv.e2e_argv(args, Path("work"))
-    pairs = dict(zip(argv[::2], argv[1::2]))
+    assert argv[-2:] == ["--editing", "--chooser"]  # (TASlation starting editing, and asking for the viewer)
+    pairs = dict(zip(argv[:-2:2], argv[1:-2:2]))
     assert pairs["--scenario"] == iv.SCENARIO and pairs["--soft-first"] == "off"
     assert pairs["--start-ollama"] == "11435" and pairs["--out"] == "work"
     assert pairs["--standin-size"] == iv.STANDIN_SIZE and pairs["--first"] == str(iv.FIRST_PAGE)
+    assert pairs["--standin-monitor"] == str(iv.STANDIN_MONITOR) == "2"
     assert "--see-edit" not in argv and "--see-truth" not in argv and "--see-pane-shot" not in argv
     assert "11434" not in argv
+
+
+def test_the_e2e_run_places_its_stand_in_where_the_tool_looked():
+    import standin_e2e as e2e
+
+    parsed = e2e.parse(iv.e2e_argv(iv.parse(["record", "--out", "x.zip"]), Path("work")))
+    assert parsed.standin_monitor == iv.STANDIN_MONITOR and parsed.standin_size == iv.STANDIN_SIZE
+    assert parsed.chooser is True and parsed.editing is True and parsed.soft_first == "off"
 
 
 def test_its_scenario_holds_until_the_first_scene_turns_once_and_holds_to_the_end(monkeypatch):
@@ -482,6 +594,119 @@ def test_refused_frames_in_a_row_stop_the_run(tmp_path):
     finally:
         run.writer.abandon()
     assert not (tmp_path / "r.zip").exists()
+
+
+STANDIN = (100, 70, 1600, 1000)  # (the stand-in's window on the made-up screen)
+
+
+def screen_of(monkeypatch, shown: list, front: list, locks: list | None = None) -> None:
+    """A made-up screen for `Run.check_screen`: its windows *shown*, the process in front *front[0]*."""
+    monkeypatch.setattr(iv, "windows_now", lambda: list(shown))
+    monkeypatch.setattr(iv, "frame_rect", lambda hwnd: STANDIN)
+    monkeypatch.setattr(iv, "front_pid", lambda: front[0])
+    monkeypatch.setattr(iv, "lock_foreground", lambda on: (locks.append(on) if locks is not None else None) or True)
+
+
+def test_the_take_is_given_up_when_another_programs_window_meets_the_stand_in(tmp_path, monkeypatch):
+    me = os.getpid()
+    shown = [iv.Shown(1, me, (500, 300, 900, 500)), iv.Shown(2, 777, STANDIN),  # (the chooser; the stand-in)
+             iv.Shown(3, 4242, (1600, 0, 1900, 500)),  # (another program's beside it: only touching)
+             iv.Shown(4, 4243, (0, 0, 3840, 1080), desktop=True)]
+    locks: list = []
+    screen_of(monkeypatch, shown, [4242], locks)
+    run = iv.Run(tmp_path / "r.zip")
+    try:
+        assert run.check_screen() == []  # (no watch yet: nothing looked at)
+        run.watch, run.browser = SimpleNamespace(hwnd=5), SimpleNamespace(tree=[777])
+        assert run.pids() == {me, 777}
+        assert run.check_screen() == shown and run.checks == 1 and locks == [True] and not run.failed
+        assert run.check_screen() == shown and locks == [True]  # (the lock asked for again every LOCK_EVERY_S)
+        run.begin("panes")
+        shown.append(iv.Shown(5, 4242, (1590, 900, 1700, 1100)))  # (it comes over a corner, above or below)
+        assert run.check_screen() is None
+        assert run.failed == iv.FOREIGN and run.foreign == 1 and run.foreign_where == [[1590, 900, 1700, 1100]]
+        assert run.scenes[0]["failed"] == iv.FOREIGN and run.scenes[0]["t1"] is not None
+    finally:
+        run.writer.abandon()
+
+
+def test_the_take_is_given_up_when_the_foreground_comes_to_ours_from_another_programs(tmp_path, monkeypatch):
+    me = os.getpid()
+    front = [4242]
+    screen_of(monkeypatch, [iv.Shown(2, 777, STANDIN)], front)
+    run = iv.Run(tmp_path / "r.zip")
+    try:
+        run.watch, run.browser = SimpleNamespace(hwnd=5), SimpleNamespace(tree=[777])
+        assert run.check_screen() is not None and run.front == 4242
+        front[0] = 4243  # (from one program's to another's: not ours)
+        assert run.check_screen() is not None
+        run.front = me
+        front[0] = 4242  # (from ours to another program's: the person's click elsewhere)
+        assert run.check_screen() is not None
+        run.begin("edit")
+        front[0] = 777  # (to the stand-in's, from another program's)
+        assert run.check_screen() is None
+        assert run.failed == iv.TAKEN and run.fronts_taken == 1 and run.scenes[0]["failed"] == iv.TAKEN
+        meta = run.meta({"version": "9.9.9"})
+        assert meta["check"]["fronts_taken"] == 1 and meta["check"]["windows_looked_at"] == 4
+        iv.check_no_text(meta)
+    finally:
+        run.writer.abandon()
+
+
+def test_what_could_take_the_foreground_acts_only_while_one_of_ours_has_it():
+    import tkinter
+
+    from taslation.capture import windows
+    from taslation.ui import see_menu
+
+    me = os.getpid()
+    front = [4242]
+    guard = iv.ForegroundGuard(lambda: {me}, front=lambda: front[0])
+    calls = []
+    given = guard.wrap(lambda *a: calls.append(a) or True, "give_foreground")
+    assert given(1) is False and not calls and guard.refused == {"give_foreground": 1}
+    front[0] = me
+    assert given(2) is True and calls == [(2,)]
+    assert iv.ForegroundGuard(lambda: {me}, front=lambda: 1 // 0).allowed() is False  # (not known: not allowed)
+    originals = (windows.give_foreground, see_menu._front, tkinter.Misc.focus_force)
+    front[0] = 4242
+    guard.install()
+    try:
+        assert windows.give_foreground.__wrapped__ is originals[0]
+        assert see_menu._front.__wrapped__ is originals[1] and tkinter.Misc.focus_force.__wrapped__ is originals[2]
+        assert windows.give_foreground(123) is False and see_menu._front(123) is False
+        assert tkinter.Misc.focus_force(None) is None
+        assert guard.refused == {"give_foreground": 2, "menu_front": 1, "focus_force": 1}
+    finally:
+        guard.undo()
+    assert (windows.give_foreground, see_menu._front, tkinter.Misc.focus_force) == originals
+
+
+def test_the_choosers_frames_are_kept_on_the_window_checks_alone(tmp_path, monkeypatch):
+    import standin_seethrough as ss
+
+    from taslation.capture import windows
+
+    shown = [iv.Shown(1, os.getpid(), (500, 300, 900, 500))]  # (the viewer chooser over the stand-in: ours)
+    screen_of(monkeypatch, shown, [4242])
+    monkeypatch.setattr(windows, "_client_box", lambda hwnd: (100, 100, 1500, 900))
+    copies = []
+    monkeypatch.setattr(ss, "screen_copy", lambda x, y, w, h: copies.append((x, y, w, h)) or np.zeros((h, w, 3),
+                                                                                                         np.uint8))
+    run = iv.Run(tmp_path / "r.zip")
+    try:
+        run.watch = SimpleNamespace(hwnd=5, over=lambda: None, fake_point=(700, 400))
+        run.grab()
+        e = iv.EDGE
+        assert copies == [(100 + e, 100, 1500 - 2 * e, 900 - e)]
+        assert run.kept == 1 and run.client == [1500 - 2 * e, 900 - e] and run.checks == 2  # (before and after)
+        assert run.pointer[-1][1:] == [700 - 100 - e, 400 - 100, 0] and run.panes == [] and run.foot == []
+        shown.append(iv.Shown(2, 4242, (1590, 0, 1700, 200)))  # (another program's window meets the stand-in's)
+        run.grab()
+        assert run.kept == 1 and run.failed == iv.FOREIGN and len(copies) == 1
+    finally:
+        run.writer.abandon()
 
 
 class FakeSet:
@@ -544,6 +769,26 @@ def test_where_the_programs_own_windows_draw_is_left_out_of_the_check(tmp_path):
         assert (190 + 100 - p, 180 + 20 - p, 210 + 100 + p, 192 + 20 + p) in masks  # (a number plate)
     finally:
         run.writer.abandon()
+
+
+def test_the_programs_other_windows_are_left_out_of_the_check_but_not_the_letterings_own():
+    over = SimpleNamespace(hwnd=10)
+    mine = {10: (100, 100, 1500, 900), 20: (500, 300, 900, 500), 30: (1400, 200, 1700, 260)}
+    p = iv.OWN_PAD
+    assert iv.window_masks(mine, over, 100, 100) == [(400 - p, 200 - p, 800 + p, 400 + p),
+                                                     (1300 - p, 100 - p, 1600 + p, 160 + p)]
+
+
+def test_messages_are_posted_to_the_programs_own_windows_only(monkeypatch):
+    sent = []
+    monkeypatch.setattr(iv, "_user32", lambda: SimpleNamespace(PostMessageW=lambda *a: sent.append(a)))
+    monkeypatch.setattr(iv, "window_pid", lambda hwnd: os.getpid() if hwnd == 10 else 4242)
+    iv.post(10, 0x0201, 1, 5, 7)
+    assert sent == [(10, 0x0201, 1, 7 << 16 | 5)]
+    for hwnd in (0, 20):  # (none, another program's)
+        with pytest.raises(iv.SceneFailed):
+            iv.post_raw(hwnd, iv.WM_CLOSE, 0, 0)
+    assert len(sent) == 1
 
 
 def test_the_bubble_and_the_box_the_scenes_pick():
@@ -640,6 +885,379 @@ def test_a_scene_that_waits_too_long_or_lacks_what_it_needs_stops_the_run(tmp_pa
             assert all(s["failed"] == why for s in iv.RUN.scenes)
         finally:
             iv.RUN.writer.abandon()
+
+
+def drive(program, run, world=None) -> dict[str, bool]:
+    """*program* (`chooser_program`, `scenes_program`) acted to its end without sleeping, on the made-up *world*'s
+    clock: a wait's seconds counted on it, a wait for something asked again every TICK_S of it until it holds (past
+    its limit: timed out), the world told where the tool's pointer is at each step. Whether each wait for something
+    held at once."""
+    world = world if world is not None else SimpleNamespace(clock=0.0, tick=lambda point: None)
+    asked: dict[str, bool] = {}
+    for got in program:
+        if isinstance(got, (int, float)):
+            world.clock += float(got)
+            world.tick(run.watch.fake_point)
+            continue
+        until, limit, what = got
+        waited = 0.0
+        while not until():
+            waited += iv.TICK_S
+            world.clock += iv.TICK_S
+            world.tick(run.watch.fake_point)
+            if waited > limit:
+                raise iv.SceneFailed(f"timed out: {what}")
+        asked.setdefault(what, waited == 0.0)
+    return asked
+
+
+class Widget:
+    def __init__(self, rect):
+        self.rect = rect
+
+    def winfo_rootx(self):
+        return self.rect[0]
+
+    def winfo_rooty(self):
+        return self.rect[1]
+
+    def winfo_width(self):
+        return self.rect[2] - self.rect[0]
+
+    def winfo_height(self):
+        return self.rect[3] - self.rect[1]
+
+
+class FakeChooser(Widget):
+    """The parts of `ui.see_menu.ViewerDialog` the chooser's scene uses."""
+
+    def __init__(self, app, listed, at, rect=(500, 300, 900, 500)):
+        from taslation.capture import taskbar_title
+
+        super().__init__(rect)
+        self.app, self.windows, self.picked = app, listed, None
+        dialog = self
+
+        class Box(Widget):
+            def current(self, i=None):
+                if i is None:
+                    return self.at
+                self.at = i
+
+            def get(self):
+                return taskbar_title(dialog.windows[self.at])
+
+        self.box = Box((rect[0] + 20, rect[1] + 40, rect[2] - 20, rect[1] + 70))
+        self.box.at = at
+        self.ok_button = Widget((rect[2] - 120, rect[3] - 40, rect[2] - 20, rect[3] - 10))
+        self.ok_button.instate = lambda states: False
+
+    def _picked(self):
+        self.picked = self.box.current()
+
+    def ok(self):
+        self.app.selected, self.app._see_chooser = self.windows[self.picked], None
+
+
+def chooser_world(monkeypatch, tmp_path, title="Stand-in reader t1a2b3c4d5", at=1, rect=(500, 300, 900, 500)):
+    from taslation.capture import windows
+
+    monkeypatch.setattr(windows, "_client_box", lambda hwnd: (100, 100, 1500, 900))
+    listed = [windows.WindowInfo(3, "A made-up window", "MadeUp", 300, (0, 0, 400, 300)),
+              windows.WindowInfo(5, title, windows.BROWSER_CLASSES[0], 500, STANDIN)]
+    app = SimpleNamespace(selected=None)
+    app._see_chooser = FakeChooser(app, listed, at, rect)
+    director = SimpleNamespace(app=app, browser=SimpleNamespace(hwnd=5), notes=SimpleNamespace(top=30, dpr=1.25),
+                               band_px=40, chooser_rows=[])
+    run = iv.Run(tmp_path / "chooser.zip")
+    run.watch = SimpleNamespace(fake_point=None)
+    return director, run
+
+
+def test_the_viewer_chooser_is_answered_through_its_own_object_with_the_stand_in_preselected(tmp_path, monkeypatch):
+    director, run = chooser_world(monkeypatch, tmp_path)
+    app, dialog = director.app, director.app._see_chooser
+    try:
+        asked = drive(iv.chooser_program(director, run, dialog), run)
+        assert asked == {"the stand-in listed in the viewer chooser": True, "the stand-in chosen as the viewer": True}
+        assert app.selected.hwnd == 5 and app._see_chooser is None and dialog.picked == 1
+        assert [s["id"] for s in run.scenes] == ["chooser"] and run.scenes[0]["t1"] is not None
+        row = director.chooser_rows[0]
+        assert row["preselected_standin"] is True and row["answered_t"] is not None and row["activated"] is False
+        assert run.crop_top == 30 + 50 and not run.on.is_set() and run.watch.fake_point is None and not run.down
+    finally:
+        run.writer.abandon()
+    for kw, why in (({"at": 0}, "the stand-in is not preselected in the viewer chooser"),
+                    ({"rect": (50, 50, 400, 300)}, "the viewer chooser is not over the stand-in"),
+                    ({"title": "Stand-in reader t1a2b3c4d5 - " + a_browser_name()},
+                     "the viewer chooser names the stand-in's browser")):
+        director, run = chooser_world(monkeypatch, tmp_path, **kw)
+        try:
+            with pytest.raises(iv.SceneFailed) as failed:
+                drive(iv.chooser_program(director, run, director.app._see_chooser), run)
+            assert str(failed.value) == why and director.app.selected is None and not run.on.is_set()
+        finally:
+            run.writer.abandon()
+
+
+def a_browser_name() -> str:
+    from taslation.capture import windows
+
+    return windows.BROWSER_NAMES[0].title()
+
+
+LEFT_HITS = (("translate", (10, 10, 90, 30)), ("auto", (10, 40, 90, 60)), ("language", (10, 70, 90, 90)),
+             ("lettering", (10, 100, 90, 120)), ("indicators", (10, 130, 90, 150)), ("edit", (10, 160, 90, 180)))
+FOOT_ROWS = ((0, 480, 250, 500), (0, 500, 250, 520), (0, 520, 250, 540))
+
+
+class World:
+    """A made-up TASlation over a made-up stand-in as the scenes after the chooser see them: the messages posted to
+    its windows (`post_raw`) answered at once, the hover's delay counted on the scenes' own clock."""
+
+    ORIGIN, SIZE = (1000, 500), (800, 600)
+    LEFT, RIGHT = (740, 520, 990, 1080), (1810, 520, 2060, 1080)
+    PATCHES = ((120, 120, 280, 180), (420, 90, 500, 150), (600, 400, 700, 460))
+    BOXES = ((100, 100, 300, 200), (400, 80, 520, 160))
+    OVER, PANES, EDITOR, MENU = 10, {"left": 11, "right": 12}, 99, 77
+
+    def __init__(self, hover_delay=1.2):
+        self.clock, self.hover_delay = 0.0, hover_delay
+        self.reader = False  # (TASlation starts editing)
+        self.language, self.serial = "English", 1
+        self.boxes = list(self.BOXES)
+        self.chosen = self.entry = self.pressed = self.moved = self.last_down = self.hover = self.bare = None
+        self.editor = self.menu = 0
+        self.events = [{"ev": "hold", "id": 1}]
+        self.posted: list[tuple[int, int]] = []
+
+    def tick(self, point):
+        o = self.ORIGIN
+        at = None if point is None else next(
+            (i for i, b in enumerate(self.PATCHES)
+             if o[0] + b[0] <= point[0] < o[0] + b[2] and o[1] + b[1] <= point[1] < o[1] + b[3]), None)
+        if at is None:
+            self.hover = self.bare = None
+        elif self.hover is None or self.hover[0] != at:
+            self.hover, self.bare = (at, self.clock), None
+        elif self.clock - self.hover[1] >= self.hover_delay:
+            self.bare = at  # (its original shown, the bubble's block in the right pane)
+
+    def turn(self, _director, n):
+        assert n == 1
+        self.serial += 1
+        self.events.append({"ev": "draw", "why": "next"})
+
+    def marks(self):
+        from taslation import seethrough as st
+
+        if self.reader:
+            return None
+        plates = tuple((np.zeros((14, 20, 4), np.uint8), (b[0] + 4, b[1] + 4)) for b in self.boxes)
+        return st.Marks(key=self.serial, boxes=tuple(self.boxes), plates=plates,
+                        chosen=() if self.chosen is None else (self.chosen,), locked=bool(self.editor))
+
+    def post(self, hwnd, message, _wparam, lparam):
+        import standin_seethrough as ss
+
+        self.posted.append((hwnd, message))
+        point = (lparam & 0xFFFF, (lparam >> 16) & 0xFFFF)
+        if hwnd in self.PANES.values():
+            if message == ss.WM_LBUTTONUP and hwnd == self.PANES["left"]:
+                name = next((n for n, b in LEFT_HITS if b[0] <= point[0] < b[2] and b[1] <= point[1] < b[3]), "")
+                self.entry = None  # (a pane's click gives a place entry up first)
+                if name == "edit":
+                    self.reader, self.chosen = not self.reader, None
+                elif name == "language":
+                    self.menu = self.MENU
+            return
+        if hwnd == self.OVER:
+            if message == ss.WM_LBUTTONDOWN:
+                twice = self.last_down == (point, self.clock)  # (a second press at once where the first was)
+                self.last_down, self.pressed, self.moved = (point, self.clock), point, None
+                if twice and self.chosen is not None:
+                    self.editor = self.EDITOR
+            elif message == ss.WM_MOUSEMOVE:
+                self.moved = point
+            elif message == ss.WM_LBUTTONUP:
+                self.release(point)
+            return
+        if hwnd == self.EDITOR and message == iv.WM_CLOSE:
+            self.editor = 0
+            return
+        raise AssertionError(f"a message for a window the scenes never post to: {hwnd}")
+
+    def release(self, point):
+        from taslation import seethrough as st
+
+        press, self.pressed = self.pressed, None
+        if self.editor or press is None:
+            return
+        if self.moved is not None and max(abs(self.moved[0] - press[0]), abs(self.moved[1] - press[1])) > 4:
+            dx, dy = point[0] - press[0], point[1] - press[1]
+            i = next(i for i, b in enumerate(self.boxes) if b[0] <= press[0] < b[2] and b[1] <= press[1] < b[3])
+            b = self.boxes[i]
+            self.boxes[i] = (b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy)
+            return
+        grip = st.edit_grip(self.marks(), point, st.GRIP_PX)
+        if grip is None:
+            self.chosen, self.entry = None, None  # (the page's empty ground)
+        elif grip[1] == st.PLATE:
+            self.entry = SimpleNamespace(closed=False)
+        else:
+            self.chosen, self.entry = grip[0], None
+
+
+class WorldOver:
+    """The see-through window of the made-up world (the parts the scenes read)."""
+
+    def __init__(self, world):
+        self.world = world
+        self._lock = threading.Lock()
+        self.hwnd, self.panes = World.OVER, dict(World.PANES)
+        self._last_look = (0, 0, 0, 0, 0, World.ORIGIN, World.SIZE)
+        self._press, self._left_out, self._dpi, self._ghost = None, frozenset(), 96, None
+        self._hover_delay = world.hover_delay
+
+    @property
+    def _store(self):
+        return SimpleNamespace(sets=[FakeSet(self.world.serial, World.PATCHES)])
+
+    @property
+    def _edit_takes(self):
+        return not self.world.reader
+
+    @property
+    def _marks_live(self):
+        return self.world.marks()
+
+    def shown(self):
+        w = self.world
+        return w.serial, tuple(i for i in range(len(World.PATCHES)) if i != w.bare), World.ORIGIN, World.SIZE
+
+    def pane_shown(self, side):
+        return {"left": World.LEFT, "right": World.RIGHT}.get(side)
+
+
+class WorldApp:
+    """TASlation's window object of the made-up world (the parts the scenes read)."""
+
+    def __init__(self, world):
+        from taslation import panes as pn
+
+        self.world = world
+        left = pn.Picture(np.zeros((560, 250, 4), np.uint8), LEFT_HITS)
+        column = pn.Picture(np.zeros((560, 250, 4), np.uint8), (), FOOT_ROWS)
+        self._see_pane_memo = {"left": (1, left, World.LEFT), "right": (2, column, World.RIGHT),
+                               "bubble": (3, column, World.RIGHT)}
+        self.role_var = SimpleNamespace(get=lambda: "reader" if world.reader else "translator")
+        self.lang_var = SimpleNamespace(get=lambda: world.language)
+        self.selected = object()
+
+    @property
+    def _chosen_region(self):
+        w = self.world
+        return None if w.chosen is None else SimpleNamespace(bbox=w.boxes[w.chosen])
+
+    @property
+    def _see_place_entry(self):
+        return self.world.entry
+
+    @property
+    def _see_right_used(self):
+        return "bubble" if self.world.bare is not None else "right"
+
+
+def scenes_world(monkeypatch, tmp_path, world):
+    over = WorldOver(world)
+    monkeypatch.setattr(iv, "post_raw", world.post)
+    monkeypatch.setattr(iv, "menu_window", lambda: world.menu)
+    monkeypatch.setattr(iv, "end_menu", lambda: setattr(world, "menu", 0))
+    monkeypatch.setattr(iv, "release_hold", world.turn)
+    monkeypatch.setattr(iv, "double_click_s", lambda: 0.5)
+    director = SimpleNamespace(app=WorldApp(world), events=world.events, idle=lambda: True, control={"go": 0},
+                               standin_dir=tmp_path, notes=SimpleNamespace(top=30, dpr=1.0), band_px=40)
+    run = iv.Run(tmp_path / "scenes.zip")
+    run.watch = SimpleNamespace(over=lambda: over, fake_point=None, _editor_window=lambda: world.editor)
+    return director, run
+
+
+def test_the_scenes_after_the_chooser_on_a_made_up_taslation(tmp_path, monkeypatch):
+    world = World()
+    director, run = scenes_world(monkeypatch, tmp_path, world)
+    try:
+        asked = drive(iv.scenes_program(director, run), run, world)
+        assert [s["id"] for s in run.scenes] == list(ORDER[1:]) and all(s["t1"] is not None for s in run.scenes)
+        assert all(asked.values()), asked  # (each thing waited for there at once: the rests long enough)
+        assert asked["the original under the pointer"] is True  # (the hover's delay rested past, 1.2 s here)
+        assert {"Reader mode", "the list of languages closed", "the box selected, its handles", "the region editor",
+                "the region editor closed", "the place entry", "the place entry given up"} <= set(asked)
+        assert world.reader is False and world.language == "English" and world.menu == 0 and world.editor == 0
+        assert world.boxes == list(World.BOXES) and world.entry is None and world.serial == 2  # (dragged and back)
+        assert {hwnd for hwnd, _m in world.posted} == {World.OVER, World.PANES["left"], World.EDITOR}
+        assert (World.EDITOR, iv.WM_CLOSE) in world.posted
+        assert run.crop_top == 70 and not run.on.is_set() and run.watch.fake_point is None and not run.down
+        assert run.drag_box is None
+    finally:
+        run.writer.abandon()
+
+
+def test_a_scene_fails_where_the_made_up_taslation_does_not_do_what_it_shows(tmp_path, monkeypatch):
+    world = World()
+    director, run = scenes_world(monkeypatch, tmp_path, world)
+    monkeypatch.setattr(iv, "end_menu", lambda: (setattr(world, "menu", 0), setattr(world, "language", "French")))
+    try:
+        with pytest.raises(iv.SceneFailed) as failed:
+            drive(iv.scenes_program(director, run), run, world)
+        assert str(failed.value) == "the target language changed"
+    finally:
+        run.writer.abandon()
+    world = World()
+    director, run = scenes_world(monkeypatch, tmp_path, world)
+    director.app._see_pane_memo["right"] = (2, None, World.RIGHT)  # (no right pane's picture: no foot)
+    try:
+        with pytest.raises(iv.SceneFailed) as failed:
+            drive(iv.scenes_program(director, run), run, world)
+        assert str(failed.value) == "the right pane shows no foot"
+        assert [s["id"] for s in run.scenes] == ["reader", "turn", "panes", "foot"]
+    finally:
+        run.writer.abandon()
+
+
+def test_the_foot_is_the_columns_on_show():
+    world = World()
+    app, over = WorldApp(world), WorldOver(world)
+    right = World.RIGHT
+    assert iv.foot_box(app, over) == (right[0], right[1] + 480, right[0] + 250, right[1] + 540)
+    world.bare = 0  # (a bubble's block in the right pane: its column's foot)
+    app._see_pane_memo["right"] = (2, None, None)
+    assert iv.foot_box(app, over) == (right[0], right[1] + 480, right[0] + 250, right[1] + 540)
+    assert iv.foot_box(None, over) is None and iv.foot_box(app, None) is None
+    over.pane_shown = lambda side: None
+    assert iv.foot_box(app, over) is None
+
+
+def test_the_plate_and_the_ground_the_edit_scene_clicks():
+    from taslation import seethrough as st
+
+    world = World()
+    over = WorldOver(world)
+    assert iv.index_near(over, (101, 99, 300, 201)) == 0 and iv.index_near(over, (0, 0, 9, 9)) is None
+    plate = iv.plate_point(over, 0)
+    assert plate == (114, 111) and st.edit_grip(world.marks(), plate, st.GRIP_PX) == (0, st.PLATE)
+    assert iv.plate_point(over, 5) is None
+    ground = iv.ground_point(over)
+    assert ground is not None and st.edit_grip(world.marks(), ground, st.GRIP_PX) is None
+    world.boxes = [(0, 0, 800, 600)]  # (no empty ground)
+    assert iv.ground_point(over) is None
+    app = WorldApp(world)
+    world.chosen = 0
+    assert iv.selected(app, over, 0, (0, 0, 800, 600)) and not iv.selected(app, over, 0, (0, 0, 10, 10))
+    assert iv.place_entry(app) is None
+    world.entry = SimpleNamespace(closed=False)
+    assert iv.place_entry(app) is world.entry
+    world.entry.closed = True
+    assert iv.place_entry(app) is None
 
 
 def test_the_watch_leaves_its_own_pointer_and_clicks_to_the_scenes():

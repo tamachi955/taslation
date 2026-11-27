@@ -214,19 +214,29 @@ rows' languages.
   is a run of `tools/standin_e2e.py` on a scenario of its own: the stand-in viewer on OpenMantra pages drawn sharp at
   once, the real program in English with its lettering over the stand-in and its two side panes, the translator's
   server started by TASlation's own starter on a port of its own (`--start-ollama`, 11435 by default), a scratch
-  state. It acts four scenes - a page the stand-in turns by its own script filling in, the side panes, the pointer on
-  a bubble (the original in its place, the bubble's block in the right pane), Reader mode unchecked with a box dragged and
-  dragged back - with a pointer of its own (the see-through window is told where it is: the real pointer never moves)
-  and clicks and drags posted to TASlation's own pane and lettering windows; nothing is sent to the stand-in or to any
-  other window, and the tool never changes the foreground (the stand-in's browser opens without taking it, as in
-  every stand-in run: below; it gets it only where TASlation gives the viewer the foreground, as a region editor's
-  closing does). Its frames are copies of the screen in the stand-in's client area,
-  each kept only when no other program's window lies over the stand-in and, outside where TASlation's own windows
-  draw, it shows the stand-in's own frame of that moment (as the stand-in run's pane shot is checked); a frame that
-  fails is never kept, and six in a row stop the run with the recording deleted. It says how long the screen was in
-  use. A recording keeps no page text. `render FILE --out GIF` makes a 960x620 GIF of about 30 to 60 s - a title
-  card, the numbered scenes with the tool's pointer drawn in, a closing card - where git ignores it or outside the
-  repository (it is copied to `docs/media` by hand), refuses one over 5 MB (`--allow-large`), and deletes the
+  state; TASlation starts editing (`--editing`) and asks for the viewer (`--chooser`), the stand-in remembered in the
+  scratch state as the viewer chosen before, so that the chooser comes over it with it preselected. It acts eight
+  scenes - the viewer chooser answered through its own object, Reader mode checked, a page the stand-in turns by its
+  own script filling in, the side panes, the right pane's foot, the list of languages opened and closed with no
+  change, the pointer resting on a bubble past the hover delay (the original in its place, the bubble's block in the
+  right pane), Reader mode unchecked with a box clicked (selected), double-clicked (the region editor, closed again),
+  dragged and dragged back and its number plate clicked (the place entry, given up) - with a pointer of its own (the
+  see-through window is told where it is: the real pointer never moves) and clicks and drags posted to TASlation's own
+  windows only; nothing is sent to the stand-in or to any other window. The stand-in goes on monitor 2
+  (`--standin-monitor`) at the top left of its work area: the tool refuses to start where a window of another program
+  lies on that place, and gives the take up as soon as one meets the stand-in's window while it runs (every shown
+  top-level window, looked at with every frame and four times a second, no title read). Nothing takes the foreground
+  from another program's window: the stand-in's browser opens without taking it (as in every stand-in run: below),
+  what TASlation would take it with acts only while one of ours is in front, Windows' lock on foreground changes is
+  asked for, and a take in which the foreground came to ours from another program's is given up. Its frames are
+  copies of the screen in the stand-in's client area, each kept only when no other program's window lies over the
+  stand-in and, outside where TASlation's own windows draw, it shows the stand-in's own frame of that moment (as the
+  stand-in run's pane shot is checked); a frame that fails is never kept, and six in a row stop the run with the
+  recording deleted. It says how long the screen was in use. A recording keeps no page text. `render FILE --out GIF`
+  makes a 960x620 GIF of about 30 to 60 s - a title card, the numbered scenes with the tool's pointer drawn in, a
+  closing card - where git ignores it or outside the repository (it is copied to `docs/media` by hand), refuses one
+  over 5 MB (`--allow-large`), with `--fit` takes the first of a few settings (fewer frames where only the picture
+  changes, fewer colours, fewer frames a second) that keeps it within the size of the GIF it replaces, and deletes the
   recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
   4.0 material. Each card line and step names the sentences of docs/MANUAL.md it follows, or is marked as the tool's
   own words; `tests/test_intro_video.py` fails when one of those sentences no longer stands word for word, so change

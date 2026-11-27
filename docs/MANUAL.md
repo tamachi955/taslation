@@ -354,7 +354,7 @@ red: translated but flagged for review). The right pane's foot says "Editing: tu
   page; neither applies to pages of a very different shape (a spread made into a single image and the like). Adding one can be taken back with one "Undo",
   whatever page is shown. The translations inside the area stay in the cache, so taking it back brings them back as they were. All that is saved is the area's four numbers,
   the side of the spread and the page's aspect ratio.
-* **Editing a region**: a click on its box opens the region editor beside it. The formatting fields are folded into the "Formatting" button when the region has no formatting of its own. You can change the **speaker** (chosen from the series sheet's names), the **kind** (Speech,
+* **Editing a region**: a double click on its box opens the region editor beside it (a click selects the box). The formatting fields are folded into the "Formatting" button when the region has no formatting of its own. You can change the **speaker** (chosen from the series sheet's names), the **kind** (Speech,
   Thought, Shout, Narration, Sound effect, Handwritten, Erase only), whether the **sentence continues in the next bubble**, the **hint for the model** (a pun, who is addressed),
   and the translation. Enter starts a new line (the lettering keeps that line break too), and Ctrl+Enter saves.
   A **sound effect** is lettered at the slant the drawing gives it, as large as it fits, in the series sheet's lettering for sound effects.

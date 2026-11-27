@@ -1,51 +1,79 @@
 """The README's introduction made into one animated GIF (dev tool, never part of a release): scenes recorded from the
-screen over the stand-in viewer's window - TASlation's lettering over it and its two side panes, the program's one
-mode -, numbered, between a title card and a closing card; every sentence in it follows docs/MANUAL.md.
+screen over the stand-in viewer's window - the viewer chooser, TASlation's lettering over the window and its two side
+panes, Reader mode and editing -, numbered, between a title card and a closing card; every sentence in it follows
+docs/MANUAL.md.
 
-    python tools/intro_video.py record --out SCRATCH/intro.zip [--start-ollama 11435]
-    python tools/intro_video.py render SCRATCH/intro.zip --out SCRATCH/taslation-intro.gif
+    python tools/intro_video.py record --out SCRATCH/intro.zip [--start-ollama 11435] [--standin-monitor 2]
+    python tools/intro_video.py render SCRATCH/intro.zip --out SCRATCH/taslation-intro.gif [--fit]
     python tools/intro_video.py render --sample --out SCRATCH/sample.gif [--frames-png SCRATCH/frames]
 
 ``record`` runs `tools/standin_e2e.py` - its stand-in viewer (a page in a browser window of its own) on the
 OpenMantra sample pages, drawn sharp at once (``--soft-first off``); the real program, OCR models and translator,
 the translator's server started by TASlation's own starter on a port of its own (``--start-ollama``, 11435 by
-default: never the port of an Ollama already running); its guard, scratch state and cleanup - on a scenario of its
-own (`SCRIPT`: held, one turn, held to the end) and drives the scenes of `SCENES` from that run's loop:
+default: never the port of an Ollama already running); TASlation starting editing (``--editing``, as it starts for
+a book not chosen for before) and asking for the viewer (``--chooser``), the stand-in remembered in the run's scratch
+state as the viewer chosen before (`remember_viewer`), so that the chooser comes over it with it preselected; its
+guard, scratch state and cleanup - on a scenario of its own (`SCRIPT`: held, one turn, held to the end) and drives
+the scenes of `SCENES` from that run's loop:
 
-1. ``turn``: the stand-in turns its page by its own script (nothing is sent to it), and the page fills in;
-2. ``panes``: the tool's pointer goes down the left pane's controls and over to the right pane;
-3. ``original``: it rests on a bubble - the original in its place, the bubble's block in the right pane - and goes
-   on to that block;
-4. ``edit``: Reader mode unchecked in the left pane, a region's box dragged and dragged back, Reader mode again.
+1. ``chooser``: the tool's pointer to the chooser's list and to OK, the chooser answered through its own object;
+2. ``reader``: Reader mode checked in the left pane, the page's boxes gone;
+3. ``turn``: the stand-in turns its page by its own script (nothing is sent to it), and the page fills in;
+4. ``panes``: the pointer goes down the left pane's controls and over to the right pane;
+5. ``foot``: it rests on the right pane's foot (outlined in the GIF);
+6. ``language``: a click on the left pane's language lists every language beside the pane, and the list is ended
+   with no change (`EndMenu`, as Windows ends a menu; an Esc posted to the list's own window should it stay up);
+7. ``original``: it rests on a bubble the hover delay and HOVER_REST_S more - the original in its place, the
+   bubble's block in the right pane - and goes on to that block;
+8. ``edit``: Reader mode unchecked; a click on a box (selected, its corner handles), a double click (the region
+   editor beside it, closed again), the box dragged and dragged back, a click on its number plate (the place entry)
+   given up by a click on the page's empty ground.
 
-The pointer is the tool's own: the see-through window is told where it is (`standin_seethrough.SeeWatch`'s fake
-point, whose own measures that would move it or click a pane are left out here); the real pointer never moves. The
-clicks on the left pane and the drag are messages POSTED to TASlation's own pane and lettering windows; nothing is
-sent to the stand-in nor to any other window, and the tool never changes the foreground (the stand-in's browser takes
-it as it starts, as in every stand-in run; ``record`` says who had it). The frames are copies of the screen in the
-stand-in's client area (`standin_seethrough.screen_copy`; its sides and foot, EDGE px, left out: the window's rounded
-corners show what lies behind it), RECORD_FPS a second while the scenes run; each
-is kept only when no other program's window lies over the stand-in (`capture.seethrough.cover_rects`) and, outside
-where TASlation's own windows draw (the patches, the panes, Edit's boxes), it shows the stand-in's own frame of that
-moment (`standin_seethrough.foreign_tiles`, as the pane shot of a stand-in run is checked). A frame that fails is
-never kept nor looked at again, and REFUSED_IN_A_ROW of them in a row stop the run, the recording deleted. The
-recording - a ZIP of JPEG frames and ``meta.json``, numbers and ids only, never a line of a page's text
-(`check_no_text`) - goes into a scratch folder; the run's own scratch folder beside it is deleted at the end
-(``--keep-run`` keeps its report.json). What the screen was used for, from the stand-in's start to its close, is
-said in seconds (``screen_s``).
+The stand-in goes on monitor ``--standin-monitor`` (STANDIN_MONITOR by default), at the top left of its work area:
+``record`` refuses before anything starts where a window of another program lies on that place or within
+PLACE_MARGIN of it (no clean place), and the take is given up and deleted as soon as one meets the stand-in's window
+while the run lasts (looked at with every frame, and every CHECK_S between them: every shown top-level window, above
+or below it, click-through or not, the desktop's own left out; no title is read). The pointer is the tool's own: the
+see-through window is told where it is (`standin_seethrough.SeeWatch`'s fake point, whose own measures that would
+move it or click a pane are left out here); the real pointer never moves. The clicks are messages POSTED to
+TASlation's own windows (its panes, its lettering, the region editor's close, an Esc to its own list of languages:
+`post_raw` refuses any window of another process); nothing is sent to the stand-in nor to any other window, and no
+key or click of the system's is made. Nothing takes the foreground from another program's window: the stand-in's
+browser opens without taking it (as in every stand-in run), what TASlation would take it with while the run lasts
+(`windows.give_foreground`, `see_menu._front`, Tk's ``focus -force``) does nothing while the window in front is not
+one of ours (`ForegroundGuard`), Windows' lock on changes of the window in front is asked for every LOCK_EVERY_S (a
+key or click of the person's lifts it), and a take in which the foreground came to a window of ours from another
+program's is given up. ``record`` says what was refused so (``foreground_refused``) and who had the foreground.
+
+The frames are copies of the screen in the stand-in's client area (`standin_seethrough.screen_copy`; its sides and
+foot, EDGE px, left out: the window's rounded corners show what lies behind it), RECORD_FPS a second while the scenes
+run; each is kept only when no other program's window lies over the stand-in (`capture.seethrough.cover_rects`,
+every window of TASlation's - the chooser, the region editor, a place entry, the list of languages - counted as its
+own) and, from the see-through window on, outside where TASlation's own windows draw (the patches, the panes, Edit's
+boxes, its other windows: `own_masks`, `window_masks`), it shows the stand-in's own frame of that moment
+(`standin_seethrough.foreign_tiles`, as the pane shot of a stand-in run is checked); the chooser's frames, before
+the stand-in's window is captured, are kept on the checks of the windows alone. A frame that fails is never kept nor
+looked at again, and REFUSED_IN_A_ROW of them in a row stop the run, the recording deleted. The recording - a ZIP
+of JPEG frames and ``meta.json``, numbers and ids only, never a line of a page's text (`check_no_text`) - goes into
+a scratch folder; the run's own scratch folder beside it is deleted at the end (``--keep-run`` keeps its
+report.json). What the screen was used for, from the stand-in's start to its close, is said in seconds
+(``screen_s``).
 
 ``render`` makes the GIF of a recording, 960x620 by default and about 30 to 60 s long: a title card, the scenes
 numbered in their order (the stand-in's window below its band as the screen showed it, the side panes outlined in
-their scene, the tool's pointer drawn in, the step under the picture), then the closing card. The page's turn is
-shown as it was; in the other scenes a wait with nothing changing is cut to LONGEST_S. The GIF costs each visitor of
-the page as little as it can: one palette of 64 colours with the panes' and the boxes' colours kept apart, no dither;
-each frame stores only what changed; where only the screen's picture changes, at most 4 frames a second; a card is
-one frame. A GIF over 5 MB is refused (``--allow-large`` writes it and says by how much it is over); either way the
-scenes that take the most bytes are said. The recording file is deleted once the GIF is written
-(``--keep-recording`` keeps it); it holds pictures of the sample pages, as the GIF does: both are CC BY-NC 4.0
-material ("Sample pages: OpenMantra dataset (Mantra Inc., CC BY-NC 4.0), modified" on every frame with a page), never
-part of a release. The GIF goes where git ignores it (``promo/``) or outside the repository; the recording into a
-scratch folder. ``render --sample`` renders made-up frames (no window, no model, no manga page)."""
+their scene and the right pane's foot in its own, the tool's pointer drawn in, the step under the picture), then the
+closing card. The page's turn is shown as it was; in the other scenes a wait with nothing changing is cut to
+LONGEST_S. The GIF costs each visitor of the page as little as it can: one palette of COLOURS colours with the
+panes' and the boxes' colours kept apart, no dither; each frame stores only what changed; where only the screen's
+picture changes, at most STILL_FPS frames a second; a card is one frame. ``--fit [BYTES]`` makes it with the first
+of FIT_LADDER's settings (frames a second where only the picture changes, colours, frames a second) that keeps it
+within BYTES (AIM_BYTES by default: the README's recording it replaces) and says what each try came to. A GIF over
+5 MB is refused (``--allow-large`` writes it and says by how much it is over); either way the scenes that take the
+most bytes are said. The recording file is deleted once the GIF is written (``--keep-recording`` keeps it); it
+holds pictures of the sample pages, as the GIF does: both are CC BY-NC 4.0 material ("Sample pages: OpenMantra
+dataset (Mantra Inc., CC BY-NC 4.0), modified" on every frame with a page), never part of a release. The GIF goes
+where git ignores it (``promo/``) or outside the repository; the recording into a scratch folder. ``render
+--sample`` renders made-up frames (no window, no model, no manga page)."""
 
 from __future__ import annotations
 
@@ -61,7 +89,7 @@ import threading
 import time
 import zipfile
 from collections import Counter, OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 
@@ -76,15 +104,20 @@ for _path in (str(TOOLS), str(ROOT)):  # (this checkout's package first, whateve
 
 import promo_video as pv  # noqa: E402
 
-FORMAT = "intro-2"  # the recording's ``intro_format`` (intro-1: TASlation's own window, before 2.0.0)
+FORMAT = "intro-3"  # the recording's ``intro_format`` (intro-1: TASlation's own window, before 2.0.0; intro-2: four
+# scenes, no viewer chooser, Reader mode at the start)
 GIF_LIMIT = 5_000_000  # bytes: a GIF over this is refused without --allow-large (every visitor of the page loads it)
+AIM_BYTES = 654_681  # bytes: the README's recording before this one (four scenes, 47.8 s): --fit keeps the GIF within
 SIZE = (960, 620)
 LENGTH_AIM = (30.0, 60.0)  # s: the GIF's length aimed at (said when it is outside)
 MAX_SPEED = 8.0
 LONGEST_S = 1.0  # a wait with nothing changing is cut to this long (not in the page's turn)
-COLOURS = 64  # the GIF's palette: the pages are black and white with greys, the panes' and boxes' colours kept apart
-STILL_FPS = 4.0  # frames where only the screen's picture changes (lettering, waiting): at most this many a second
-TITLE_S, CARD_S = 4.5, 6.5
+COLOURS = 48  # the GIF's palette: the pages are black and white with greys, the panes' and boxes' colours kept apart
+STILL_FPS = 2.0  # frames where only the screen's picture changes (lettering, waiting): at most this many a second
+RENDER_FPS = 10.0
+FIT_LADDER = ((STILL_FPS, COLOURS, RENDER_FPS), (1.5, 40, 8.0), (1.0, 32, 8.0), (1.0, 32, 6.0), (0.75, 24, 6.0))
+# (--fit: still frames a second, colours, frames a second; tried in turn until the GIF is small enough)
+TITLE_S, CARD_S = 3.5, 5.0
 
 # colours (the dark ground of promo_video's)
 BG, TEXT, DIM, AMBER = pv.BG, pv.TEXT, pv.DIM, pv.AMBER
@@ -106,13 +139,18 @@ def always() -> bool:
     return True
 
 
+def chooser_present() -> bool:
+    """The viewer chooser at the start (`taslation.ui.see_menu`)."""
+    return has_module("taslation.ui.see_menu")
+
+
 def panes_present() -> bool:
     """The side panes beside the page (`taslation.panes`)."""
     return has_module("taslation.panes")
 
 
 def edit_present() -> bool:
-    """Editing on the lettering over the viewer (`taslation.ui.see_edit`)."""
+    """Editing on the lettering over the viewer and Reader mode (`taslation.ui.see_edit`)."""
     return has_module("taslation.ui.see_edit")
 
 
@@ -155,6 +193,24 @@ class Scene:
 
 
 SCENES: tuple[Scene, ...] = (
+    Scene("chooser", "Choose the viewer",
+          "At the start, TASlation asks which window is the viewer. The viewer chosen before comes first in the list "
+          "and is already selected: OK is enough.", 5.0, present=chooser_present,
+          follows=cites(MANUAL, "TASlation asks which window is the viewer: a small dialog with a \"Viewer\" list of "
+                                "the windows on the screen",
+                        "TASlation never chooses a window by itself.",
+                        "the viewer you chose before comes first in the list and is already selected, so Enter or "
+                        "\"OK\" is enough")),
+    Scene("reader", "Reader mode",
+          "TASlation starts editing, every region of the page outlined. Check Reader mode in the left pane to only "
+          "read: the boxes go, and every click goes to the viewer.", 5.0, present=edit_present,
+          follows=cites(MANUAL, "TASlation starts editing.",
+                        "\"Reader mode\" in the left pane (checked: you only read) switches editing off, and "
+                        "unchecked again, on.",
+                        "While editing, every region of the page on show is outlined over the viewer in its colour, "
+                        "with its number in the reading order on a small plate of that colour",
+                        "In Reader mode it takes no click and no key: every click and key goes to the viewer, as "
+                        "without TASlation")),
     Scene("turn", "Real-time translation",
           "Turn the page in the viewer, as ever. The page fills in while you look at it: its bubbles are translated "
           "in reading order, each lettered as soon as its translation is ready.", 9.0, cut=False,
@@ -172,6 +228,20 @@ SCENES: tuple[Scene, ...] = (
                         "**The left pane** holds the controls",
                         "**The right pane** (while \"Indicators\" is on) shows, at its top, the bubble last under the "
                         "pointer")),
+    Scene("foot", "The right pane's foot",
+          "The foot of the right pane keeps its rows in their places: how far the page on show is, the mode, where "
+          "the translator runs and the viewer followed.", 4.0, present=panes_present,
+          follows=cites(MANUAL, "Its foot keeps its rows in their places whatever the rest says: how far the page on "
+                                "show is, the mode (\"Editing: turn pages with the keys\" or \"Reader mode\"), where "
+                                "the translator runs",
+                        "the viewer followed (\"Viewer: <title>\", a long title shortened in the middle)")),
+    Scene("language", "Your language",
+          "A click on the language in the left pane lists every language at the right side of the pane; a click on "
+          "one takes it at once, and a click elsewhere, or Esc, closes the list with no change.", 5.0,
+          present=panes_present,
+          follows=cites(MANUAL, "the target language (a click lists every language at the right side of the pane, "
+                                "and a click on one takes it at once; a click elsewhere, or Esc, closes the list with "
+                                "no change)")),
     Scene("original", "The original under the pointer",
           "Rest the pointer on a bubble: its lettering gives way to the original lettering in its place, and the right "
           "pane shows that bubble's Japanese and its translation.", 7.0, present=panes_present,
@@ -181,18 +251,18 @@ SCENES: tuple[Scene, ...] = (
                         "With \"Indicators\" on, the right pane shows that bubble at its top: \"Copy the Japanese\", "
                         "\"Copy the translation\" and \"Ask again\", then its Japanese and its translation (up to five "
                         "lines each).")),
-    Scene("edit", "Editing: move a region",
-          "Uncheck Reader mode in the left pane: the page's regions are outlined over the viewer. Drag a box to move "
-          "it; the lettering follows a moment later.", 12.0, present=edit_present,
-          follows=cites(MANUAL, "\"Reader mode\" in the left pane (checked: you only read) switches editing off, and "
-                                "unchecked again, on.",
-                        "While editing, every region of the page on show is outlined over the viewer in its colour, "
-                        "with its number in the reading order on a small plate of that colour",
+    Scene("edit", "Editing",
+          "Uncheck Reader mode to edit. A click on a box selects it, with its corner handles; a double click opens "
+          "the region editor beside it. Drag a box to move it; a click on its number opens a field for its place in "
+          "the reading order.", 16.0, present=edit_present,
+          follows=cites(MANUAL, "\"Reader mode\" (checked: the mouse is the viewer's; unchecked: editing)",
+                        "a click on a box selects it: it gets a stronger outline with its corner handles. A double "
+                        "click opens the region editor beside it.",
                         "Like shapes in office software, a region is moved by dragging and resized with its corner "
                         "handles",
-                        "it is read again only when the new frame covers a larger area (a right click "
-                        "during a drag gives the drag up).",
-                        "After a change, the lettering over the viewer follows a moment later.")),
+                        "a click on a box's number opens a small field over it to type the region's place in the "
+                        "reading order",
+                        "Esc, or a click anywhere else, gives it up.")),
 )
 SCENE_IDS = tuple(s.id for s in SCENES)
 
@@ -300,28 +370,255 @@ RECORD_FPS = 8.0
 REFUSED_IN_A_ROW = 6  # frames in a row refused by the check stop the run
 STANDIN_SIZE = "1500x900"  # the stand-in's window: room for both panes beside a spread, and clear of the screen's
 # right-hand column where notifications stay until they are put away (a 1920 px screen)
+STANDIN_MONITOR = 2  # the monitor the stand-in goes on, at the top left of its work area (the primary is 1, the others
+# by their left edge, as standin_e2e numbers them): the primary is the one the person most likely works on
+PLACE_MARGIN = 8  # px round the stand-in's place that no window of another program may meet either, before the start
 RECORD_PORT = 11435  # the translator's server TASlation's starter starts for the run (not the usual 11434)
 FIRST_PAGE = 4  # the sample series' page the stand-in opens on (past its title pages)
 FIRST_PAGE_S = 300.0  # the first page (the models loaded at the start) waited for so long at the most
 PAGE_S = 90.0  # a page turned to, and Edit's page read again, waited for so long at the most
+CHOOSER_S = 30.0  # the stand-in listed in the viewer chooser waited for so long at the most
 TICK_S = 0.04  # the run's loop (standin_e2e.TICK_MS)
-PATCH_PAD, PANE_PAD = 3, 2  # px round TASlation's patches and panes that the check leaves out
+PATCH_PAD, PANE_PAD, OWN_PAD = 3, 2, 2  # px round TASlation's patches, panes, other windows the check leaves out
 EDGE = 16  # px of the stand-in's client area left out at its sides and foot (the window's rounded corners)
 EDIT_PAD = 30  # px (at 96 DPI) round Edit's boxes: their number plates, outlines and handles
 DRAG = (64, 30)  # px (at 96 DPI) a box is dragged by in the edit scene, and back
 DRAG_S = 0.8
-MIN_BOX = 40  # px (at 96 DPI): the least side of a box the edit scene drags
+MIN_BOX = 40  # px (at 96 DPI): the least side of a box the edit scene takes
+HOVER_REST_S = 0.6  # the pointer rests on a bubble the hover delay and so much more before the original is looked for
+CHECK_S = 0.25  # the screen's windows looked at so often while no frame is taken (and at every frame)
+LOCK_EVERY_S = 2.0  # Windows' lock on changes of the window in front asked for again so often while the run lasts
+ESC_AFTER_S = 3.0  # the list of languages, still up so long after it was ended, gets an Esc posted to its own window
 JPEG_QUALITY = 90
+DESKTOP_CLASSES = ("Progman", "WorkerW")  # the desktop's own windows (its wallpaper and icons): never in the way
+FOREIGN = "a window of another program's met the stand-in"
+TAKEN = "the foreground came to a window of ours from another program's"
+WM_CLOSE, WM_KEYDOWN, WM_KEYUP, VK_ESCAPE = 0x0010, 0x0100, 0x0101, 0x1B
+
+Box = tuple[int, int, int, int]
 
 
 class SceneFailed(RuntimeError):
     """A scene could not be acted (its words: what was waited for, numbers only)."""
 
 
+# the screen's windows, read only (no title is read; nothing is moved, raised or sent anything)
+@dataclass(frozen=True)
+class Shown:
+    """A shown top-level window: its handle, its process, its rectangle as the compositor shows it, and whether it is
+    the desktop's own (its wallpaper, its icons)."""
+
+    hwnd: int
+    pid: int
+    rect: Box
+    desktop: bool = False
+
+
+_DLLS: dict[str, Any] = {}
+
+
+def _user32() -> Any:
+    """user32 of this tool's own (its functions' argument types set here, not shared with any other module)."""
+    if "user32" not in _DLLS:
+        import ctypes
+        from ctypes import wintypes
+
+        u = ctypes.WinDLL("user32")
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        _DLLS["user32"] = u
+    return _DLLS["user32"]
+
+
+def _dwmapi() -> Any:
+    if "dwmapi" not in _DLLS:
+        import ctypes
+
+        _DLLS["dwmapi"] = ctypes.WinDLL("dwmapi")
+    return _DLLS["dwmapi"]
+
+
+def window_pid(hwnd: int) -> int:
+    import ctypes
+    from ctypes import wintypes
+
+    pid = wintypes.DWORD(0)
+    _user32().GetWindowThreadProcessId(int(hwnd or 0), ctypes.byref(pid))
+    return int(pid.value)
+
+
+def frame_rect(hwnd: int) -> Box:
+    """The window's rectangle as the compositor shows it (without the invisible resize borders)."""
+    import ctypes
+    from ctypes import wintypes
+
+    rect = wintypes.RECT()
+    if _dwmapi().DwmGetWindowAttribute(wintypes.HWND(hwnd), 9, ctypes.byref(rect), ctypes.sizeof(rect)) != 0:
+        _user32().GetWindowRect(hwnd, ctypes.byref(rect))
+    return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
+
+def windows_now() -> list[Shown]:
+    """Every shown top-level window of the screen - not minimised nor cloaked, more than a pixel each way -, from the
+    top of the order of the windows down. No title is read (the class only, to tell the desktop's own)."""
+    import ctypes
+    from ctypes import wintypes
+
+    u, dwm = _user32(), _dwmapi()
+    out: list[Shown] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _lparam):  # type: ignore[no-untyped-def]
+        try:
+            h = int(hwnd or 0)
+            if not h or not u.IsWindowVisible(h) or u.IsIconic(h):
+                return True
+            cloaked = wintypes.DWORD(0)
+            if dwm.DwmGetWindowAttribute(wintypes.HWND(h), 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked)) == 0 \
+                    and cloaked.value:
+                return True
+            r = frame_rect(h)
+            if r[2] - r[0] <= 1 or r[3] - r[1] <= 1:
+                return True
+            name = ctypes.create_unicode_buffer(32)
+            u.GetClassNameW(h, name, 32)
+            out.append(Shown(h, window_pid(h), r, name.value in DESKTOP_CLASSES))
+        except Exception:  # noqa: BLE001 - a window gone meanwhile
+            pass
+        return True
+
+    u.EnumWindows(each, 0)
+    return out
+
+
+def meets(a: Sequence[int], b: Sequence[int]) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def foreign_windows(rects: Sequence[Sequence[int]], pids: set[int], shown: Sequence[Shown] | None = None
+                    ) -> list[Shown]:
+    """The shown windows of no process of *pids* that meet one of *rects* (screen px): above the stand-in or below
+    it, click-through or not, the desktop's own left out."""
+    shown = windows_now() if shown is None else shown
+    return [w for w in shown if not w.desktop and w.pid not in pids and any(meets(w.rect, r) for r in rects)]
+
+
+def monitor_areas() -> list[tuple[Box, bool]]:
+    """The monitors' work areas (screen px, the process DPI aware as TASlation makes it) with whether each is the
+    primary: the primary first, then by their left edge (as standin_e2e numbers them)."""
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.WinDLL("user32")
+    try:
+        u.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # (per monitor v2, as `enable_dpi_awareness` sets it)
+    except (AttributeError, OSError):
+        pass
+
+    class Info(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD)]
+
+    areas: list[tuple[Box, bool]] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+    def each(handle, _dc, _rect, _lparam):  # type: ignore[no-untyped-def]
+        info = Info()
+        info.cbSize = ctypes.sizeof(Info)
+        if u.GetMonitorInfoW(handle, ctypes.byref(info)):
+            w = info.rcWork
+            areas.append(((int(w.left), int(w.top), int(w.right), int(w.bottom)), bool(info.dwFlags & 1)))
+        return True
+
+    u.EnumDisplayMonitors(None, None, each, 0)
+    areas.sort(key=lambda a: (not a[1], a[0][0], a[0][1]))
+    return areas
+
+
+def planned_place(size: str, monitor: int, areas: Sequence[tuple[Box, bool]] | None = None) -> Box:
+    """Where the stand-in's window will lie (screen px): *size* at the top left of the work area of *monitor*, as
+    standin_e2e places it with --standin-size and --standin-monitor."""
+    areas = monitor_areas() if areas is None else areas
+    if not 1 <= int(monitor) <= len(areas):
+        raise SystemExit(f"there is no monitor {monitor} on this computer ({len(areas)} found)")
+    (left, top, right, bottom), _primary = areas[int(monitor) - 1]
+    w, h = (int(v) for v in str(size).lower().split("x"))
+    return (left, top, left + min(w, right - left), top + min(h, bottom - top))
+
+
+def front_pid() -> int:
+    """The process of the window in front (0: none); no title is read."""
+    import standin_viewer as sv
+
+    return int(sv.foreground()[1])
+
+
+def lock_foreground(on: bool) -> bool:
+    """Windows' lock on changes of the window in front (`standin_viewer.lock_foreground`): taken only where any
+    program could change it now (the person has given no input for a while), and lifted by their next key or click."""
+    import standin_viewer as sv
+
+    return sv.lock_foreground(on)
+
+
+class ForegroundGuard:
+    """While the recording runs, what TASlation could take the foreground with - `windows.give_foreground` wherever
+    TASlation holds it, `see_menu._front`, Tk's ``focus -force`` - acts only while the window in front is already
+    one of *ours* (this process's, the stand-in's): it is never taken from another program's window. What was not
+    done is counted (`refused`)."""
+
+    def __init__(self, ours: Callable[[], set[int]], front: Callable[[], int] = front_pid) -> None:
+        self.ours, self.front = ours, front
+        self.refused: Counter[str] = Counter()
+        self._undo: list[Callable[[], Any]] = []
+
+    def allowed(self) -> bool:
+        try:
+            return int(self.front()) in self.ours()
+        except Exception:  # noqa: BLE001 - not known: not allowed
+            return False
+
+    def wrap(self, original: Callable[..., Any], name: str, refused: Any = False) -> Callable[..., Any]:
+        def guarded(*a: Any, **k: Any) -> Any:
+            if self.allowed():
+                return original(*a, **k)
+            self.refused[name] += 1
+            return refused
+
+        guarded.__wrapped__ = original  # type: ignore[attr-defined]
+        return guarded
+
+    def install(self) -> None:
+        import tkinter
+
+        import demo_video
+        from taslation.capture import windows
+        from taslation.ui import see_menu
+
+        current = windows.give_foreground
+        given = self.wrap(current, "give_foreground")
+        demo_video.replace_everywhere(current, given)
+        self._undo.append(lambda: demo_video.replace_everywhere(given, current))
+        front = see_menu._front
+        see_menu._front = self.wrap(front, "menu_front")
+        self._undo.append(lambda: setattr(see_menu, "_front", front))
+        force = tkinter.Misc.focus_force
+        tkinter.Misc.focus_force = self.wrap(force, "focus_force", None)  # type: ignore[method-assign]
+        self._undo.append(lambda: setattr(tkinter.Misc, "focus_force", force))
+
+    def undo(self) -> None:
+        while self._undo:
+            self._undo.pop()()
+
+
 class Run:
     """One recording: the recording file being written, what the frames' thread and the scenes note (numbers only),
-    and the check's verdicts. The frames' thread (`frames_loop`) belongs to the see-through watch of the stand-in run
-    (`attach`); the scenes are acted on the run's loop (`scenes_program`)."""
+    and the checks' verdicts. The frames' thread (`frames_loop`) belongs to the see-through watch of the stand-in run
+    (`attach`); the scenes are acted on the run's loop (`chooser_program`, `scenes_program`)."""
 
     def __init__(self, out: Path, fps: float = RECORD_FPS):
         self.writer = pv.RecordingWriter(out, quality=JPEG_QUALITY)
@@ -331,14 +628,16 @@ class Run:
         self.ended = threading.Event()
         self.watch: Any = None
         self.director: Any = None
+        self.browser: Any = None
         self.thread: threading.Thread | None = None
         self.down = False  # (the tool's pointer pressed: drawn with a ring)
-        self.drag_box: tuple[int, int, int, int] | None = None  # (page-area px) the sweep of a drag, left out
+        self.drag_box: Box | None = None  # (page-area px) the sweep of a drag, left out
         self.serials: tuple[int, ...] = ()  # the sets shown at the last two frames (their patches left out)
         self.crop_top = 0
         self.client: list[int] = []
         self.pointer: list[list[float]] = []  # [t, x, y, down] in the copy's px (x -1: none)
         self.panes: list[list[float]] = []  # [t, left box, right box] in the copy's px (-1: hidden)
+        self.foot: list[list[float]] = []  # [t, the right pane's foot] in the copy's px (-1: none)
         self.scenes: list[dict[str, Any]] = []
         self.kept = 0
         self.refused: Counter[str] = Counter()
@@ -347,6 +646,18 @@ class Run:
         self.failed = ""
         self.copy_ms: list[float] = []
         self.times: dict[str, float] = {}
+        self.checks = 0  # the screen's windows looked at
+        self.foreign = 0  # ... with a window of another program's on the stand-in
+        self.foreign_where: list[list[int]] = []  # (their rectangles: numbers only)
+        self.front: int | None = None  # the process in front at the last look
+        self.fronts_taken = 0
+        self.locked_at = float("-inf")
+        self.guard: ForegroundGuard | None = None
+        self.viewer_remembered = False
+
+    def pids(self) -> set[int]:
+        """Our processes: this one (TASlation's windows) and the stand-in browser's."""
+        return {os.getpid(), *(int(p) for p in (getattr(self.browser, "tree", None) or ()))}
 
     # the scenes' marks
     def begin(self, scene_id: str) -> None:
@@ -376,13 +687,22 @@ class Run:
             self.thread.join(5.0)
 
     def frames_loop(self) -> None:
-        due = time.monotonic()
+        due = checked = time.monotonic()
         while not self.ended.is_set():
+            now = time.monotonic()
+            if self.failed:  # (nothing more is looked at: the take is given up)
+                self.ended.wait(0.05)
+                continue
             if not self.on.is_set():
+                if now - checked >= CHECK_S:
+                    checked = now
+                    try:
+                        self.check_screen()
+                    except Exception:  # noqa: BLE001 - a look that failed is looked at again
+                        pass
                 self.ended.wait(0.02)
                 due = time.monotonic()
                 continue
-            now = time.monotonic()
             if now < due:
                 self.ended.wait(min(0.01, due - now))
                 continue
@@ -392,22 +712,63 @@ class Run:
             except Exception as e:  # noqa: BLE001 - a frame that could not be taken is one refused
                 self.refuse(f"{type(e).__name__} while taking a frame")
 
+    def check_screen(self) -> list[Shown] | None:
+        """The screen's windows looked at: the run fails (None) where a window of another program's meets the
+        stand-in's window, or the foreground came to one of ours from another program's window; else the windows
+        shown (Windows' lock on foreground changes asked for again every LOCK_EVERY_S meanwhile)."""
+        watch = self.watch
+        if watch is None:
+            return []
+        pids = self.pids()
+        shown = windows_now()
+        self.checks += 1
+        found = foreign_windows([frame_rect(int(watch.hwnd))], pids, shown)
+        if found:
+            self.foreign += 1
+            if len(self.foreign_where) < 10:
+                self.foreign_where.append([int(v) for v in found[0].rect])
+            self.fail(FOREIGN)
+            return None
+        front = front_pid()
+        if self.front is not None and self.front not in pids and front in pids:
+            self.fronts_taken += 1
+            self.fail(TAKEN)
+            return None
+        self.front = front
+        now = time.monotonic()
+        if now - self.locked_at >= LOCK_EVERY_S:
+            self.locked_at = now
+            lock_foreground(True)
+        return shown
+
     def grab(self) -> None:
-        """One frame: the screen in the stand-in's client area, kept when the check passes (see the module's notes)."""
+        """One frame: the screen in the stand-in's client area, kept when the checks pass (see the module's notes)."""
         import standin_seethrough as ss
 
         from taslation.capture import seethrough as window
         from taslation.capture import windows
 
         watch = self.watch
-        over = watch.over() if watch is not None else None
-        if over is None:
+        if watch is None:
             return
+        shown = self.check_screen()
+        if shown is None:
+            return
+        over = watch.over()
         cx, cy, cw, ch = windows._client_box(watch.hwnd)
+        x, y, w, h = cx + EDGE, cy, cw - 2 * EDGE, ch - EDGE  # (the window's rounded bottom corners left out)
+        mine = {s.hwnd: s.rect for s in shown if s.pid == os.getpid()}  # (TASlation's windows on the screen)
         started = time.perf_counter()
-        covers = window.cover_rects(watch.hwnd, (cx, cy, cx + cw, cy + ch), over.own_windows())
-        # (the window's rounded bottom corners show what lies behind it: the sides and the foot are left out)
-        x, y, w, h = cx + EDGE, cy, cw - 2 * EDGE, ch - EDGE
+        point = watch.fake_point
+        if over is None:  # (the viewer chooser, before the stand-in's window is captured: on the window checks)
+            t = time.time() * 1000
+            copy = ss.screen_copy(x, y, w, h)
+            if self.check_screen() is None:
+                del copy  # (never kept, never looked at again)
+                return
+            self.keep(t, copy, point, (x, y, w, h), None, started)
+            return
+        covers = window.cover_rects(watch.hwnd, (cx, cy, cx + cw, cy + ch), set(over.own_windows()) | set(mine))
 
         def cut(frame: Any) -> Any:
             return None if frame is None or frame.shape[:2] != (ch, cw) else frame[:h, EDGE:EDGE + w]
@@ -416,30 +777,44 @@ class Run:
         t = time.time() * 1000
         copy = ss.screen_copy(x, y, w, h)
         after = cut(watch._viewer_frame())
-        point = watch.fake_point
-        tiles, where = (-2, None) if covers else ss.foreign_tiles(copy, [before, after], own_masks(over, x, y, self))
+        masks = own_masks(over, x, y, self) + window_masks(mine, over, x, y)
+        tiles, where = (-2, None) if covers else ss.foreign_tiles(copy, [before, after], masks)
         del before, after
         why = verdict(len(covers), tiles)
+        if not why and self.check_screen() is None:
+            del copy
+            return
         if why:
             del copy  # (never kept, never looked at again)
             if where is not None and len(self.refused_where) < 20:
                 self.refused_where.append([int(v) for v in where])  # (the squares' box: numbers only)
             self.refuse(why)
             return
+        self.keep(t, copy, point, (x, y, w, h), over, started)
+
+    def keep(self, t: float, copy: Any, point: tuple[int, int] | None, area: Box, over: Any, started: float) -> None:
+        """A frame kept: its picture, the tool's pointer and (from the see-through window on) the panes and the right
+        pane's foot where they were, in the copy's px."""
+        x, y, w, h = area
         self.in_a_row = 0
         self.kept += 1
         self.writer.add(t, Image.fromarray(copy))
-        del copy
         self.copy_ms.append((time.perf_counter() - started) * 1000)
         self.client = [w, h]
         self.pointer.append([round(t, 1), *((point[0] - x, point[1] - y) if point is not None else (-1, -1)),
                              int(self.down)])
+        if over is None:
+            return
         boxes = []
         for side in ("left", "right"):
             b = over.pane_shown(side)
             boxes += [b[0] - x, b[1] - y, b[2] - x, b[3] - y] if b is not None else [-1, -1, -1, -1]
         if not self.panes or self.panes[-1][1:] != boxes:
             self.panes.append([round(t, 1), *boxes])
+        f = foot_box(getattr(self.director, "app", None), over)
+        foot = [f[0] - x, f[1] - y, f[2] - x, f[3] - y] if f is not None else [-1, -1, -1, -1]
+        if not self.foot or self.foot[-1][1:] != foot:
+            self.foot.append([round(t, 1), *foot])
 
     def refuse(self, why: str) -> None:
         self.refused[why] += 1
@@ -451,9 +826,11 @@ class Run:
         copy_ms = sorted(self.copy_ms)
         return {"intro_format": FORMAT, "version": facts.get("version"), "facts": facts, "made_up": False,
                 "client": self.client, "crop_top": self.crop_top, "scenes": self.scenes, "pointer": self.pointer,
-                "panes": self.panes,
+                "panes": self.panes, "foot": self.foot,
                 "check": {"kept": self.kept, "refused": dict(self.refused), "refused_where": self.refused_where,
-                          "fps": self.fps,
+                          "fps": self.fps, "windows_looked_at": self.checks, "foreign": self.foreign,
+                          "fronts_taken": self.fronts_taken,
+                          "foreground_refused": dict(self.guard.refused) if self.guard is not None else {},
                           "frame_ms_median": round(copy_ms[len(copy_ms) // 2], 1) if copy_ms else None},
                 "screen_s": self.screen_s()}
 
@@ -478,14 +855,14 @@ def verdict(covers: int, tiles: int) -> str:
     return ""
 
 
-def own_masks(over: Any, x: int, y: int, run: Run | None = None) -> list[tuple[int, int, int, int]]:
-    """Where TASlation's own windows draw over the stand-in, in the copy's px (its client area at *x*, *y*): every
-    patch of the set shown and of the one shown at the frame before (all of them, shown or given way: a look may
-    change that between the copy and the frames it is told by), the panes, and while editing its boxes with their
-    plates and handles (and the sweep of a drag); the check leaves those out."""
+def own_masks(over: Any, x: int, y: int, run: Run | None = None) -> list[Box]:
+    """Where TASlation's own see-through windows draw over the stand-in, in the copy's px (its client area at *x*,
+    *y*): every patch of the set shown and of the one shown at the frame before (all of them, shown or given way: a
+    look may change that between the copy and the frames it is told by), the panes, and while editing its boxes with
+    their plates and handles (and the sweep of a drag); the check leaves those out."""
     from taslation import seethrough as st
 
-    out: list[tuple[int, int, int, int]] = []
+    out: list[Box] = []
     shown = over.shown()
     look = getattr(over, "_last_look", None)
     origin = shown[2] if shown is not None else (look[5] if look is not None else None)
@@ -525,6 +902,15 @@ def own_masks(over: Any, x: int, y: int, run: Run | None = None) -> list[tuple[i
     return out
 
 
+def window_masks(mine: dict[int, Box], over: Any, x: int, y: int) -> list[Box]:
+    """Where TASlation's other windows lie (this process's shown top-level windows *mine*, screen px: the viewer
+    chooser, the region editor, a place entry, the list of languages), in the copy's px; not the lettering's own
+    window, which lies over the whole client area while editing (what it draws is `own_masks`')."""
+    skip = int(getattr(over, "hwnd", 0) or 0)
+    return [(r[0] - x - OWN_PAD, r[1] - y - OWN_PAD, r[2] - x + OWN_PAD, r[3] - y + OWN_PAD)
+            for hwnd, r in mine.items() if int(hwnd) != skip]
+
+
 # the scenes, acted on the stand-in run's loop
 def ease(u: float) -> float:
     return u * u * (3 - 2 * u)
@@ -541,11 +927,16 @@ def glide(run: Run, to: tuple[int, int], seconds: float) -> Iterator[Any]:
         yield TICK_S
 
 
+def post_raw(hwnd: int, message: int, wparam: int, lparam: int) -> None:
+    """A message POSTED to one of TASlation's own windows (this process's): any other window is refused."""
+    if not hwnd or window_pid(int(hwnd)) != os.getpid():
+        raise SceneFailed("a message for a window that is not TASlation's")
+    _user32().PostMessageW(int(hwnd), message, wparam, lparam)
+
+
 def post(hwnd: int, message: int, wparam: int, x: int, y: int) -> None:
     """A mouse message POSTED to one of TASlation's own windows (its pane, its lettering): nothing else."""
-    import standin_seethrough as ss
-
-    ss._user32.PostMessageW(hwnd, message, wparam, (int(y) & 0xFFFF) << 16 | (int(x) & 0xFFFF))
+    post_raw(hwnd, message, wparam, (int(y) & 0xFFFF) << 16 | (int(x) & 0xFFFF))
 
 
 def final_set(over: Any) -> Any:
@@ -579,15 +970,36 @@ def release_hold(director: Any, n: int) -> None:
     sv.write_control(director.standin_dir, director.control["go"], hold=int(n))
 
 
+def crop_of(director: Any) -> int:
+    """The rows of a copy above the stand-in's page: its own band (as it said when it drew the page) and above."""
+    notes = director.notes
+    return int(getattr(notes, "top", 0) + round(float(getattr(director, "band_px", 0) or 0) *
+                                                float(getattr(notes, "dpr", 1.0) or 1.0)))
+
+
 def pane_point(app: Any, over: Any, side: str, name: str) -> tuple[tuple[int, int], tuple[int, int]] | None:
     """Where the pane's control *name* is: (screen px, the pane's own px), or None."""
     memo = (getattr(app, "_see_pane_memo", None) or {}).get(side)
     box = over.pane_shown(side)
-    hit = dict(memo[1].hits).get(name) if memo is not None else None
+    hit = dict(memo[1].hits).get(name) if memo is not None and memo[1] is not None else None
     if box is None or hit is None:
         return None
     local = ((hit[0] + hit[2]) // 2, (hit[1] + hit[3]) // 2)
     return (box[0] + local[0], box[1] + local[1]), local
+
+
+def foot_box(app: Any, over: Any) -> Box | None:
+    """The right pane's foot on the screen (its rows' boxes together, `panes.Picture.foot`, of the column shown: the
+    indicators', or the one with a bubble's block), or None."""
+    if app is None or over is None:
+        return None
+    memo = (getattr(app, "_see_pane_memo", None) or {}).get(str(getattr(app, "_see_right_used", "right") or "right"))
+    shown = over.pane_shown("right")
+    foot = tuple(getattr(memo[1], "foot", ()) or ()) if memo is not None else ()
+    if shown is None or not foot:
+        return None
+    return (shown[0] + min(b[0] for b in foot), shown[1] + min(b[1] for b in foot),
+            shown[0] + max(b[2] for b in foot), shown[1] + max(b[3] for b in foot))
 
 
 def click_pane(run: Run, over: Any, side: str, local: tuple[int, int]) -> Iterator[Any]:
@@ -603,6 +1015,66 @@ def click_pane(run: Run, over: Any, side: str, local: tuple[int, int]) -> Iterat
     post(pane, ss.WM_LBUTTONUP, 0, *local)
     run.down = False
     yield TICK_S
+
+
+def click_at(run: Run, over: Any, point: tuple[int, int]) -> Iterator[Any]:
+    """A click POSTED to the lettering's own window at *point* (page-area px), the pointer drawn pressed."""
+    import standin_seethrough as ss
+
+    over._edit_held = lambda: None  # (a posted press holds no button of the system's: not given up for that)
+    run.down = True
+    post(over.hwnd, ss.WM_LBUTTONDOWN, ss.MK_LBUTTON, *point)
+    yield 0.1
+    post(over.hwnd, ss.WM_LBUTTONUP, 0, *point)
+    run.down = False
+    yield TICK_S
+
+
+def double_click_at(run: Run, over: Any, point: tuple[int, int]) -> Iterator[Any]:
+    """A double click POSTED to the lettering's own window at *point*: two presses and releases at once, as
+    `standin_seethrough.SeeWatch._edit_measure` posts them."""
+    import standin_seethrough as ss
+
+    over._edit_held = lambda: None
+    run.down = True
+    for _twice in range(2):
+        post(over.hwnd, ss.WM_LBUTTONDOWN, ss.MK_LBUTTON, *point)
+        post(over.hwnd, ss.WM_LBUTTONUP, 0, *point)
+    yield 0.12
+    run.down = False
+    yield TICK_S
+
+
+def double_click_s() -> float:
+    """The system's double-click time, s."""
+    from taslation.capture import seethrough as window
+
+    return float(window.double_click()[0])
+
+
+def menu_window() -> int:
+    """TASlation's own popup menu on the screen (the list of languages), 0 while none is."""
+    from taslation.capture import seethrough as window
+
+    return int(window.own_menu() or 0)
+
+
+def end_menu() -> None:
+    """The list of languages ended as Windows ends a menu (`EndMenu`: the menu of the calling thread, the Tk
+    thread's, where the scenes are acted); an Esc posted to the menu's own window after ESC_AFTER_S should it still
+    be up."""
+    import ctypes
+
+    ctypes.WinDLL("user32").EndMenu()
+
+    def escape() -> None:
+        time.sleep(ESC_AFTER_S)
+        hwnd = menu_window()
+        if hwnd:
+            post_raw(hwnd, WM_KEYDOWN, VK_ESCAPE, 0)
+            post_raw(hwnd, WM_KEYUP, VK_ESCAPE, 0)
+
+    threading.Thread(target=escape, name="intro-menu-escape", daemon=True).start()
 
 
 def biggest_patch(over: Any, panes: Sequence[tuple[int, ...]]) -> tuple[int, int, tuple[int, int]] | None:
@@ -637,9 +1109,9 @@ def edit_ready(director: Any, over: Any) -> bool:
     return edit_settled(director, over) and final_set(over) is not None
 
 
-def drag_box_pick(over: Any) -> tuple[int, tuple[int, int, int, int]] | None:
-    """The biggest of Edit's boxes that the drag of the edit scene can move (its middle in no other box nor on a
-    pane, room for the drag on the page): (index, box in page-area px)."""
+def drag_box_pick(over: Any) -> tuple[int, Box] | None:
+    """The biggest of Edit's boxes that the edit scene can take (its middle in no other box nor on a pane, room for
+    the drag on the page): (index, box in page-area px)."""
     from taslation import seethrough as st
 
     look, marks = over._last_look, over._marks_live
@@ -664,12 +1136,68 @@ def drag_box_pick(over: Any) -> tuple[int, tuple[int, int, int, int]] | None:
     return None if best is None else (best[1], best[2])  # type: ignore[return-value]
 
 
-def box_near(over: Any, box: Sequence[int], px: int = 2) -> tuple[int, ...] | None:
+def box_near(over: Any, box: Sequence[int], px: int = 2) -> Box | None:
     marks = getattr(over, "_marks_live", None)
     if marks is None:
         return None
     return next((tuple(int(v) for v in o) for o in marks.boxes if max(abs(a - b) for a, b in zip(o, box)) <= px),
-                None)
+                None)  # type: ignore[return-value]
+
+
+def index_near(over: Any, box: Sequence[int], px: int = 2) -> int | None:
+    """The index of Edit's box within *px* of *box*, or None."""
+    marks = getattr(over, "_marks_live", None)
+    boxes = marks.boxes if marks is not None else ()
+    return next((i for i, o in enumerate(boxes) if max(abs(a - b) for a, b in zip(o, box)) <= px), None)
+
+
+def selected(app: Any, over: Any, index: int, box: Sequence[int]) -> bool:
+    """The region of Edit's box *index* chosen, alone, its corner handles on it."""
+    region = getattr(app, "_chosen_region", None)
+    marks = getattr(over, "_marks_live", None)
+    return (region is not None and tuple(int(v) for v in region.bbox) == tuple(int(v) for v in box)
+            and marks is not None and tuple(marks.chosen) == (index,))
+
+
+def plate_point(over: Any, index: int) -> tuple[int, int] | None:
+    """The middle of the number plate of Edit's box *index* (page-area px), where a press takes the plate itself
+    (`seethrough.edit_grip`: no corner of a box there); None where it has none."""
+    from taslation import seethrough as st
+
+    marks = getattr(over, "_marks_live", None)
+    if marks is None or index >= len(marks.plates):
+        return None
+    plate = st.plate_box(marks.plates[index])
+    if plate is None:
+        return None
+    point = ((plate[0] + plate[2]) // 2, (plate[1] + plate[3]) // 2)
+    reach = st.scaled(st.GRIP_PX, getattr(over, "_dpi", st.BASE_DPI))
+    return point if st.edit_grip(marks, point, reach, over._left_out) == (index, st.PLATE) else None
+
+
+def ground_point(over: Any) -> tuple[int, int] | None:
+    """A point of the page's empty ground (page-area px): no box, plate nor handle within 8 px, no pane on it."""
+    from taslation import seethrough as st
+
+    look, marks = over._last_look, over._marks_live
+    origin, size = look[5], look[6]
+    reach = st.scaled(st.GRIP_PX, getattr(over, "_dpi", st.BASE_DPI)) + 8
+    panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+    plates = [p for p in (st.plate_box(q) for q in getattr(marks, "plates", ()) or ()) if p is not None]
+    for x, y in ((size[0] // 2, size[1] - 8), (12, size[1] * 93 // 100), (size[0] - 12, size[1] * 93 // 100)):
+        near = (x - reach, y - reach, x + reach, y + reach)
+        if any(meets(near, b) for b in (*marks.boxes, *plates)):
+            continue
+        if any(p[0] <= origin[0] + x < p[2] and p[1] <= origin[1] + y < p[3] for p in panes):
+            continue
+        return x, y
+    return None
+
+
+def place_entry(app: Any) -> Any:
+    """The place entry open over a number plate (`see_edit.PlaceEntry`), or None."""
+    entry = getattr(app, "_see_place_entry", None)
+    return entry if entry is not None and not getattr(entry, "closed", False) else None
 
 
 def drag(run: Run, over: Any, box: Sequence[int], by: tuple[int, int]) -> Iterator[Any]:
@@ -698,10 +1226,95 @@ def drag(run: Run, over: Any, box: Sequence[int], by: tuple[int, int]) -> Iterat
     return (box[0] + by[0], box[1] + by[1], box[2] + by[0], box[3] + by[1])
 
 
+def names_browser(text: str) -> bool:
+    """Whether *text* (a window as a list names it) names a browser in one of its parts ("<tab> - <browser>")."""
+    from taslation.capture import windows
+
+    return any(windows._is_browser_name(part) for part in windows.SEPARATOR.split(str(text or "")) if part.strip())
+
+
+def listed(dialog: Any, hwnd: int) -> int | None:
+    """Where the window *hwnd* is in the viewer chooser's list, or None."""
+    return next((i for i, w in enumerate(getattr(dialog, "windows", ()) or ()) if int(w.hwnd) == int(hwnd)), None)
+
+
+def widget_box(widget: Any) -> Box | None:
+    """A Tk widget's box on the screen, or None (gone)."""
+    try:
+        x, y = int(widget.winfo_rootx()), int(widget.winfo_rooty())
+        return (x, y, x + int(widget.winfo_width()), y + int(widget.winfo_height()))
+    except Exception:  # noqa: BLE001 - (gone meanwhile)
+        return None
+
+
+def middle(box: Sequence[int]) -> tuple[int, int]:
+    return ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
+
+
+def chooser_program(director: Any, run: Run, dialog: Any) -> Iterator[Any]:
+    """The viewer chooser as the first scene: the tool's pointer to its list - the stand-in preselected in it, as the
+    viewer chosen before (`remember_viewer`) - and to OK, and the chooser answered through its own object as
+    standin_e2e answers it (the stand-in's entry, OK: no input, no window activated). It fails where the stand-in is
+    not preselected, the chooser lies off the stand-in's client area, or the list names the stand-in's browser."""
+    from taslation.capture import taskbar_title
+    from taslation.capture import windows
+
+    app, hwnd = director.app, int(director.browser.hwnd)
+    yield (lambda: run.watch is not None and listed(dialog, hwnd) is not None, CHOOSER_S,
+           "the stand-in listed in the viewer chooser")
+    for _ in range(round(3.0 / TICK_S)):  # (the stand-in's band, as it said when it drew its page)
+        if getattr(director, "band_px", 0):
+            break
+        yield TICK_S
+    at = listed(dialog, hwnd)
+    if at is None:
+        raise SceneFailed("the stand-in left the viewer chooser")
+    if names_browser(taskbar_title(dialog.windows[at])) or names_browser(str(dialog.box.get())):
+        raise SceneFailed("the viewer chooser names the stand-in's browser")
+    if dialog.box.current() != at:
+        raise SceneFailed("the stand-in is not preselected in the viewer chooser")
+    cx, cy, cw, ch = windows._client_box(hwnd)
+    box = widget_box(dialog)
+    if box is None or not (cx <= box[0] and cy <= box[1] and box[2] <= cx + cw and box[3] <= cy + ch):
+        raise SceneFailed("the viewer chooser is not over the stand-in")
+    row = {"t": time.time() * 1000, "dialog": id(dialog), "listed": len(dialog.windows), "preselected_standin": True,
+           "ok_greyed": bool(dialog.ok_button.instate(["disabled"])), "answered_t": None, "activated": False}
+    rows = getattr(director, "chooser_rows", None)
+    if isinstance(rows, list):
+        rows.append(row)
+    run.crop_top = crop_of(director)
+    list_box, ok_box = widget_box(dialog.box), widget_box(dialog.ok_button)
+    if list_box is None or ok_box is None:
+        raise SceneFailed("the viewer chooser has gone")
+    run.watch.fake_point = (middle(box)[0], min(box[3] + 60, cy + ch - EDGE - 12))
+    run.begin("chooser")
+    run.on.set()
+    yield 1.0
+    yield from glide(run, middle(list_box), 0.7)
+    yield 0.9
+    yield from glide(run, middle(ok_box), 0.6)
+    yield 0.35
+    run.down = True
+    yield 0.12
+    dialog.box.current(at)
+    dialog._picked()
+    dialog.ok()
+    row["answered_t"] = time.time() * 1000
+    run.down = False
+    yield (lambda: getattr(app, "selected", None) is not None and getattr(app, "_see_chooser", None) is None, 10.0,
+           "the stand-in chosen as the viewer")
+    yield 1.0
+    run.end("chooser")
+    run.on.clear()
+    run.watch.fake_point = None
+
+
 def scenes_program(director: Any, run: Run) -> Iterator[Any]:
-    """The scenes on the stand-in run's loop: each step yields a wait - seconds, or (until, at most seconds, what) -
-    and raises `SceneFailed` where what it needs is not there."""
+    """The scenes after the chooser on the stand-in run's loop: each step yields a wait - seconds, or (until, at most
+    seconds, what) - and raises `SceneFailed` where what it needs is not there."""
     from taslation import seethrough as st
+    from taslation.ui import see_edit
+    from taslation.ui import seethrough as see_ui
 
     app = director.app
 
@@ -715,17 +1328,39 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
         o = run.watch.over() if run.watch is not None else None
         return o is not None and held(director, 1) and page_done(director, o)
 
-    yield (first_page, FIRST_PAGE_S, "the first page translated")
-    yield 1.0
-    notes = director.notes
-    run.crop_top = int(getattr(notes, "top", 0) + round(float(getattr(director, "band_px", 0)) *
-                                                         float(getattr(notes, "dpr", 1.0) or 1.0)))
-    run.on.set()
-    yield 0.6
+    def screen(o: Any, point: Sequence[int]) -> tuple[int, int]:
+        origin = o._last_look[5]
+        return int(origin[0] + point[0]), int(origin[1] + point[1])
 
-    # 1. a page turned, filling in
+    yield (first_page, FIRST_PAGE_S, "the first page translated")
+    yield (lambda: edit_ready(director, over()), PAGE_S, "editing, the page's boxes")  # (TASlation starts editing)
+    yield 1.0
+    run.crop_top = crop_of(director)
+    o = over()
+    left, right = o.pane_shown("left"), o.pane_shown("right")
+    if left is None or right is None:
+        raise SceneFailed("a side pane has no room beside the page")
+    run.watch.fake_point = ((left[0] + left[2]) // 2, max(left[1] - 24, 0))
+    run.on.set()
+    yield 0.4
+
+    # Reader mode checked: the page's boxes go
+    run.begin("reader")
+    yield 1.4
+    at = pane_point(app, over(), "left", "edit")
+    if at is None:
+        raise SceneFailed("no Reader mode in the left pane")
+    yield from glide(run, at[0], 0.8)
+    yield 0.3
+    yield from click_pane(run, over(), "left", at[1])
+    yield (lambda: not getattr(over(), "_edit_takes", False) and see_edit.reader_mode(app) and director.idle(), 15.0,
+           "Reader mode")
+    yield 1.4
+    run.end("reader")
+
+    # a page turned, filling in
     run.begin("turn")
-    yield 0.8
+    yield 0.6
     first = final_set(over())
     before = first.serial if first is not None else None
     since = len(director.events)
@@ -736,39 +1371,67 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
     yield 1.5
     run.end("turn")
 
-    # 2. the side panes
+    # the side panes
     o = over()
     left, right = o.pane_shown("left"), o.pane_shown("right")
     if left is None or right is None:
         raise SceneFailed("a side pane has no room beside the page")
     run.begin("panes")
-    run.watch.fake_point = ((left[0] + left[2]) // 2, max(left[1] - 24, 0))
-    yield 0.5
-    for name in ("translate", "auto", "lettering", "indicators", "edit"):
+    yield 0.3
+    for name in ("translate", "auto", "language", "lettering", "indicators", "edit"):
         at = pane_point(app, o, "left", name)
         if at is not None:
             yield from glide(run, at[0], 0.35)
-            yield 0.3
-    yield from glide(run, ((right[0] + right[2]) // 2, (right[1] + right[3]) // 2), 1.0)
-    yield 1.4
+            yield 0.25
+    yield from glide(run, ((right[0] + right[2]) // 2, (right[1] + right[3]) // 2), 0.9)
+    yield 1.2
     run.end("panes")
 
-    # 3. the original under the pointer, the bubble's block in the right pane
+    # the right pane's foot
+    run.begin("foot")
+    foot = foot_box(app, over())
+    if foot is None:
+        raise SceneFailed("the right pane shows no foot")
+    yield from glide(run, (foot[0] + (foot[2] - foot[0]) // 3, (foot[1] + foot[3]) // 2), 0.7)
+    yield 2.4
+    run.end("foot")
+
+    # the list of languages beside the left pane, closed with no change
+    run.begin("language")
+    language = see_ui.target(app)
+    at = pane_point(app, over(), "left", "language")
+    if at is None:
+        raise SceneFailed("no language in the left pane")
+    yield from glide(run, at[0], 0.9)
+    yield 0.3
+    yield from click_pane(run, over(), "left", at[1])
+    yield (lambda: menu_window() != 0, 5.0, "the list of languages")
+    yield 2.2
+    end_menu()
+    yield (lambda: menu_window() == 0, ESC_AFTER_S + 3.0, "the list of languages closed")
+    if see_ui.target(app) != language:
+        raise SceneFailed("the target language changed")
+    yield 1.0
+    run.end("language")
+
+    # the original under the pointer, the bubble's block in the right pane
     run.begin("original")
-    picked = biggest_patch(o, (left, right))
+    o = over()
+    picked = biggest_patch(o, [b for b in (o.pane_shown("left"), o.pane_shown("right")) if b is not None])
     if picked is None:
         raise SceneFailed("no bubble lettered on the page")
-    serial, index, middle = picked
-    yield from glide(run, middle, 0.9)
+    serial, index, spot = picked
+    yield from glide(run, spot, 0.9)
+    yield float(getattr(o, "_hover_delay", 0.0) or 0.0) + HOVER_REST_S  # (resting past the hover delay)
     yield (lambda: (lambda s: s is not None and s[0] == serial and index not in s[1])(over().shown())
            and getattr(app, "_see_right_used", "") == "bubble", 4.0, "the original under the pointer")
-    yield 2.2
+    yield 2.0
     right = over().pane_shown("right") or right
     yield from glide(run, ((right[0] + right[2]) // 2, right[1] + min(60, (right[3] - right[1]) // 4)), 0.8)
-    yield 1.8
+    yield 1.6
     run.end("original")
 
-    # 4. editing: Reader mode unchecked, a box dragged and back, Reader mode checked again
+    # editing: a click selects a box, a double click opens the region editor, a drag moves it, its number plate
     run.begin("edit")
     at = pane_point(app, over(), "left", "edit")
     if at is None:
@@ -777,15 +1440,30 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
     yield 0.3
     yield from click_pane(run, over(), "left", at[1])
     yield (lambda: edit_ready(director, over()), PAGE_S, "editing, the page's boxes")
-    yield 1.3
+    yield 1.0
     o = over()
     picked_box = drag_box_pick(o)
     if picked_box is None:
-        raise SceneFailed("no box the drag can move")
-    _index, box = picked_box
-    origin = o._last_look[5]
-    yield from glide(run, (origin[0] + (box[0] + box[2]) // 2, origin[1] + (box[1] + box[3]) // 2), 0.8)
-    yield 0.7
+        raise SceneFailed("no box the scene can take")
+    index, box = picked_box
+    inside = middle(box)
+    yield from glide(run, screen(o, inside), 0.8)
+    yield 0.4
+    yield from click_at(run, o, inside)
+    clicked = time.monotonic()
+    yield (lambda: selected(app, over(), index, box), 10.0, "the box selected, its handles")
+    yield 1.4
+    rest = double_click_s() + 0.2 - (time.monotonic() - clicked)  # (no double click with the click before)
+    if rest > 0:
+        yield rest
+    yield from double_click_at(run, over(), inside)
+    yield (lambda: run.watch._editor_window() != 0, 20.0, "the region editor")
+    yield 2.4
+    post_raw(run.watch._editor_window(), WM_CLOSE, 0, 0)
+    yield (lambda: run.watch._editor_window() == 0 and edit_settled(director, over()), 15.0,
+           "the region editor closed")
+    yield 0.8
+    o = over()
     dpi = getattr(o, "_dpi", st.BASE_DPI)
     by = (st.scaled(DRAG[0], dpi), st.scaled(DRAG[1], dpi))
     to = yield from drag(run, o, box, by)
@@ -797,31 +1475,96 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
     back = yield from drag(run, over(), moved, (-by[0], -by[1]))
     yield (lambda: box_near(over(), back) is not None and edit_settled(director, over()), PAGE_S,
            "the box back, the page lettered again")
-    yield 1.2
+    yield 1.0
     run.drag_box = None
-    yield from glide(run, at[0], 0.8)
+    o = over()
+    where = index_near(o, back)
+    plate = plate_point(o, where) if where is not None else None
+    if plate is None:
+        raise SceneFailed("no number plate the scene can click")
+    yield from glide(run, screen(o, plate), 0.6)
     yield 0.3
-    yield from click_pane(run, over(), "left", at[1])
-    yield (lambda: not getattr(over(), "_edit_takes", False) and director.idle(), 15.0, "Reader mode again")
-    yield 1.6
+    yield from click_at(run, o, plate)
+    yield (lambda: place_entry(app) is not None, 5.0, "the place entry")
+    yield 0.5  # (an entry that never gets the keys goes by itself after see_edit.PLACE_FOCUS_S)
+    ground = ground_point(over())
+    if ground is None:
+        raise SceneFailed("no empty ground on the page")
+    yield from glide(run, screen(over(), ground), 0.35)
+    yield from click_at(run, over(), ground)
+    yield (lambda: place_entry(app) is None and edit_settled(director, over()), 5.0, "the place entry given up")
+    yield 1.2
     run.end("edit")
     run.on.clear()
     run.watch.fake_point = None
     yield 0.2
 
 
+class Act:
+    """A program of waits (`chooser_program`, `scenes_program`) acted a step at each tick of the run's loop."""
+
+    def __init__(self, program: Iterator[Any]) -> None:
+        self.program = program
+        self.waiting: tuple[Any, ...] | None = None
+        self.until = 0.0
+
+    def advance(self) -> bool:
+        """One tick's step: whether the program has ended. Raises `SceneFailed` (its own, or a wait that timed out)."""
+        if self.waiting is not None and not self.waited():
+            return False
+        try:
+            got = next(self.program)
+        except StopIteration:
+            return True
+        if isinstance(got, (int, float)):
+            self.waiting, self.until = ("time", None, ""), time.monotonic() + float(got)
+        else:
+            until, limit, what = got
+            self.waiting, self.until = ("until", until, what), time.monotonic() + float(limit)
+        return False
+
+    def waited(self) -> bool:
+        kind, until, what = self.waiting  # type: ignore[misc]
+        if kind == "time":
+            return time.monotonic() >= self.until
+        if until():
+            return True
+        if time.monotonic() >= self.until:
+            raise SceneFailed(f"timed out: {what}")
+        return False
+
+
 def director_class(e2e: Any) -> type:
-    """standin_e2e's Director with the scenes (`scenes_program`) in place of its scenarios once its first release is
-    made; the run ends when the scenes are done, or stops when one fails or the check stopped it."""
+    """standin_e2e's Director with the viewer chooser acted as a scene (`chooser_program`, in place of its own answer
+    to it) and the other scenes (`scenes_program`) in place of its scenarios once its first release is made; the run
+    ends when the scenes are done, or stops when one fails or a check stopped it."""
 
     class IntroDirector(e2e.Director):
         def __init__(self, *a: Any, **k: Any) -> None:
             super().__init__(*a, **k)
-            self.program: Iterator[Any] | None = None
-            self.waiting: tuple[Any, ...] | None = None
-            self.until = 0.0
+            self.act: Act | None = None
+            self.pre: Act | None = None
+            self.chosen = False
             if RUN is not None:
                 RUN.director = self
+
+        def chooser_step(self) -> None:
+            run = RUN
+            if run is None or self.over:
+                return
+            if self.pre is None:
+                dialog = getattr(self.app, "_see_chooser", None)
+                if dialog is None or self.chosen:
+                    return
+                self.pre = Act(chooser_program(self, run, dialog))
+            try:
+                done = self.pre.advance()
+            except SceneFailed as e:
+                run.fail(str(e))
+                self.stop(run.failed)
+                return
+            if done:
+                self.pre, self.chosen = None, True
 
         def step(self) -> None:
             run = RUN
@@ -830,27 +1573,19 @@ def director_class(e2e: Any) -> type:
             if run.failed:
                 self.stop(run.failed)
                 return
-            if self.program is None:
+            if self.act is None:
                 super().step()
-                if SCENARIO in self.released and self.phase == "running":
-                    self.program = scenes_program(self, run)
+                if SCENARIO in self.released and self.phase == "running" and not self.over:
+                    self.act = Act(scenes_program(self, run))
                 return
             try:
-                if self.waiting is not None and not self.waited():
-                    return
-                got = next(self.program)
-            except StopIteration:
-                self.finish()
-                return
+                done = self.act.advance()
             except SceneFailed as e:
                 run.fail(str(e))
                 self.stop(run.failed)
                 return
-            if isinstance(got, (int, float)):
-                self.waiting, self.until = ("time", None, ""), time.monotonic() + float(got)
-            else:
-                until, limit, what = got
-                self.waiting, self.until = ("until", until, what), time.monotonic() + float(limit)
+            if done:
+                self.finish()
 
         def stop(self, why: str) -> None:
             if RUN is not None:
@@ -858,16 +1593,6 @@ def director_class(e2e: Any) -> type:
                 if why != "done":
                     RUN.fail(why)
             super().stop(why)
-
-        def waited(self) -> bool:
-            kind, until, what = self.waiting  # type: ignore[misc]
-            if kind == "time":
-                return time.monotonic() >= self.until
-            if until():
-                return True
-            if time.monotonic() >= self.until:
-                raise SceneFailed(f"timed out: {what}")
-            return False
 
     return IntroDirector
 
@@ -899,15 +1624,46 @@ def watch_class(ss: Any) -> type:
     return IntroWatch
 
 
+def remember_viewer(state: Path, hwnd: int) -> bool:
+    """The stand-in's window remembered as the viewer chosen before, in the run's scratch state (its viewers.json,
+    `viewerparts`): the viewer chooser then lists it first, preselected, and comes centred over it - on the
+    stand-in's monitor, in the recording - as it comes over a viewer chosen before. Its title only (its program is
+    every browser window's). Whether it was remembered."""
+    import standin_viewer as sv
+
+    from taslation import viewerparts
+    from taslation.capture import windows
+
+    title = " ".join(windows.tab_title(sv.window_text(int(hwnd)), sv.window_class(int(hwnd))).split())
+    if not title:
+        return False
+    viewerparts.use(Path(state))
+    viewerparts.change(lambda memory: memory.remember(title))
+    return True
+
+
 def e2e_argv(args: argparse.Namespace, work: Path) -> list[str]:
-    """The stand-in run's command line: this tool's scenario, the stand-in sharp at once, its window's size, the
-    translator's server started on a port of its own."""
+    """The stand-in run's command line: this tool's scenario, the stand-in sharp at once, its window's size and
+    monitor, the translator's server started on a port of its own, TASlation starting editing and asking for the
+    viewer (its flags last)."""
     argv = ["--out", str(work), "--scenario", SCENARIO, "--soft-first", "off", "--standin-size", args.standin_size,
-            "--browser", args.browser, "--series", str(args.series), "--first", str(args.first),
-            "--start-ollama", str(args.start_ollama)]
+            "--standin-monitor", str(args.standin_monitor), "--browser", args.browser, "--series", str(args.series),
+            "--first", str(args.first), "--start-ollama", str(args.start_ollama)]
     if args.models:
         argv += ["--models", args.models]
-    return argv
+    return [*argv, "--editing", "--chooser"]
+
+
+def clean_place(args: argparse.Namespace) -> Box:
+    """The stand-in's place (`planned_place`) when no window of another program lies on it nor within PLACE_MARGIN of
+    it; else SystemExit (nothing has started: no clean place, no recording)."""
+    place = planned_place(args.standin_size, args.standin_monitor)
+    m = PLACE_MARGIN
+    found = foreign_windows([(place[0] - m, place[1] - m, place[2] + m, place[3] + m)], {os.getpid()})
+    if found:
+        raise SystemExit(f"no clean place for the stand-in: {len(found)} window(s) of other programs lie on its place "
+                         f"{list(place)} (monitor {args.standin_monitor}); nothing was started")
+    return place
 
 
 def record(args: argparse.Namespace) -> int:
@@ -925,7 +1681,9 @@ def record(args: argparse.Namespace) -> int:
     work = out.with_name(out.stem + "-run")
     if work.exists():
         raise SystemExit(f"{work} is there from a run before: delete it, or give another --out")
+    place = clean_place(args)
     out.parent.mkdir(parents=True, exist_ok=True)
+    import demo_video
     import standin_e2e as e2e
     import standin_seethrough as ss
     import standin_viewer as sv
@@ -934,12 +1692,15 @@ def record(args: argparse.Namespace) -> int:
     if SCENARIO not in e2e.NAMED_ONLY:
         e2e.NAMED_ONLY = (*e2e.NAMED_ONLY, SCENARIO)
     run = RUN = Run(out, args.fps)
+    guard = run.guard = ForegroundGuard(run.pids)
     e2e.Director = director_class(e2e)
     ss.SeeWatch = watch_class(ss)
     browser_init, browser_close = sv.StandinBrowser.__init__, sv.StandinBrowser.close
+    scratch_state = demo_video.scratch_state
 
     def started(self: Any, *a: Any, **k: Any) -> None:
         run.times.setdefault("standin_started", time.monotonic())
+        run.browser = self
         browser_init(self, *a, **k)
 
     def closed(self: Any, *a: Any, **k: Any) -> Any:
@@ -948,7 +1709,15 @@ def record(args: argparse.Namespace) -> int:
         finally:
             run.times["standin_closed"] = time.monotonic()
 
+    def state_made() -> Path:  # (the run's scratch state, just before TASlation's window is made)
+        state = scratch_state()
+        if run.browser is not None and getattr(run.browser, "hwnd", None):
+            run.viewer_remembered = remember_viewer(state, int(run.browser.hwnd))
+        guard.install()
+        return state
+
     sv.StandinBrowser.__init__, sv.StandinBrowser.close = started, closed  # type: ignore[method-assign]
+    demo_video.scratch_state = state_made
     try:
         code = e2e.main(e2e_argv(args, work))
     except BaseException:
@@ -957,6 +1726,9 @@ def record(args: argparse.Namespace) -> int:
         raise
     finally:
         run.detach()
+        guard.undo()
+        lock_foreground(False)
+        demo_video.scratch_state = scratch_state
         sv.StandinBrowser.__init__, sv.StandinBrowser.close = browser_init, browser_close  # type: ignore[method-assign]
         RUN = None
     facts = code_facts()
@@ -969,6 +1741,10 @@ def record(args: argparse.Namespace) -> int:
     report = {"recording": str(out), "kept": run.kept, "refused": dict(run.refused),
               "refused_where": run.refused_where, "screen_s": meta["screen_s"],
               "frame_ms_median": meta["check"]["frame_ms_median"],
+              "standin_place": list(place), "standin_monitor": args.standin_monitor,
+              "viewer_remembered": run.viewer_remembered,
+              "windows_looked_at": run.checks, "foreign_windows": run.foreign, "foreign_where": run.foreign_where,
+              "fronts_taken": run.fronts_taken, "foreground_refused": dict(guard.refused),
               "scenes": [{"id": s["id"], "seconds": round((s["t1"] - s["t0"]) / 1000, 1) if s["t1"] else None,
                           "failed": s["failed"]} for s in run.scenes],
               # (who had the foreground: just before TASlation's window was made, then each change while it ran)
@@ -1011,6 +1787,8 @@ class Source:
         self.pointer_times: list[float] = []
         self.panes: list[list[float]] = []
         self.pane_times: list[float] = []
+        self.foot: list[list[float]] = []
+        self.foot_times: list[float] = []
         self._cache: OrderedDict[str, Image.Image] = OrderedDict()
 
     def index(self) -> None:
@@ -1021,6 +1799,8 @@ class Source:
         self.pointer_times = [float(p[0]) for p in self.pointer]
         self.panes = sorted(meta.get("panes", []), key=lambda p: p[0])
         self.pane_times = [float(p[0]) for p in self.panes]
+        self.foot = sorted(meta.get("foot", []), key=lambda p: p[0])
+        self.foot_times = [float(p[0]) for p in self.foot]
 
     def load(self, name: str) -> Image.Image:
         raise NotImplementedError
@@ -1053,6 +1833,14 @@ class Source:
             return ()
         p = [int(v) for v in self.panes[i][1:]]
         return tuple(tuple(p[k:k + 4]) for k in (0, 4) if p[k] >= 0)  # type: ignore[misc]
+
+    def foot_at(self, t: float) -> tuple[tuple[int, int, int, int], ...]:
+        """The right pane's foot shown at *t* (the copy's px): one box, or none."""
+        i = bisect.bisect_right(self.foot_times, t) - 1
+        if i < 0:
+            return ()
+        p = [int(v) for v in self.foot[i][1:5]]
+        return (tuple(p),) if p[0] >= 0 else ()  # type: ignore[return-value]
 
     def close(self) -> None:
         pass
@@ -1111,9 +1899,11 @@ def sample_source(scene_ids: Sequence[str] | None = None, seconds: float = 4.0, 
     images: dict[str, Image.Image] = {}
     frames: list[list[Any]] = []
     left, right = made_up_panes(size)
+    foot = (right[0], right[3] - (right[3] - right[1]) // 4, right[2], right[3])
     meta: dict[str, Any] = {"intro_format": FORMAT, "version": facts["version"], "facts": facts, "made_up": True,
                             "client": list(size), "crop_top": max(12, round(44 * size[0] / 720)), "scenes": [],
-                            "pointer": [], "panes": [[t, *left, *right]], "check": {"kept": 0, "refused": {}}}
+                            "pointer": [], "panes": [[t, *left, *right]], "foot": [[t, *foot]],
+                            "check": {"kept": 0, "refused": {}}}
     step = 1000.0 / fps
     count = max(3, int(seconds * fps))
     for k, scene in enumerate(chosen):
@@ -1127,6 +1917,10 @@ def sample_source(scene_ids: Sequence[str] | None = None, seconds: float = 4.0, 
                 draw = ImageDraw.Draw(image)
                 for box in (left, right):
                     draw.rectangle(box, fill=(52, 54, 60))
+                draw.rectangle(foot, fill=(66, 68, 74))
+                if scene.id == "chooser":  # (a made-up dialog in the middle, as the chooser comes over the viewer)
+                    w, h = size
+                    draw.rectangle((w // 3, h // 3, 2 * w // 3, 2 * h // 3), fill=(240, 240, 240), outline=(90, 90, 90))
                 images[name] = image
             frames.append([round(t, 1), name])
             u = i / max(1, count - 1)
@@ -1218,7 +2012,7 @@ def scene_segments(entry: dict[str, Any], changes: Sequence[float], budget_ms: f
 @dataclass
 class Options:
     size: tuple[int, int] = SIZE
-    fps: float = 10.0
+    fps: float = RENDER_FPS
     longest_s: float = LONGEST_S
     max_speed: float = MAX_SPEED
     title_s: float = TITLE_S
@@ -1355,10 +2149,12 @@ class Painter:
             if placed[0] <= x <= placed[0] + placed[2] and placed[1] <= y <= placed[1] + placed[3]:
                 drawn_pointer = (int(round(x)), int(round(y)), pointer[2])
         outlined: tuple[tuple[int, int, int, int], ...] = ()
-        if part.scene is not None and part.scene.id == "panes" and placed is not None:
+        boxes = (src.panes_at(t) if part.scene is not None and part.scene.id == "panes" else
+                 src.foot_at(t) if part.scene is not None and part.scene.id == "foot" else ())
+        if placed is not None:  # (the side panes in their scene, the right pane's foot in its own)
             outlined = tuple(tuple(int(round(v)) for v in (*self.to_out(b[0], b[1], placed),
                                                             *self.to_out(b[2], b[3], placed)))
-                             for b in src.panes_at(t))  # type: ignore[misc]
+                             for b in boxes)  # type: ignore[misc]
         badge = part.factor if fast else None
         return ("scene", part.number, frame, drawn_pointer, outlined, badge)
 
@@ -1657,6 +2453,29 @@ def render(source: Source, out: Path, opts: Options) -> dict[str, Any]:
     return report
 
 
+def fit_render(source: Source, out: Path, opts: Options, aim: int = AIM_BYTES) -> dict[str, Any]:
+    """The GIF of *source* (`render`) at the first of FIT_LADDER's settings - frames a second where only the screen's
+    picture changes, colours, frames a second - that keeps it within *aim* bytes; its report says what each try came
+    to (``fit``). Raises `TooLarge` (nothing written; the last try's report) when none does."""
+    tried: list[dict[str, Any]] = []
+    last: TooLarge | None = None
+    for still, colours, fps in FIT_LADDER:
+        attempt = replace(opts, still_fps=still, colours=colours, fps=fps, limit=int(aim), allow_large=False)
+        setting = {"still_fps": still, "colours": colours, "fps": fps}
+        try:
+            report = render(source, out, attempt)
+        except TooLarge as e:
+            tried.append({**setting, "bytes": e.report["bytes"]})
+            last = e
+            continue
+        tried.append({**setting, "bytes": report["bytes"]})
+        report["fit"] = {"aim": int(aim), "chose": setting, "tried": tried}
+        return report
+    assert last is not None
+    last.report["fit"] = {"aim": int(aim), "chose": None, "tried": tried}
+    raise last
+
+
 def only_window_moved(a: Sequence[Any], b: Sequence[Any]) -> bool:
     """Whether frame *b* (part index, key, ms) differs from *a* in the screen's picture alone: the same scene, the
     same pointer, outlines and badge."""
@@ -1736,6 +2555,9 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--fps", type=float, default=RECORD_FPS, help="copies of the screen a second while the scenes run")
     rec.add_argument("--standin-size", default=STANDIN_SIZE, metavar="WxH",
                      help="the stand-in's window (room for both panes beside a spread)")
+    rec.add_argument("--standin-monitor", type=int, default=STANDIN_MONITOR, metavar="N",
+                     help=f"the monitor the stand-in goes on, at the top left of its work area (default "
+                          f"{STANDIN_MONITOR}; the primary is 1): no window of another program may lie there")
     rec.add_argument("--browser", default="auto", choices=("auto", "chrome", "edge"))
     rec.add_argument("--series", type=int, default=1, help="the sample dataset's series, by its place in the sorted list")
     rec.add_argument("--first", type=int, default=FIRST_PAGE, help="its first page (from 1)")
@@ -1749,7 +2571,7 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ren.add_argument("--sample", action="store_true", help="made-up frames in place of a recording")
     ren.add_argument("--scenes", default=None, help="a,b,c: these of the recorded scenes only")
     ren.add_argument("--size", type=size_arg, default=SIZE)
-    ren.add_argument("--fps", type=float, default=10.0)
+    ren.add_argument("--fps", type=float, default=RENDER_FPS)
     ren.add_argument("--longest", type=float, default=LONGEST_S, help="seconds a wait with nothing changing is shown")
     ren.add_argument("--max-speed", type=float, default=MAX_SPEED)
     ren.add_argument("--title-seconds", type=float, default=TITLE_S)
@@ -1757,6 +2579,10 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ren.add_argument("--colours", type=int, default=COLOURS, help="the palette's colours (at most 255)")
     ren.add_argument("--still-fps", type=float, default=STILL_FPS,
                      help="frames where only the screen's picture changes, at most this many a second (0: all)")
+    ren.add_argument("--fit", type=int, nargs="?", const=AIM_BYTES, default=None, metavar="BYTES",
+                     help=f"the first of the settings tried in turn (frames a second where only the picture changes, "
+                          f"colours, frames a second) that keeps the GIF within BYTES (default {AIM_BYTES}: the "
+                          f"README's recording it replaces); --still-fps, --colours and --fps are not used then")
     ren.add_argument("--allow-large", action="store_true", help=f"write a GIF over {GIF_LIMIT} bytes all the same")
     ren.add_argument("--keep-recording", action="store_true", help="keep the recording file after the GIF")
     ren.add_argument("--frames-png", type=Path, default=None, help="a scratch folder for a few frames as PNG")
@@ -1782,7 +2608,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         source = ZipSource(pv.check_scratch_path(args.recording))
     try:
-        report = render(source, out, opts)
+        report = render(source, out, opts) if args.fit is None else fit_render(source, out, opts, args.fit)
     except TooLarge as e:
         print(json.dumps({"refused": str(e), **e.report}, indent=1, default=str))
         return 1
