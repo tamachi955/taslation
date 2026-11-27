@@ -435,7 +435,9 @@ rows' languages.
   right pane's foot rows are looked at once a second (`panes.foot`: their tops in the client area, one per frame
   size, `constant`). `--editing` keeps the role as editing as `--see-edit` does, but does nothing on the page (the
   patch under the pointer measured as in Reader mode): for timing runs of editing against Reader mode (the report's
-  `role_kept`).
+  `role_kept`). With `--see-edit` or `--see-add` the measure is on the first page done and the first scenario is
+  released only once it is over (`SeeWatch.scene_pending`), so best with scenario `g`; `--see-edit` runs on the
+  runners only (the group g-see-edit), its region editor taking the keys from whatever window is in front.
   In every run the page on show's lettered regions whose patch did not show are counted once a second
   (`run.see_through.unshown`, from `ui.seethrough.unshown_tick`): per page the looks, the regions' boxes, the kinds
   summed over the looks - "differs:top" (the pixels compared above it are other than when it was read), "covered",
@@ -635,15 +637,20 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then eight stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+Then nine stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
 three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
 shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as the tool may on a runner,
-`GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor; and
-c-a-b-editing, c, a and b again in editing; each with `--wait-done`, which holds no rest of k; seven at a time). Each
-group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where TASlation
-starts for a new book), judged as a criterion of its own - and the stand-in's size: the tool's 1300 x 900 leaves no
-room for the side panes beside a spread, so the groups whose criteria look at the panes (the tabs, the resizes, s,
-h) run at 1900 x 1000, the others at the tool's size, as the GPU computer's timings have it. And five
+`GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor;
+c-a-b-editing, c, a and b again in editing; and g-see-edit, editing on the page measured with `--see-edit` on the
+first page done, then g's one page held long; each with `--wait-done`, which holds no rest of k; seven at a time).
+Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
+TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900
+leaves no room for the side panes beside a spread, so the groups whose criteria look at the panes (the tabs, the
+resizes, s, h) run at 1900 x 1000, the others at the tool's size, as the GPU computer's timings have it - and what
+it measures besides (`measure`: "edit" runs `--see-edit` in place of `--editing`). `--see-edit` runs there and
+nowhere else: the region editor its double click opens takes the keys, which a runner has no person's window to
+take them from; with it (and with `--see-add`) the first scenario is released only once the measure is over, so
+that no turn comes under its drags and the jobs they start. And five
 benchmark jobs (a title a job, `--series`; at most five at a time) run beside `tests.yml`'s eight, each restoring the
 caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
 start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at
@@ -660,9 +667,15 @@ while another tab showed no page job on a frame of it, nothing asked, stored or 
 taken over it a second after its title came, the right pane's line, the book's tab followed into its own window;
 while the window was sized with the button held no job and no request, at no look a side pane outside the window,
 each pane back at rest or hidden for want of room; no side pane hidden on a slide; both panes on the screen once the
-stand-in was back in sight, and there they stayed, ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
-cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first bubble, the
-time the backlog took to empty), with what each scenario was meant to show and whether it still did. A benchmark job
+stand-in was back in sight, and there they stayed; with `--see-edit` a region of a page done found and the overlay
+taking the mouse over it, a click choosing it with no editor, a double click opening its editor on it, the drags,
+the plate and the rectangle handed over as what they are, a click on the empty ground choosing, opening and
+changing nothing, the Delete key's message dropping the region chosen as a change of the history and the key let
+go of after, ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page,
+holds at their cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first
+bubble, the time the backlog took to empty; editing's times, `edit_figures`: the jobs a drag, a place typed or a
+rectangle start, the Delete key held, which needs the stand-in really in front), with what each scenario was meant
+to show and whether it still did. A benchmark job
 fails when its title's F1, CER or chrF leaves its tolerance around
 the runners' own figures in `.github/gpu-checks/benchmark-expected.json` (a run of fewer pages or another
 `detect_model` is not compared); the expected figures are the first run's, each run's own are kept beside them

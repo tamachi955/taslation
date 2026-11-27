@@ -1,19 +1,21 @@
 # The two checks that need the developer's computer with its GPU for their timings - the real window beside the
 # stand-in viewer (tools/standin_e2e.py) and the OpenMantra benchmark (tools/openmantra_eval.py) - run for their
 # verdicts on GitHub's own Windows runners (4 processors, 16 GB, no GPU: the OCR, the layout model and the translator
-# run on the CPU), in parallel jobs: the stand-in's scenarios in eight groups, each with --wait-done (a rest held until
+# run on the CPU), in parallel jobs: the stand-in's scenarios in nine groups, each with --wait-done (a rest held until
 # its page is finished, scenario x's soft frames kept until the window asked on them, so that every scenario keeps its
 # meaning on a slower computer), each in the role it states (Reader mode; one group in editing, where TASlation
 # starts) and at the stand-in's size it states, scenario k (pages flipped past, read behind the reader, then read back)
-# in a short form, another tab shown, the window resized, the page slid, a start behind another window, and the
-# benchmark's five titles a job each. A stand-in job fails when a criterion of correctness fails (summarise.py's `correctness`: the run
-# went through, nothing kept or shown from a frame that was not the sharp one, no request sent for nothing, a page
-# translated before came back without a request, the narrow window's page read at its new size, no frame held behind
-# the reader after its read and nothing at the end, nothing read or learnt of another tab, no job while the window is
-# sized with the button held, no side pane outside the window or hidden on a slide, the panes back after a cover, ...)
-# and only then: what depends on the computer's speed is reported beside it. A benchmark job fails when a title's F1,
-# CER or chrF leaves its tolerance around the runners' own figures (.github/gpu-checks/benchmark-expected.json). The GPU
-# computer keeps only the timing figures.
+# in a short form, another tab shown, the window resized, the page slid, a start behind another window, editing on
+# the page measured (--see-edit: its region editor takes the keys, so it runs here, where no person's window is in
+# front, and never on the developer's computer), and the benchmark's five titles a job each. A stand-in job fails
+# when a criterion of correctness fails (summarise.py's `correctness`: the run went through, nothing kept or shown
+# from a frame that was not the sharp one, no request sent for nothing, a page translated before came back without
+# a request, the narrow window's page read at its new size, no frame held behind the reader after its read and
+# nothing at the end, nothing read or learnt of another tab, no job while the window is sized with the button held,
+# no side pane outside the window or hidden on a slide, the panes back after a cover, a click choosing a region and
+# a double click opening its editor, ...) and only then: what depends on the computer's speed is reported beside
+# it. A benchmark job fails when a title's F1, CER or chrF leaves its tolerance around the runners' own figures
+# (.github/gpu-checks/benchmark-expected.json). The GPU computer keeps only the timing figures.
 #
 # It runs for every push to a branch named ci/... (tests.yml too: one push starts the suite and these), for a push to
 # main (the caches alone, see below), and when started by hand, with inputs for a part of it. The caches - Ollama's
@@ -40,7 +42,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h"
+        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h,g-see-edit"
         type: string
         default: all
       titles:
@@ -101,11 +103,14 @@ env:
   # moved out into a window of its own), the window resized (r1-r8; "resize" asks for them all), the page slid with the
   # pointer (s), a start behind another window (h, with --start-behind cover). Each group states its role - "reader"
   # (Reader mode, the tool's own) or "editing" (--editing: the book's role kept as editing, where TASlation starts;
-  # its group's name ends in -editing, its scenarios run in Reader mode too) - and the stand-in's size ("": the
+  # its group's name ends in -editing, its scenarios run in Reader mode too) -, the stand-in's size ("": the
   # tool's, 1300 x 900, as the GPU computer's timings have it; the groups whose criteria look at the side panes get a
   # window with room for them beside a spread, which 1300 x 900 leaves none: 1900 x 1000, within the runner's work
-  # area at DISPLAY_SIZE)
-  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000"}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000"}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000"}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000"}}'
+  # area at DISPLAY_SIZE) and what it measures besides ("": nothing; "edit": --see-edit in place of --editing, its
+  # role editing and its name ending in -see-edit - on the first page done, before its scenario g turns: a click
+  # chooses a region, a double click opens its editor, drags, a number plate, a click and a rectangle on the empty
+  # ground, the Delete key's message; all posted to TASlation's own windows)
+  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": "", "measure": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": "", "measure": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": "", "measure": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": "", "measure": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000", "measure": ""}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000", "measure": ""}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000", "measure": ""}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000", "measure": ""}, "g-see-edit": {"scenarios": "g", "role": "editing", "size": "", "measure": "edit"}}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}
@@ -160,8 +165,10 @@ jobs:
           foreach ($g in $all.Keys) {
               if ($all[$g].role -notin 'reader', 'editing') { throw "group $g's role is reader or editing, not '$($all[$g].role)'" }
               if ("$($all[$g].size)" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "group $g's size is WxH or nothing, not '$($all[$g].size)'" }
+              if ("$($all[$g].measure)" -notin '', 'edit') { throw "group $g's measure is edit or nothing, not '$($all[$g].measure)'" }
+              if ("$($all[$g].measure)" -eq 'edit' -and $all[$g].role -ne 'editing') { throw "group $g measures editing: its role is editing" }
           }
-          $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_].scenarios; role = $all[$_].role; size = "$($all[$_].size)" } })
+          $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_].scenarios; role = $all[$_].role; size = "$($all[$_].size)"; measure = "$($all[$_].measure)" } })
           $titles = @($(if ($env:WANTED_TITLES -eq 'all') { 1..5 } else { $env:WANTED_TITLES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }))
           foreach ($t in $titles) { if ("$t" -notmatch '^[1-5]$') { throw "the titles are 1 to 5, not '$t'" } }
           $titles = @($titles | ForEach-Object { [int]$_ } | Sort-Object -Unique)
@@ -465,10 +472,12 @@ jobs:
           SCENARIOS: ${{ matrix.scenarios }}
           ROLE: ${{ matrix.role }}
           STANDIN_SIZE: ${{ matrix.size }}
+          MEASURE: ${{ matrix.measure }}
         run: |
           . .github/gpu-checks/helpers.ps1
           if ($env:SCENARIO_TIMEOUT -notmatch '^\d{2,4}$') { throw "scenario_timeout is seconds, not '$env:SCENARIO_TIMEOUT'" }
           if ($env:ROLE -notin 'reader', 'editing') { throw "the role is reader or editing, not '$env:ROLE'" }
+          if ("$env:MEASURE" -notin '', 'edit') { throw "the measure is edit or nothing, not '$env:MEASURE'" }
           if ("$env:STANDIN_SIZE" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "the stand-in's size is WxH or nothing, not '$env:STANDIN_SIZE'" }
           if ($env:CANCEL_SOFT_MS -notmatch '^\d{2,5}$') { throw "cancel_soft_ms is milliseconds, not '$env:CANCEL_SOFT_MS'" }
           if ($env:WAIT_DONE -notmatch '^\d{1,4}$') { throw "wait_done is seconds, not '$env:WAIT_DONE'" }
@@ -478,8 +487,10 @@ jobs:
                          '--start-ollama', $env:OLLAMA_PORT, '--seed', '1', '--timeout', $env:SCENARIO_TIMEOUT,
                          '--cancel-soft-ms', $env:CANCEL_SOFT_MS)
           if ($env:WAIT_DONE -ne '0') { $arguments += @('--wait-done', $env:WAIT_DONE) }
-          # the group's role (the tool's own is Reader mode) and the stand-in's size (none: the tool's)
-          if ($env:ROLE -eq 'editing') { $arguments += @('--editing') }
+          # the group's role (the tool's own is Reader mode), editing measured (its role editing as --editing has it)
+          # and the stand-in's size (none: the tool's)
+          if ($env:MEASURE -eq 'edit') { $arguments += @('--see-edit') }
+          elseif ($env:ROLE -eq 'editing') { $arguments += @('--editing') }
           if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }
           # scenario k in a short form: 6 pages flipped past at each pace and 3 of them read back (the tool's own form
           # is 20 and all 20). On the CPU the window reads and translates a caught page in some 20 to 30 s, and each

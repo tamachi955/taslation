@@ -521,6 +521,94 @@ def _behind_correctness(run: dict[str, Any], names: list[str], check: Any) -> No
           {"panes_stayed": b.get("panes_stayed"), "hidden_why": _pane_whys(run)})
 
 
+def _edit_report(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Editing on the page as the tool measured it (--see-edit: `standin_seethrough.SeeWatch._edit_measure`,
+    ``run.see_through.edit``); None in a run without it."""
+    edit = (run.get("see_through") or {}).get("edit")
+    return edit if isinstance(edit, dict) else None
+
+
+def _edit_correctness(run: dict[str, Any], check: Any) -> None:
+    """Editing's criteria (with --see-edit), true on any computer however slow - what a press does is waited for
+    generously, and whatever the jobs after it take is reported (`edit_figures`), never judged: a region of a page
+    done found, the see-through window taking the mouse over it; a click choosing it and opening no editor, a double
+    click opening its editor on it; the drags, the number plate and the rectangle handed over as what they are; a
+    click on the empty ground choosing nothing, opening nothing and changing nothing; the Delete key's message
+    dropping the region chosen as a change of the history, the key let go of after."""
+    edit = _edit_report(run)
+    if edit is None:
+        return
+    region = edit.get("region")
+    check("edit", "a region of a page done was found to edit on", region is not None and not edit.get("error"),
+          {"error": edit.get("error"), "waited_ms": edit.get("region_wait_ms")})
+    if region is None:
+        return
+    check("edit", "the see-through window took the mouse over the region",
+          edit.get("takes_the_mouse") is True and edit.get("hit_box") == "overlay",
+          [edit.get("takes_the_mouse"), edit.get("hit_box")])
+    select = edit.get("select") or {}
+    check("edit", "a click chose the region and opened no editor",
+          select.get("chosen_ms") is not None and select.get("editor_ms") is None, select)
+    click = edit.get("click") or {}
+    check("edit", "a double click opened the region editor on that region",
+          click.get("editor_ms") is not None and click.get("holds_the_region") is True,
+          {k: click.get(k) for k in ("editor_ms", "holds_the_region")})
+    drag = edit.get("drag") or {}
+    plate = edit.get("plate") or {}
+    # (the drag and the rectangle always; the corner's drag where the box had room for it, the plate where one was
+    # free of the panes: the page's layout, not the computer's speed)
+    handed = {"drag": drag.get("handed_as"), "rectangle": (edit.get("draw") or {}).get("handed_as")}
+    if isinstance(drag.get("resize"), dict):
+        handed["corner"] = drag["resize"].get("handed_as")
+    if plate.get("region") is not None:
+        handed["plate"] = plate.get("handed_as")
+    want = {"drag": "edit_move", "rectangle": "edit_draw", "corner": "edit_resize", "plate": "edit_plate"}
+    check("edit", "a drag, a corner's drag, a number plate and a rectangle on the empty ground were handed over as "
+          "what they are", all(v == want[k] for k, v in handed.items()), handed)
+    ground = edit.get("ground_click") or {}
+    check("edit", "a click on the empty ground chose nothing, opened nothing and changed nothing",
+          ground.get("handed_as") == "edit_ground" and ground.get("none_chosen_ms") is not None
+          and ground.get("editor") is False and ground.get("changes") == 0, ground)
+    delete = edit.get("delete") or {}
+    change = delete.get("change") or [None]
+    check("edit", "the Delete key's message dropped the region chosen, as a change Undo takes back",
+          delete.get("chosen_ms") is not None and delete.get("dropped_ms") is not None
+          and change[0] in ("drop", "drops"), delete)
+    check("edit", "the Delete key was let go of after", delete.get("key_let_go_ms") is not None,
+          delete.get("key_let_go_ms"))
+
+
+# editing's times (`edit_figures`: part.key of the tool's report) and their words in a summary
+EDIT_WORDS = {"region.region_wait_ms": "region found", "select.chosen_ms": "a click chose it",
+              "click.editor_ms": "a double click's editor", "click.took_the_keys_ms": "the editor had the keys",
+              "drag.stored_ms": "a drag stored", "resize.stored_ms": "a corner's drag stored",
+              "plate.done_ms": "a place typed done", "draw.stored_ms": "a rectangle stored",
+              "delete.key_held_ms": "Delete held", "delete.dropped_ms": "Delete dropped it"}
+
+
+def edit_figures(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Editing's times (with --see-edit), reported and never a failure: the ms to the region found, to it chosen by a
+    click, to its editor by a double click and to the editor taking the keys, to the drag, the corner's drag, the
+    place typed and the rectangle drawn stored (each a job), to the Delete key held (only with the stand-in really in
+    front) and the region dropped; who was in front meanwhile. None in a run without it."""
+    edit = _edit_report(run)
+    if edit is None:
+        return None
+    drag = edit.get("drag") or {}
+    parts = {"region": edit, "select": edit.get("select") or {}, "click": edit.get("click") or {}, "drag": drag,
+             "resize": drag.get("resize") if isinstance(drag.get("resize"), dict) else {},
+             "plate": edit.get("plate") or {}, "draw": edit.get("draw") or {}, "delete": edit.get("delete") or {}}
+    out: dict[str, Any] = {name: parts[name.split(".")[0]].get(name.split(".")[1]) for name in EDIT_WORDS}
+    out["fronts_meanwhile"] = edit.get("fronts_meanwhile")
+    return out
+
+
+def _edit_line(e: dict[str, Any]) -> str:
+    """Editing's times in one line of a job's summary (`edit_figures`)."""
+    return "; ".join(f"{words} {'-' if e.get(key) is None else e[key]}" for key, words in EDIT_WORDS.items()) + (
+        f"; in front meanwhile {', '.join(e.get('fronts_meanwhile') or []) or '-'}")
+
+
 def _pane_whys(run: dict[str, Any]) -> dict[str, Any]:
     """Each look a side pane was not on the screen, by side and why (`standin_seethrough.SeeWatch.pane_report`'s
     ``hidden_why``: no ground, no room, off the screen, sizing, covered, ?); {} from a tool before it said."""
@@ -689,6 +777,7 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     _k_correctness(run, names, check)
     for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness):
         judge(run, names, check)
+    _edit_correctness(run, check)
     return found
 
 
@@ -855,7 +944,7 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
         if waits else None,
         "segments": segment_rows(run), "meaning": meanings(report),
         "criteria": len(criteria), "failed": failed, "speed": speed(report, timeout_s),
-        "scenario_k": k_figures(report),
+        "scenario_k": k_figures(report), "edit": edit_figures(run),
         "streamed_lines": _streamed(run),
         "requests": {k: requests.get(k) for k in ("total", "outside_page_jobs", "gate_pending", "warm_ups")},
         "jobs": {k: jobs.get(k) for k in ("started", "on", "discarded")},
@@ -933,6 +1022,8 @@ def standin_md(s: dict[str, Any]) -> str:
                          f"{_pair([first.get('median'), first.get('max')])} | {drained} | "
                          f"{k.get('background_requests')} | {k.get('peak_mb')} |")
         lines.append("")
+    if s.get("edit"):
+        lines.append("* editing on the page, ms (reported): " + _edit_line(s["edit"]))
     if s.get("streamed_lines"):
         st = s["streamed_lines"]
         on_show = st.get("withdrawn_on_show_ms") or {}
@@ -1222,6 +1313,16 @@ def table(artifacts: Path, jobs_file: Path | None, merged: Any, caches_file: Pat
                            f"{row['finished_within_rest']} | {row['translated_at_rest']} | {row.get('holds') or '-'} | "
                            f"{_pair(row['finished_ms'])} | {(s.get('meaning') or {}).get(row['scenario'], '')} |")
         out.append("")
+        edited = [s for s in stand if s.get("edit")]
+        if edited:  # (--see-edit: editing on the page measured, its times)
+            out += ["| group | " + " | ".join(EDIT_WORDS.values()) + " | in front meanwhile |",
+                    "|---|" + "---|" * (len(EDIT_WORDS) + 1)]
+            for s in edited:
+                e = s["edit"]
+                out.append(f"| {s.get('group')} | " + " | ".join("-" if e.get(k) is None else str(e[k])
+                                                                 for k in EDIT_WORDS)
+                           + f" | {', '.join(e.get('fronts_meanwhile') or []) or '-'} |")
+            out.append("")
     if marks or isinstance(merged, dict):
         out += ["## Benchmark (tools/openmantra_eval.py, a title a job)", "",
                 "| title | verdict | pages | det+OCR s | translation s | total s | F1 | OCR CER | chrF | gen tok/s | "

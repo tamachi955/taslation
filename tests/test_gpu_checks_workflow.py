@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,7 @@ def _install_ps1(name: str) -> str:
 
 
 def _groups() -> dict[str, dict[str, str]]:
-    """The stand-in's groups: name -> {scenarios, role, size}."""
+    """The stand-in's groups: name -> {scenarios, role, size, measure}."""
     return json.loads(_workflow()["env"]["STANDIN_GROUPS"])
 
 
@@ -233,21 +234,29 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
     import standin_e2e
 
     groups = _groups()
-    covered, editing = [], []
+    covered, editing, measured = [], [], []
     for group, spec in groups.items():
-        assert sorted(spec) == ["role", "scenarios", "size"], group
-        assert spec["role"] in ("reader", "editing"), group
+        assert sorted(spec) == ["measure", "role", "scenarios", "size"], group
+        assert spec["role"] in ("reader", "editing") and spec["measure"] in ("", "edit"), group
         names = standin_e2e.wanted(spec["scenarios"])
-        # (the group says what the tool runs, a pair comes along, and an editing group says so)
-        assert group == "-".join(names) + ("-editing" if spec["role"] == "editing" else ""), group
-        (editing if spec["role"] == "editing" else covered).extend(names)
+        # (the group says what the tool runs, a pair comes along, and an editing group says so - the one that
+        # measures editing on the page too)
+        suffix = "-see-edit" if spec["measure"] == "edit" else "-editing" if spec["role"] == "editing" else ""
+        assert group == "-".join(names) + suffix, group
+        assert spec["measure"] != "edit" or spec["role"] == "editing", group
+        (measured if spec["measure"] else editing if spec["role"] == "editing" else covered).extend(names)
     # every scenario of "all" once, and scenario k's three paces (never in "all") once; of those by their names only,
     # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized, the
     # page slid, a start behind another window - all of them in Reader mode, and one group again in editing
     by_name = [*standin_e2e.TAB_STEPS_ASKED, *standin_e2e.R_STEPS, "s", "h"]
     assert sorted(covered) == sorted([*standin_e2e.ORDER, *standin_e2e.K_ASKED, *by_name])
     assert len(covered) == len(set(covered))
-    assert editing and set(editing) <= set(covered) and sum(s["role"] == "editing" for s in groups.values()) == 1
+    assert editing and set(editing) <= set(covered)
+    assert sum(s["role"] == "editing" and not s["measure"] for s in groups.values()) == 1
+    # and editing on the page measured (--see-edit: its editor takes the keys, which only a runner may give it) on
+    # the first page done, then one page held long (g, by its name only), at the tool's size
+    assert measured == ["g"] and "g" in standin_e2e.NAMED_ONLY
+    assert [s["size"] for s in groups.values() if s["measure"]] == [""]
     assert not set(covered) & set(standin_e2e.M_STEPS)  # (a second monitor: none on a runner)
     behind = "if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }"
     assert behind in _step("standin", "Run: tools/standin_e2e.py")["run"]
@@ -264,10 +273,13 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
             assert spec["size"] == "", group
     run = _step("standin", "Run: tools/standin_e2e.py")
     assert run["env"]["ROLE"] == "${{ matrix.role }}" and run["env"]["STANDIN_SIZE"] == "${{ matrix.size }}"
-    for line in ("if ($env:ROLE -eq 'editing') { $arguments += @('--editing') }",
-                 "if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }"):
-        assert line in run["run"], line
+    assert run["env"]["MEASURE"] == "${{ matrix.measure }}"
+    lines = [ln.strip() for ln in run["run"].splitlines()]
+    see_edit = lines.index("if ($env:MEASURE -eq 'edit') { $arguments += @('--see-edit') }")
+    assert lines[see_edit + 1] == "elseif ($env:ROLE -eq 'editing') { $arguments += @('--editing') }"
+    assert "if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }" in lines
     assert standin_e2e.parse(["--editing", "--standin-size", "1900x1000"]).editing
+    assert standin_e2e.parse(["--see-edit", "--scenario", "g"]).see_edit
     verdict = _step("standin", "The verdict")
     assert verdict["env"]["ROLE"] == "${{ matrix.role }}" and "--role $env:ROLE" in verdict["run"]
     # e turns back to the pages d translated: never alone, never without d
@@ -292,6 +304,51 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         assert verdict["if"] == "always()" and words in verdict["run"] and "--check" in verdict["run"]
         assert "exit $code" in verdict["run"]
     assert "--timeout $env:SCENARIO_TIMEOUT" in _step("standin", "The verdict")["run"]
+
+
+def test_the_editing_measure_acts_on_the_first_page_done_before_the_first_scenario_turns():
+    import threading
+    from types import SimpleNamespace
+
+    import standin_e2e
+    import standin_seethrough as ss
+
+    watch = object.__new__(ss.SeeWatch)  # (no window, no app: the gate alone)
+    watch.edit, watch.add, watch.standin, watch.hover_thread = True, False, None, None
+    assert watch.scene_pending()  # (not begun yet)
+    gate = threading.Event()
+    watch.hover_thread = threading.Thread(target=gate.wait, daemon=True)
+    watch.hover_thread.start()
+    assert watch.scene_pending()  # (being acted)
+    gate.set()
+    watch.hover_thread.join(2.0)
+    assert not watch.scene_pending()  # (over: the first scenario may turn)
+    watch.edit, watch.hover_thread = False, None
+    assert not watch.scene_pending()  # (the pointer on a bubble in Reader mode: nothing waits for it)
+    watch.add, watch.standin = True, object()
+    assert not watch.scene_pending()  # (slides followed: no scene of its own)
+    assert ss.EDIT_FOR_S >= 240  # (the first page done on a runner's processor)
+
+    # the run's first scenario released only once the scene is over (`Director.step`), the window at rest
+    segments, _ = standin_e2e.build_plan(["g"], 200, 0, 700, 90.0)
+    director = object.__new__(standin_e2e.Director)
+    released = []
+    now = time.monotonic()
+    pending = [True]
+    for name, value in dict(segments=segments, index=0, phase="settle", phase_at=now, idle_since=now - 60.0,
+                            wait_done=None, behind=None, waiting_go=segments[0].go, released={}, mon=None, tabs=None,
+                            ended=False, app=SimpleNamespace(ready=True, selected=object()),
+                            args=SimpleNamespace(timeout=600.0, no_viewer_s=0),
+                            see=SimpleNamespace(scene_pending=lambda: pending[0])).items():
+        setattr(director, name, value)
+    director.idle = lambda: True
+    director.first_page_done = lambda: True
+    director.release = lambda go=None, **k: released.append(go)
+    director.step()
+    assert released == [] and director.phase == "settle"  # (the scene on the first page: no turn under it)
+    pending[0] = False
+    director.step()
+    assert released == [segments[0].go] and director.phase == "running"
 
 
 def test_scenario_k_runs_once_in_a_short_form_its_rests_never_held():
@@ -358,8 +415,17 @@ def test_the_plan_gives_the_jobs_asked_for(tmp_path):
                                                             "WANTED_TITLES": "3"}, tmp_path)
     assert code == 0, said
     assert json.loads(out["standin_matrix"]) == [{"group": "d-e-x-f2", "scenarios": "d,e,x,f2", "role": "reader",
-                                                  "size": ""}]  # (an array of one)
+                                                  "size": "", "measure": ""}]  # (an array of one)
     assert (out["standin"], out["benchmark"], json.loads(out["titles"])) == ("true", "false", [3])
+    code, said, out = _run_step("prepare", "Which checks", {**base, "WANTED_GROUPS": "g-see-edit"}, tmp_path)
+    assert code == 0, said
+    assert json.loads(out["standin_matrix"]) == [{"group": "g-see-edit", "scenarios": "g", "role": "editing",
+                                                  "size": "", "measure": "edit"}]
+    groups = json.loads(_workflow()["env"]["STANDIN_GROUPS"])
+    for wrong in ({"measure": "hover"}, {"measure": "edit", "role": "reader"}):  # (checked as the plan reads them)
+        bad = json.dumps({**groups, "g-see-edit": {**groups["g-see-edit"], **wrong}})
+        code, said, out = _run_step("prepare", "Which checks", {**base, "STANDIN_GROUPS": bad}, tmp_path)
+        assert code != 0 and not out and "measure" in said, wrong
     code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "benchmark", "WANTED_TITLES": "5, 1,1",
                                                             "OLLAMA_VERSION": "latest"}, tmp_path)
     assert code == 0, said
@@ -839,6 +905,81 @@ def test_a_group_s_role_is_judged_and_a_pane_s_criteria_say_why_it_was_hidden(tm
     # ... as the tool counts them, a look at a time (the hooks' why first, then the window's own)
     source = (ROOT / "tools" / "standin_seethrough.py").read_text("utf-8")
     assert '"hidden_why":' in source and "standin_monitors.watch_pane_whys(self)" in source
+
+
+def _edit(**parts) -> dict:
+    """Editing on the page as the tool reports it (`standin_seethrough.SeeWatch._edit_measure`), all of it done."""
+    edit = {"region_wait_ms": 2100.0, "region": {"boxes": 7, "size": [120, 90]}, "takes_the_mouse": True,
+            "hit_box": "overlay", "select": {"chosen_ms": 40.0, "marks_chosen_ms": 60.0, "editor_ms": None},
+            "click": {"editor_ms": 310.0, "holds_the_region": True, "took_the_keys_ms": 20.0, "closed_ms": 30.0},
+            "drag": {"handed_as": "edit_move", "stored_ms": 4200.0,
+                     "resize": {"handed_as": "edit_resize", "stored_ms": 3900.0}},
+            "plate": {"region": {"place": 5, "of": 7}, "handed_as": "edit_plate", "done_ms": 9100.0},
+            "ground_click": {"handed_as": "edit_ground", "none_chosen_ms": 55.0, "editor": False, "changes": 0},
+            "draw": {"handed_as": "edit_draw", "stored_ms": 5100.0},
+            "delete": {"chosen_ms": 35.0, "key_held_ms": 80.0, "dropped_ms": 700.0, "change": ["drop", "done"],
+                       "key_let_go_ms": 50.0},
+            "fronts_meanwhile": ["own", "standin"]}
+    for name, value in parts.items():
+        edit[name] = value if not isinstance(value, dict) or not isinstance(edit.get(name), dict) else {
+            **edit[name], **value}
+    return edit
+
+
+def test_editing_on_the_page_is_judged_on_what_a_press_does_and_its_jobs_times_are_reported(tmp_path):
+    s = _summarise()
+
+    def failed(edit) -> tuple[list[str], int]:
+        found: list[tuple[str, bool]] = []
+        s._edit_correctness({"see_through": {"edit": edit}},
+                            lambda _scenario, criterion, ok, seen=None: found.append((criterion, bool(ok))))
+        return [c for c, ok in found if not ok], len(found)
+
+    assert failed(_edit()) == ([], 8)
+    assert failed(None) == ([], 0)  # (no --see-edit: nothing judged)
+    # (the corner's drag where the box had no room for it, no plate free of the panes: the page's layout, not a fault)
+    assert failed(_edit(drag={"resize": "no room"}, plate={"region": None, "handed_as": None})) == ([], 8)
+    faults = {
+        "a region of a page done was found to edit on": _edit(region=None),
+        "the see-through window took the mouse over the region": _edit(hit_box="standin"),
+        "a click chose the region and opened no editor": _edit(select={"editor_ms": 15.0}),
+        "a double click opened the region editor on that region": _edit(click={"holds_the_region": False}),
+        "a drag, a corner's drag, a number plate and a rectangle on the empty ground were handed over as what they "
+        "are": _edit(drag={"handed_as": "edit_click"}),
+        "a click on the empty ground chose nothing, opened nothing and changed nothing":
+            _edit(ground_click={"none_chosen_ms": None}),
+        "the Delete key's message dropped the region chosen, as a change Undo takes back":
+            _edit(delete={"dropped_ms": None}),
+        "the Delete key was let go of after": _edit(delete={"key_let_go_ms": None}),
+    }
+    for criterion, edit in faults.items():
+        assert failed(edit)[0] == [criterion], (criterion, failed(edit))
+    assert failed(_edit(error="KeyError"))[0] == ["a region of a page done was found to edit on"]
+    # the jobs after a press are the computer's speed: reported, never judged
+    slow = _edit(drag={"stored_ms": None}, plate={"done_ms": None}, draw={"stored_ms": None},
+                 delete={"key_held_ms": None})  # (Delete held only with the stand-in really in front)
+    assert failed(slow) == ([], 8)
+    report = {**_report(modes={"rows": [[0.1, "translator"]]}), "role_kept": "translator"}
+    report["run"]["see_through"] = {"edit": _edit()}
+    out = s.standin(report, "", {}, "g-see-edit", 600, "editing")
+    assert out["verdict"] == "pass", _failed(out)
+    assert out["edit"]["click.editor_ms"] == 310.0 and out["edit"]["delete.dropped_ms"] == 700.0
+    assert out["edit"]["fronts_meanwhile"] == ["own", "standin"]
+    md = s.standin_md(out)
+    assert "* editing on the page, ms (reported): region found 2100.0; a click chose it 40.0;" in md
+    assert "; in front meanwhile own, standin" in md
+    report["run"]["see_through"] = {"edit": _edit(select={"editor_ms": 15.0})}
+    bad = s.standin(report, "", {}, "g-see-edit", 600, "editing")
+    assert bad["verdict"] == "fail" and _failed(bad) == ["a click chose the region and opened no editor"]
+    assert s.standin(_report(), "", {}, "c", 600)["edit"] is None
+    # the run's table: a row of editing's times for each group that measured it
+    folder = tmp_path / "artifacts" / "standin-g-see-edit"
+    folder.mkdir(parents=True)
+    (folder / "summary.json").write_text(json.dumps(out), encoding="utf-8")
+    table = s.table(tmp_path / "artifacts", None, None)
+    assert "| group | region found | a click chose it | a double click's editor |" in table
+    assert "| g-see-edit | 2100.0 | 40.0 | 310.0 | 20.0 | 4200.0 | 3900.0 | 9100.0 | 5100.0 | 80.0 | 700.0 | own, " \
+           "standin |" in table
 
 
 def test_lines_taken_back_are_reported_and_fail_a_run_only_when_something_of_them_stayed():

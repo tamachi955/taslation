@@ -3361,6 +3361,8 @@ class Director:
                       and not (first and self.args.k_narrow and not self.resized()))
             else:
                 go = ready_go and rested and (self.index > 0 or self.first_page_done())
+            if go and self.index == 0 and self.see is not None and self.see.scene_pending():
+                go = False  # (--see-edit, --see-add: the watch's scene acts on the first page done, no turn under it)
             timed_out = ready_go and waited > self.args.timeout
             if timed_out and not app.ready:
                 self.stop("the window was not ready within --timeout")
@@ -6196,7 +6198,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "so that the left pane's Reader mode is off from the start; a click (it chooses), a double "
                          "click (the editor) and drags on a region, a click on its number plate with its place typed, "
                          "a rectangle drawn on the empty ground and the Delete key on it, posted to TASlation's own "
-                         "windows, are measured in place of the patch under the pointer (run.see_through.edit)")
+                         "windows, are measured in place of the patch under the pointer (run.see_through.edit), on "
+                         "the first page done: the first scenario is released once that is over (best with g)")
     ap.add_argument("--editing", action="store_true",
                     help="the book's role kept as editing, as --see-edit keeps it, but nothing is done on the page: the "
                          "patch under the pointer measured as in Reader mode (timing runs of editing against Reader "
@@ -6206,7 +6209,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "and Reader mode without: once a page is done, the left pane's Add area and the Insert key's "
                          "message, each with a rectangle dragged on the page's empty space, then each way of giving "
                          "it up, all posted to TASlation's own windows, and who is in front against whether the key "
-                         "is held (read only); best with scenario g")
+                         "is held (read only); on the first page done, the first scenario released once that is "
+                         "over; best with scenario g")
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")

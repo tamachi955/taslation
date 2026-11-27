@@ -78,7 +78,10 @@ HOVER_FOR_S = 60.0  # ... for so long at the most (a round in which another page
 WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0201, 0x0202, 0x0001
 WM_MOUSEMOVE, WM_CLOSE = 0x0200, 0x0010
 GWL_EXSTYLE, WS_EX_TRANSPARENT = -20, 0x00000020
-EDIT_FOR_S = 60.0  # (with *edit*) a region to measure editing on is waited for so long at the most
+# (with *edit* or *add*) a page done to measure editing or adding on is waited for so long at the most: the first
+# page, which no scenario turns from before the measure is over (`scene_pending`), done on a runner's processor too
+EDIT_FOR_S = 300.0
+EDIT_ACT_S = 10.0  # (with *edit*) what a press does on the Tk side - a region chosen, its editor - waited for so long
 EDIT_DRAG = (24, 12)  # px (at 100 %) the region's box is dragged by
 EDIT_MIN_BOX = 24  # px: the least side of a box the measure takes
 EDITOR_TITLE = "Edit region"  # (the region editor's title, the window's language being English in a run)
@@ -586,6 +589,15 @@ class SeeWatch:
         acted now: the run's end waits for it (`standin_e2e.Director.step`), so that its measures are not cut."""
         thread = self.hover_thread
         return thread is not None and thread.is_alive()
+
+    def scene_pending(self) -> bool:
+        """Whether the run's first scenario waits for the watch's scene (`standin_e2e.Director.step`): with *edit* or
+        *add* (no slides followed) until it has been acted, so that it acts on the first page done with no turn under
+        it - the drags, the place typed and the regions added wait for that page's jobs, which a turn would cancel."""
+        if not (self.edit or self.add) or self.standin is not None:
+            return False
+        thread = self.hover_thread
+        return thread is None or thread.is_alive()
 
     def close(self) -> None:
         self.stop.set()
@@ -1284,8 +1296,8 @@ class SeeWatch:
         # a click: the region chosen, its corner handles on it, and no editor
         _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
         _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx, cy))
-        select: dict[str, Any] = {"chosen_ms": wait(chosen, 3.0)}
-        select["marks_chosen_ms"] = wait(lambda: getattr(over._marks_live, "chosen", ()) == (index,), 1.0)
+        select: dict[str, Any] = {"chosen_ms": wait(chosen, EDIT_ACT_S)}
+        select["marks_chosen_ms"] = wait(lambda: getattr(over._marks_live, "chosen", ()) == (index,), EDIT_ACT_S)
         apart = max(1.0, window.double_click()[0] + 0.2)  # (the double click below: no double with this one)
         select["editor_ms"] = wait(lambda: self._editor_window() != 0, apart)
         out["select"] = select
@@ -1294,7 +1306,7 @@ class SeeWatch:
         for _twice in range(2):
             _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
             _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx, cy))
-        shown_ms = wait(lambda: self._editor_window() != 0, 6.0)
+        shown_ms = wait(lambda: self._editor_window() != 0, 2 * EDIT_ACT_S)
         editor = self._editor_window()
         click: dict[str, Any] = {"editor_ms": shown_ms}
         out["click"] = click
@@ -1318,7 +1330,7 @@ class SeeWatch:
                          marks_held=wait(lambda: getattr(over._marks_live, "held", None) == index, 1.0))
             t = time.monotonic()
             _user32.PostMessageW(editor, WM_CLOSE, 0, 0)
-            click["closed_ms"] = wait(lambda: not _user32.IsWindowVisible(editor), 3.0)
+            click["closed_ms"] = wait(lambda: not _user32.IsWindowVisible(editor), EDIT_ACT_S)
             click["viewer_in_front_ms"] = wait(lambda: int(_user32.GetForegroundWindow() or 0) == self.hwnd, 3.0)
             click["since_close_ms"] = round((time.monotonic() - t) * 1000, 1)
         self.fake_point = None
@@ -1524,9 +1536,9 @@ class SeeWatch:
         click(box[0] + 4, box[1] + 4)
         ground["handed_ms"], ground["handed_as"] = handed(serial)
         ground["job_ms"] = wait(busy, 0.8)
+        ground["none_chosen_ms"] = wait(lambda: getattr(app, "_chosen_region", None) is None, EDIT_ACT_S)
         ground["editor"] = self._editor_window() != 0
         ground["changes"] = len(app.history.done) - steps
-        ground["none_chosen"] = getattr(app, "_chosen_region", None) is None
         draw: dict[str, Any] = {"idle_ms": wait(idle, 30.0), "spot": [box[2] - box[0], box[3] - box[1]]}
         out["draw"] = draw
         before = order()
@@ -1566,15 +1578,16 @@ class SeeWatch:
         drawn = tuple(int(v) for v in regions[0].bbox)
         click((drawn[0] + drawn[2]) // 2, (drawn[1] + drawn[3]) // 2)
         delete["chosen_ms"] = wait(lambda: tuple(int(v) for v in getattr(
-            getattr(app, "_chosen_region", None), "bbox", ())) == drawn, 3.0)
-        delete["key_held_ms"] = wait(over.delete_held, 2.0)
+            getattr(app, "_chosen_region", None), "bbox", ())) == drawn, EDIT_ACT_S)
+        # (held only with the stand-in really in front, `viewer_in_front`: who was is in fronts_meanwhile)
+        delete["key_held_ms"] = wait(over.delete_held, 5.0)
         steps = len(app.history.done)
         _user32.PostMessageW(over.hwnd, window.WM_HOTKEY, window.DELETE_ID, 0)
         delete["job_ms"] = wait(busy, 3.0)
-        delete["dropped_ms"] = wait(lambda: not busy() and not made(), 30.0)
+        delete["dropped_ms"] = wait(lambda: not busy() and not made(), 60.0)
         newest = app.history.done[-1] if len(app.history.done) > steps else None
         delete["change"] = None if newest is None else [newest.kind, newest.state]
-        delete["key_let_go_ms"] = wait(lambda: not over.delete_held(), 2.0)
+        delete["key_let_go_ms"] = wait(lambda: not over.delete_held(), 5.0)
 
     def _add_safe(self) -> None:
         try:
