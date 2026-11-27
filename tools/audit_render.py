@@ -17,7 +17,10 @@ region is measured:
 * ``line_lost``: pixels of lines (the bubble's outline, a tail, the drawing) round the region that the erase made light;
 * ``ink_on_line`` / ``ink_out`` / ``ink_other``: lettering pixels on such a line, outside the bubble's interior (a
   closed light area round the text), and on another region's interior or lettering;
-* the font size against the original glyph and the room, the hyphenated lines, the lettering's own flags;
+* the font size against the original glyph and the room, the hyphenated lines, the lettering's own flags, and the
+  room a bubble's lettering took beyond its own across (``frame``: "turned", the line turned 90 degrees, whose lines,
+  size and ink are measured as drawn and whose room is judged narrow in the turned frame; "overrun", over the
+  outline), counted per set and scale by ``merge``;
 * the text box against the lettering it holds (``box_cover``, ``box_excess``);
 * regions with no bubble whose readers disagree (``false_likely``), regions far from every gold or made-up text,
   untranslated regions and gold texts with no region.
@@ -60,7 +63,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 6
+VERSION = 7
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -841,8 +844,11 @@ class Recorder:
 
                 mask = cv2.resize(mask, (region.width, region.height), interpolation=cv2.INTER_NEAREST)
             self.rooms[key] = (region.bbox, mask > 0)
+            # (the layout drawn is the last one asked for: a turned block's, in its turned frame, after the sizes the
+            # lettering compared)
             self.lines[key] = [ln for fit in self.fits[-1:] for ln in _fit_lines(fit)]
             self.won[key] = getattr(done, "won", "")
+            self.frame[key] = getattr(done, "frame", "")
             return done
 
         def layout_text(*a, **k):
@@ -864,6 +870,7 @@ class Recorder:
         self.ink: dict[int, Any] = {}
         self.lines: dict[int, list[str]] = {}
         self.won: dict[int, str] = {}
+        self.frame: dict[int, str] = {}
         self.fits: list[Any] = []
         self.page: Any = None
         self.erased: Any = None
@@ -1266,6 +1273,7 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             m["lines"] = len(lines)
             m["hyphens"] = _hyphens(lines)
             m["won"] = rec.won.get(id(r), "")
+            m["frame"] = rec.frame.get(id(r), "")
             room = rec.rooms.get(id(r))
             if room is not None:
                 rm = _page_mask((h, w), room[0], room[1])
@@ -1280,7 +1288,10 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                 codes.append("SMALL")
             if m["hyphens"]:
                 codes.append("HYPHEN")
-            narrow = "room_wh" in m and m["room_wh"][1] > 2.5 * m["room_wh"][0]
+            # (narrow for the lines as they run: a turned block's lines run down the room, its height their length)
+            wh = m.get("room_wh", [1, 1])
+            length, depth = wh[::-1] if m["frame"] == "turned" else wh
+            narrow = depth > 2.5 * length
             if 0 < r.font_size < 13 and (m["hyphens"] or narrow) or (m["hyphens"] >= 2):
                 codes.append("SQUEEZED")
             if "no-fit" in r.letter_flags:
@@ -1542,10 +1553,13 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
     for rec in records:
         scale = rec["item"].rsplit("@", 1)[1]
         key = (rec["set"], scale)
-        tot = totals.setdefault(key, {"pages": 0, "regions": 0, "lettered": 0, "texts": 0, "seconds": 0})
+        tot = totals.setdefault(key, {"pages": 0, "regions": 0, "lettered": 0, "texts": 0, "seconds": 0, "turned": 0,
+                                      "overrun": 0})
         tot["pages"] += 1
         tot["regions"] += len(rec["regions"])
         tot["lettered"] += sum(1 for r in rec["regions"] if "ink_px" in r["m"])
+        for frame in ("turned", "overrun"):
+            tot[frame] += sum(1 for r in rec["regions"] if r["m"].get("frame") == frame)
         tot["texts"] += rec.get("texts", 0)
         tot["seconds"] += rec.get("seconds", 0)
         for r in rec["regions"]:
@@ -1574,7 +1588,12 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
             cells.append(f"{cell['regions']}/{denom}, {len(cell['pages'])} p" if cell else "-")
         if any(c != "-" for c in cells):
             lines.append(f"| {code} | " + " | ".join(cells) + f" | {allc[code]} |")
-    failed = [f for m in meta for f in (m.get("failed") or [])]
+    for frame, what in (("turned", "lettered with the line turned 90 degrees (a count, not a fault)"),
+                        ("overrun", "lettered over the bubble's outline (a count, not a fault)")):
+        if any(totals[k].get(frame) for k in keys):
+            lines.append(f"| ({frame}) | " + " | ".join(f"{totals[k].get(frame, 0)}/{totals[k]['lettered']}"
+                                                         for k in keys) + f" | {what} |")
+    failed =[f for m in meta for f in (m.get("failed") or [])]
     if failed:
         lines += ["", f"Items that failed: {len(failed)} ({', '.join(f['item'] for f in failed[:20])})"]
     text = "\n".join(lines) + "\n"
