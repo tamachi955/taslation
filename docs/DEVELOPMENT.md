@@ -514,7 +514,9 @@ rows' languages.
   the titles late - the other tab's 0.4 s after its page, the book's 0.4 s before its page - (tab5), and the book's
   tab moved out into a window of its own (tab6, always last: a second browser of the same program on a throwaway
   profile, opened at the start right behind the first and covered by it - a browser's window opened later in a run,
-  or restored from minimised, took the foreground -, and brought above it without activation at the move).
+  or restored from minimised, took the foreground -, drawing all the same - its browser's occlusion tracking off, as
+  `--standin-draws-covered` has it: hidden from its start, it was taken for a window out of sight even once raised,
+  its page went on minutes late and no frame of it came -, and brought above it without activation at the move).
   `--standin-start-tab plain|japanese` starts the window with the other tab on show (with tab0, which brings the
   book's tab back after 3 s; with `--chooser` the chooser is answered while it shows). `run.tabs`
   (`tools/standin_tabs.py`) gives per spell away from the book's tab what was captured, read, asked, looked up,

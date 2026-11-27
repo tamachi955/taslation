@@ -7,9 +7,10 @@ show that tab's page - a plain page with a neutral title, or one of made-up Japa
 title -, the band stays), switched by its script: no key, no click. The book's tab moved out into a window of its own
 (``z``) is a second window of the same browser program, opened at the start right behind the first, covered by it
 (`standin_viewer.StandinBrowser.open_held`: opened later, or restored from minimised, a browser's window took the
-foreground), taken by the guards as the stand-in's from then on; at the ``z`` its page is told to go on (the control
-file's *out*: the screen the first window showed, the step after the ``z``) and the window brought above the first
-without activation (`show_held`).
+foreground) and drawing all the same (its browser's occlusion tracking off: a window hidden from its start was taken
+for one out of sight even once raised), taken by the guards as the stand-in's from then on; at the ``z`` its page is
+told to go on (the control file's *out*: the screen the first window showed, the step after the ``z``) and the window
+brought above the first without activation (`show_held`).
 
 * `Sampler`: a thread that looks every SAMPLE_S at the see-through window: whether it shows anything and how many
   patches, the window whose client area it lies on (the first stand-in window, the second, none), whether it takes the
@@ -224,7 +225,7 @@ class TabRun:
                 self.second_facts.update({"came_ms": round((time.monotonic() - began) * 1000), "t": now_ms(),
                                           "locked": raised.get("locked"),
                                           "took_the_foreground": raised.get("took_the_foreground"),
-                                          "took_it_at": raised.get("took_it_at")})
+                                          "took_it_at": raised.get("took_it_at"), "in_front": raised.get("in_front")})
             except Exception as e:  # noqa: BLE001 - said by its type
                 self.second_facts["failed"] = type(e).__name__
 

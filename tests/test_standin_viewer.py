@@ -350,6 +350,57 @@ def test_the_tab_steps_are_the_stand_in_s_own_and_the_book_s_own_window_waits_he
     assert standin_e2e.tab_order(["tab6", "tab2", "tab0", "tab1"]) == ["tab0", "tab2", "tab1", "tab6"]
 
 
+def test_the_book_s_own_window_draws_while_covered_and_its_raise_takes_no_foreground_it_had(monkeypatch, tmp_path):
+    """The book's own window of a ``z`` (`open_held`), opened behind the first one and covered by it wholly: its
+    browser draws all the same (the occlusion tracking off, whatever the first one's) - hidden from its start, it was
+    taken for a window out of sight even once raised, on the runners. Its raise (`show_held`) says the foreground was
+    taken only when it went to a window of the browsers' by it, not when the first one had it already. Nothing real is
+    started or touched: the browser, the windows and the foreground are stand-ins of their own."""
+    import threading
+
+    commands, state = [], {"now": (7, 5), "after": (7, 5)}
+
+    class Proc:
+        pid = 41
+        stderr = iter(())
+
+        def poll(self):
+            return None
+
+    def popen(cmd, **_kw):
+        commands.append(cmd)
+        return Proc()
+
+    def set_window_pos(*_a):
+        state["now"] = state["after"]
+        return 1
+
+    monkeypatch.setattr(sv.subprocess, "Popen", popen)
+    monkeypatch.setattr(sv, "process_tree", lambda pid: {pid})
+    monkeypatch.setattr(sv, "find_window", lambda pids, _title: 99 if 41 in pids else None)
+    monkeypatch.setattr(sv, "lock_foreground", lambda _lock: True)
+    monkeypatch.setattr(sv, "foreground", lambda: state["now"])
+    monkeypatch.setattr(sv, "_user32", SimpleNamespace(SetWindowPos=set_window_pos, GetAncestor=lambda h, _f: h,
+                                                       IsIconic=lambda _h: 0, ShowWindow=lambda *_a: 1))
+    monkeypatch.setattr(sv.time, "sleep", lambda _s: None)
+    browser = object.__new__(sv.StandinBrowser)
+    browser.profile, browser.token, browser.scale, browser.draws_covered = tmp_path / "profile", "t1234", 1.0, False
+    browser.hwnd, browser.more, browser.more_browsers, browser.more_trees = 7, [], [], []
+    browser.tree, browser.started_from, browser.events, browser.lock = {5}, (3, 2), [], threading.Lock()
+    browser._locked, browser.start_facts = False, {}
+    assert browser.open_held(Path("C:/b/chrome.exe"), "file:///p.html?held=1", (40, 40, 960, 760)) == 99
+    held = commands[-1]
+    assert "--disable-backgrounding-occluded-windows" in held and held[-1] == "--app=file:///p.html?held=1"
+    assert [a for a in held if a.startswith("--disable-features=")][0].endswith(",CalculateNativeWinOcclusion")
+    assert browser.more_facts["draws_covered"] is True and browser.draws_covered is False  # (the first one's as it was)
+    assert browser.more == [99] and browser.tree == {5, 41}
+    facts = browser.show_held(99)  # (the first one in front since the start, and after the raise)
+    assert facts["took_the_foreground"] is False and facts["in_front"] == "first"
+    state["after"] = (99, 41)
+    facts = browser.show_held(99)  # (the book's own window took it)
+    assert facts["took_the_foreground"] is True and facts["took_it_at"] == "raised" and facts["in_front"] == "held"
+
+
 def test_a_spell_on_another_tab_is_counted_from_the_other_tab_drawn_to_the_book_s_page_drawn_again():
     import threading
 

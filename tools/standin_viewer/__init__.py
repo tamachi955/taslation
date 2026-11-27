@@ -273,7 +273,8 @@ FLAGS = ("--no-first-run", "--no-default-browser-check", "--disable-sync", "--di
 
 
 # ... and, for a run that must not depend on the windows of a person at the machine (`draws_covered`), the occlusion
-# tracking off: the stand-in draws on under any window, as a viewer that draws while covered does.
+# tracking off: the stand-in draws on under any window, as a viewer that draws while covered does. (The book's own
+# window of a ``z`` always has it: `StandinBrowser.open_held`.)
 DRAWS_COVERED = ("--disable-backgrounding-occluded-windows",)
 OCCLUSION_FEATURE = "CalculateNativeWinOcclusion"
 
@@ -621,16 +622,21 @@ class StandinBrowser:
         both times on 2026-11-25, and a window kept minimised from the start took it as it was shown again: a browser's
         window restored from minimised activates itself once the person has given no input for a while. So it is never
         minimised here.) The program is the same and its window of the same class, so that TASlation sees what a tab
-        dragged out gives: a window of that browser titled as the book's tab. Its log is read into the same `events`;
-        its window found by its own title (`held_title`) in its own process tree. How it came is kept in `more_facts`
-        (as `start_facts`); its handle, also in `more`."""
+        dragged out gives: a window of that browser titled as the book's tab. Its browser draws while covered
+        (`browser_command`'s *draws_covered*, whatever the first one's): a tab dragged out is a window in front from
+        its start, and this one, hidden wholly from its start, was taken by its browser for a window out of sight:
+        on the runners (2026-11-27, twice) its page went on only 110 and 360 s after the move, and raised without
+        activation (`show_held`) it was still taken so - no frame of it came after TASlation followed it, and the
+        animation frames of its next turn never ran. Its log is read into the same `events`; its window found by its
+        own title (`held_title`) in its own process tree. How it came is kept in `more_facts` (as `start_facts`, and
+        "draws_covered"); its handle, also in `more`."""
         profile = make_profile(self.profile.parent / f"{self.profile.name}-{len(self.more_browsers) + 2}")
         self.more_facts = {"asked": "minimised, not activated", "foreground_locked": False, "came_minimised": None,
                            "shown_without_activation": None, "took_the_foreground": False, "took_it_at": None,
-                           "minimised_again": False}
+                           "minimised_again": False, "draws_covered": True}
         self._locked = self.more_facts["foreground_locked"] = lock_foreground(True)
         try:
-            proc = subprocess.Popen(browser_command(program, url, profile, rect, self.scale, self.draws_covered),
+            proc = subprocess.Popen(browser_command(program, url, profile, rect, self.scale, draws_covered=True),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", errors="replace",
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), startupinfo=quiet_start())
@@ -663,18 +669,25 @@ class StandinBrowser:
     def show_held(self, hwnd: int) -> dict[str, Any]:
         """The book's own window (`open_held`, behind the first one) brought above the first one without activation
         (as the first one is put on top at the start: topmost, then not), the foreground locked meanwhile, now that the
-        book's tab is moved out into it. What came, as flags: whether the lock was taken, whether the window in front
-        was the browser's after it."""
-        facts: dict[str, Any] = {"locked": False, "took_the_foreground": False, "took_it_at": None}
+        book's tab is moved out into it. What came, as flags: whether the lock was taken, whether the foreground went
+        to a window of the browsers' by it ("took_the_foreground": one of theirs in front after it, another window
+        before - the first one in front since TASlation gave it the foreground at its start is not taken by the raise),
+        and whose window is in front after it ("in_front": "held" this one, "first" the first one, "" another's)."""
+        facts: dict[str, Any] = {"locked": False, "took_the_foreground": False, "took_it_at": None, "in_front": ""}
         if sys.platform != "win32":
             return facts
         self._locked = facts["locked"] = lock_foreground(True)
         try:
+            before = foreground()
             flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE
             _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
             _user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
             time.sleep(0.3)  # (a browser that would activate itself as it is raised does so at once)
-            self._front_look("raised", facts)
+            front = foreground()
+            if front[1] in self.tree:
+                facts["in_front"] = "held" if self._in_front(hwnd) else "first"
+                if front != before:
+                    facts["took_the_foreground"], facts["took_it_at"] = True, "raised"
         finally:
             self._unlock()
         return facts
