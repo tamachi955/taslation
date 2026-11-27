@@ -618,6 +618,112 @@ def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None
     return bg
 
 
+LINE_REACH = 2.0  # glyphs: a straight dark run this long (at the least 0.8 of it) beyond the box of lettering set on
+LINE_THIN = 0.15  # the page, no wider than twice this (glyphs), that reaches the box and goes into it at
+LINE_ANGLE = 0.17  # this sine of the angle with the box's side at the least (10 degrees), is a line of the drawing (a
+# tail, a stroke of the art), and goes on into the box along it: never erased with the lettering
+LINE_SEGMENTS = 64  # the longest straight runs looked at, at the most
+
+
+def _runs_across(dark: np.ndarray, points: np.ndarray, n: np.ndarray, most: int) -> np.ndarray:
+    """The dark run across a line at each of *points* (k x 2, x and y) along its normal *n*, up to *most* pixels to
+    each side (pixels; 0 where the point is light)."""
+    h, w = dark.shape
+    ks = np.arange(-most, most + 1)
+    xs = np.rint(points[:, :1] + ks[None, :] * n[0]).astype(int)
+    ys = np.rint(points[:, 1:] + ks[None, :] * n[1]).astype(int)
+    ok = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+    on = np.zeros(xs.shape, bool)
+    on[ok] = dark[ys[ok], xs[ok]]
+    after = np.cumprod(on[:, most + 1:], axis=1).sum(axis=1)
+    before = np.cumprod(on[:, most - 1::-1], axis=1).sum(axis=1)
+    return np.where(on[:, most], 1 + after + before, 0)
+
+
+def lines_through(image: np.ndarray, region: TextRegion, dark_threshold: int = 140) -> np.ndarray | None:
+    """The straight lines of the drawing that run into the box of lettering set on the page from beyond it (bool, the
+    region's crop, with a pixel of anti-aliasing round them), or None (`line_pixels`)."""
+    found = line_pixels(image, region, dark_threshold)
+    if found is None:
+        return None
+    (wx0, wy0, _wx1, _wy1), lines = found
+    return lines[region.y0 - wy0:region.y1 - wy0, region.x0 - wx0:region.x1 - wx0]
+
+
+def line_pixels(image: np.ndarray, region: TextRegion, dark_threshold: int = 140
+                ) -> tuple[Box, np.ndarray] | None:
+    """The straight lines of the drawing that run into the box of lettering set on the page from beyond it, within it
+    and on their way to it (the window round the box and a bool mask of it, with a pixel of anti-aliasing round the
+    lines), or None. A straight dark run beyond the box at least
+    `LINE_REACH` glyphs long (`cv2.HoughLinesP` on the dark pixels within that reach of the box), thin all along
+    (`LINE_THIN`), that reaches the box and points into it (`LINE_ANGLE`: a line along the box's side, a bubble's
+    outline beside it, is not one) goes on into the box as the dark pixels along that line joined to it - through the
+    glyphs it crosses. Lettering stays inside its box and is no longer than a glyph along any one stroke; a bubble's
+    tail through the lettering was erased with it where it crossed the box (each of its two sides found on its own,
+    the tip where they meet and the drawing round it left out)."""
+    g = _glyph(region)
+    reach = LINE_REACH * g
+    thin = max(1.5, LINE_THIN * g)
+    wx0, wy0, wx1, wy1 = _window(image, region, int(round(reach)) + 2)
+    gray = cv2.cvtColor(np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3]), cv2.COLOR_RGB2GRAY)
+    dark = gray < dark_threshold
+    bx0, by0, bx1, by1 = region.x0 - wx0, region.y0 - wy0, region.x1 - wx0, region.y1 - wy0
+    ys_all, xs_all = np.mgrid[0:dark.shape[0], 0:dark.shape[1]]
+    beyond_x = np.maximum(np.maximum(bx0 - xs_all, xs_all - (bx1 - 1)), 0)
+    beyond_y = np.maximum(np.maximum(by0 - ys_all, ys_all - (by1 - 1)), 0)
+    off = np.maximum(beyond_x, beyond_y)
+    inside = off == 0
+    near = dark & ~inside & (off <= reach)
+    if int(near.sum()) < reach:
+        return None
+    least = max(8, int(round(0.8 * reach)))
+    segs = cv2.HoughLinesP(near.astype(np.uint8), 1, np.pi / 180, threshold=max(8, int(round(0.5 * reach))),
+                           minLineLength=least, maxLineGap=2)
+    if segs is None:
+        return None
+    segs = sorted(np.asarray(segs).reshape(-1, 4), key=lambda s: -float(np.hypot(s[2] - s[0], s[3] - s[1])))
+    segs = segs[:LINE_SEGMENTS]
+    keep = np.zeros(dark.shape, bool)
+    most = int(np.ceil(3 * thin)) + 2
+    for x1, y1, x2, y2 in segs:
+        ends = np.array([[x1, y1], [x2, y2]], float)
+        offs = [int(off[int(y), int(x)]) for x, y in ends]
+        k = int(np.argmin(offs))
+        far, end = ends[1 - k], ends[k]
+        if offs[k] > thin + 2:
+            continue  # stops short of the box
+        length = float(np.hypot(*(end - far)))
+        d = (end - far) / length
+        ex, ey = int(end[0]), int(end[1])
+        if beyond_x[ey, ex] >= beyond_y[ey, ex]:
+            side = np.array([1.0 if ex < bx0 else -1.0, 0.0])
+        else:
+            side = np.array([0.0, 1.0 if ey < by0 else -1.0])
+        if float(d @ side) < LINE_ANGLE:
+            continue  # along the box's side, or away from it
+        mx, my = (far + end) / 2.0
+        if keep[int(round(my)), int(round(mx))]:
+            continue  # another run of the same line, taken already
+        n = np.array([-d[1], d[0]])
+        runs = _runs_across(dark, far[None, :] + np.arange(0.0, length + 0.5, 2.0)[:, None] * d[None, :], n, most)
+        hit = runs[runs > 0]
+        if hit.size < 0.8 * runs.size or float(np.percentile(hit, 80)) > 2 * thin + 2:  # (+2: the pixels at its sides)
+            continue  # not one thin line all along: a drawing, a dark ground
+        half = float(np.percentile(hit, 90)) / 2.0 + 1.0
+        dist = np.abs((xs_all - end[0]) * d[1] - (ys_all - end[1]) * d[0])
+        along = (xs_all - far[0]) * d[0] + (ys_all - far[1]) * d[1]
+        band = dark & inside & (dist <= half)
+        run = near & (dist <= half) & (along >= -2) & (along <= length + 2)
+        m, parts = cv2.connectedComponents((band | run).astype(np.uint8), connectivity=8)
+        ids = np.unique(parts[run])
+        joined = np.isin(parts, ids[ids > 0]) & band
+        if joined.any():
+            keep |= joined | run
+    if not keep.any():
+        return None
+    return (wx0, wy0, wx1, wy1), cv2.dilate(keep.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+
+
 def _local_box(region: TextRegion) -> Box:
     tb = region.text_box
     return (tb[0] - region.x0, tb[1] - region.y0, tb[2] - region.x0, tb[3] - region.y0)
@@ -672,7 +778,12 @@ def _erase(image: np.ndarray, crop: np.ndarray, region: TextRegion, mask: np.nda
     elif region.kind in MANUAL_KINDS:
         crop[inside] = bg  # the reader's own rectangle: wiped as drawn, or its paper alone (`within_paper`)
     else:
-        fill_paper(crop, inside, bg, dark, whole=region.kind not in ON_PAGE_KINDS)
+        paint = inside
+        if region.kind in ON_PAGE_KINDS and not dark:
+            lines = lines_through(image, region, dark_threshold)  # (a tail through the lettering: kept)
+            if lines is not None:
+                paint = inside & ~lines
+        fill_paper(crop, paint, bg, dark, whole=region.kind not in ON_PAGE_KINDS)
     if cut:
         region.mask = inside.astype(np.uint8) * 255
     return bg

@@ -377,3 +377,71 @@ def test_the_default_keeps_what_classic_painted_over():
     outline = _outline(img, ex)
     assert not np.any(default != img, axis=2)[outline].any()
     assert int(np.any(classic != img, axis=2)[outline].sum()) > 100
+
+
+def _tail_page(line: bool = True) -> tuple[np.ndarray, TextRegion, np.ndarray, np.ndarray]:
+    """Lettering set on the page in a column, a bubble's tail (a straight line of 3 px) running through it from far
+    beyond its box to far beyond it; the page, the region, the line's pixels and the glyphs' cells."""
+    img = np.full((400, 400, 3), 255, np.uint8)
+    rng = np.random.default_rng(5)
+    cells = np.zeros((400, 400), bool)
+    for y in range(120, 280, 22):
+        _glyph(img, 190, y, rng)
+        cells[y:y + 16, 190:206] = True
+    drawn = np.zeros((400, 400), np.uint8)
+    if line:
+        cv2.line(drawn, (40, 330), (360, 90), 255, 3, cv2.LINE_AA)
+        img[drawn > 0] = np.minimum(img[drawn > 0], (255 - drawn[drawn > 0])[:, None]).astype(np.uint8)
+    box = (180, 110, 216, 290)
+    mask = np.full((box[3] - box[1], box[2] - box[0]), 255, np.uint8)
+    r = TextRegion(*box, mask, box, kind="text-on-page", glyph=16.0)
+    return img, r, drawn > 128, cells
+
+
+def test_a_line_of_the_drawing_through_lettering_on_the_page_is_kept():
+    """A bubble's tail crossing lettering set on the page was erased with it where it crossed the text box (a gap of
+    a glyph's width or more in the tail, on the made-up pages); a straight dark run some glyphs long that goes on past
+    the box (`lines_through`) is the drawing's, and stays."""
+    from taslation.render.erase import lines_through
+
+    img, r, line, cells = _tail_page()
+    out = img.copy()
+    erase_region(out, r)
+    gray = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
+    inbox = np.zeros(line.shape, bool)
+    inbox[r.y0:r.y1, r.x0:r.x1] = True
+    crossing = line & inbox
+    assert crossing.sum() > 50
+    assert (gray[crossing] < 140).mean() > 0.95  # the tail, where it crosses the box
+    letters = (cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) < 140) & cells & ~(cv2.dilate(line.astype(np.uint8),
+                                                                                    np.ones((5, 5), np.uint8)) > 0)
+    assert (gray[letters] > 190).all()  # the lettering off the tail, gone
+    plain, r2, _, _ = _tail_page(line=False)
+    assert lines_through(plain, r2) is None  # lettering alone: nothing kept, and nothing looked for
+
+
+def test_both_sides_of_a_tail_through_lettering_on_the_page_are_kept_by_the_ground_fill_too(tmp_path):
+    """The made-up page's case: a bubble's tail - its two sides, meeting at its tip beyond the box, from the bubble's
+    outline - crosses lettering set on white paper. One straight line fitted to both sides was none, so each side is
+    found on its own (`line_pixels`), and the art eraser's ground fill (the ring of the lettering painted the flat
+    ground before the paper fill) keeps them as well: it cut them where they crossed the box."""
+    from taslation.render.artwork import ArtEraser
+
+    img, r, _, cells = _tail_page(line=False)
+    sides = np.zeros(img.shape[:2], np.uint8)
+    for end in ((330, 200), (340, 235)):
+        cv2.line(sides, (50, 330), end, 255, 4)
+    cv2.ellipse(sides, (360, 190), (40, 70), 0, 0, 360, 255, 5)
+    letters = (cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) < 140) & cells
+    img[sides > 0] = 0
+    out = img.copy()
+    ArtEraser(tmp_path, "auto", erase_region).erase(out, r)
+    gray = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
+    inbox = np.zeros(sides.shape, bool)
+    inbox[r.y0:r.y1, r.x0:r.x1] = True
+    crossing = (sides > 0) & inbox
+    assert crossing.sum() > 150
+    assert (gray[crossing] < 140).mean() > 0.95  # both sides, where they cross the box
+    assert (gray[sides > 0] < 140).mean() > 0.97  # and beyond it
+    off_sides = letters & ~(cv2.dilate(sides, np.ones((9, 9), np.uint8)) > 0)
+    assert off_sides.sum() > 300 and (gray[off_sides] > 190).all()  # the lettering off them, gone

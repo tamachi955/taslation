@@ -59,7 +59,7 @@ from ..config import LAMA_MODEL
 from ..detect.bubbles import fill_holes
 from ..regions import TextRegion
 from . import pagescale
-from .erase import MANUAL_KINDS, erase_region, paper_colour, paper_surface, within_paper
+from .erase import MANUAL_KINDS, erase_region, line_pixels, paper_colour, paper_surface, within_paper
 
 LOG = logging.getLogger(__name__)
 
@@ -689,6 +689,29 @@ def available(models_dir: Path, setting: str = "auto", cuda: bool | None = None)
     return setting != "off" and installed(models_dir) and runs_here(setting, cuda)
 
 
+Kept = tuple[tuple[int, int, int, int], np.ndarray, np.ndarray]
+
+
+def _keep_lines(image: np.ndarray, region: TextRegion, dark: bool, dark_threshold: int) -> Kept | None:
+    """The straight lines of the drawing that run through the box of lettering set on the page (`erase.line_pixels`:
+    a bubble's tail crossing it) and their pixels as they are, to be put back (`_put_back`) after a fill that took
+    them with the lettering's ring; the paper fill keeps them too. (Left out of the hole, they made the ground fitted
+    round it darker.)"""
+    if dark or region.kind not in ART_KINDS:
+        return None
+    found = line_pixels(image, region, dark_threshold)
+    if found is None:
+        return None
+    (x0, y0, x1, y1), lines = found
+    return (x0, y0, x1, y1), lines, image[y0:y1, x0:x1][lines].copy()
+
+
+def _put_back(image: np.ndarray, kept: Kept | None) -> None:
+    if kept is not None:
+        (x0, y0, x1, y1), lines, pixels = kept
+        image[y0:y1, x0:x1][lines] = pixels
+
+
 class ArtEraser:
     """`erase` for regions on the art, with LaMa in *models_dir*, loaded on first use."""
 
@@ -796,7 +819,9 @@ class ArtEraser:
             if not self.failed and FLAT_RINGS and region.kind in ART_KINDS:
                 full = art_mask(image, judged)  # outlined lettering on a flat ground: its ring painted that ground
                 if full is not None and plain_ground(image, full, scale=scale):
+                    kept = _keep_lines(image, region, dark, dark_threshold)
                     fill_ground(image, full, scale=scale)
+                    _put_back(image, kept)
             return app()
         if on_paper(image, region):
             self.counts["ground"] += 1
@@ -808,7 +833,9 @@ class ArtEraser:
         if plain_ground(image, full, scale=scale):
             self.counts["ground"] += 1
             if GROUND_FILL:
+                kept = _keep_lines(image, region, dark, dark_threshold)
                 fill_ground(image, full, scale=scale)  # (strokes, ring and all; the paper fill takes what is left)
+                _put_back(image, kept)
             return app()
         if judged is not region:  # the hole takes in the model's text box too
             wider = art_mask(image, region)
