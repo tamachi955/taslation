@@ -622,7 +622,9 @@ LINE_REACH = 2.0  # glyphs: a straight dark run this long (at the least 0.8 of i
 LINE_THIN = 0.15  # the page, no wider than twice this (glyphs), that reaches the box and goes into it at
 LINE_ANGLE = 0.17  # this sine of the angle with the box's side at the least (10 degrees), is a line of the drawing (a
 # tail, a stroke of the art), and goes on into the box along it: never erased with the lettering
-LINE_SEGMENTS = 64  # the longest straight runs looked at, at the most
+LINE_SEGMENTS = 64  # straight runs looked at, at the most: more beyond the box are a hatching or a tone of lines, not
+# lines of the drawing running into the lettering, and none is kept (the longest 64 of a hatching were kept through the
+# box and the rest cut, in stripes; and every line of it kept would keep the glyph pixels along it)
 
 
 def _runs_across(dark: np.ndarray, points: np.ndarray, n: np.ndarray, most: int) -> np.ndarray:
@@ -681,8 +683,10 @@ def line_pixels(image: np.ndarray, region: TextRegion, dark_threshold: int = 140
                            minLineLength=least, maxLineGap=2)
     if segs is None:
         return None
-    segs = sorted(np.asarray(segs).reshape(-1, 4), key=lambda s: -float(np.hypot(s[2] - s[0], s[3] - s[1])))
-    segs = segs[:LINE_SEGMENTS]
+    segs = np.asarray(segs).reshape(-1, 4)
+    if len(segs) > LINE_SEGMENTS:
+        return None  # a hatching, a tone of lines
+    segs = sorted(segs, key=lambda s: -float(np.hypot(s[2] - s[0], s[3] - s[1])))
     keep = np.zeros(dark.shape, bool)
     most = int(np.ceil(3 * thin)) + 2
     for x1, y1, x2, y2 in segs:

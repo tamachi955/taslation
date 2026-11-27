@@ -420,6 +420,30 @@ def test_a_line_of_the_drawing_through_lettering_on_the_page_is_kept():
     assert lines_through(plain, r2) is None  # lettering alone: nothing kept, and nothing looked for
 
 
+def test_a_hatching_round_lettering_on_the_page_keeps_no_line_through_it(monkeypatch):
+    """Lettering set on a hatching (thin straight lines 4 px apart all round its box, a white ring round each glyph):
+    more straight runs beyond the box than LINE_SEGMENTS are a hatching or a tone of lines, not lines of the drawing
+    running into the lettering, and none is kept through the box - the longest of them were and the rest cut, in
+    stripes (the lettering identity page's tone)."""
+    from taslation.render import erase
+
+    img = np.full((400, 400, 3), 255, np.uint8)
+    hatch = np.zeros(img.shape[:2], np.uint8)
+    for k in range(-400, 400, 4):
+        cv2.line(hatch, (k, 0), (k + 400, 400), 255, 1)
+    img[hatch > 0] = 70
+    rng = np.random.default_rng(5)
+    for y in range(120, 280, 22):
+        img[y - 3:y + 19, 187:209] = 255
+        _glyph(img, 190, y, rng)
+    box = (180, 110, 216, 290)
+    r = TextRegion(*box, np.full((box[3] - box[1], box[2] - box[0]), 255, np.uint8), box, kind="text-on-page",
+                   glyph=16.0)
+    assert erase.lines_through(img, r) is None
+    monkeypatch.setattr(erase, "LINE_SEGMENTS", 10 ** 6)
+    assert erase.lines_through(img, r) is not None  # (with no such bound its lines would run through the box)
+
+
 def test_both_sides_of_a_tail_through_lettering_on_the_page_are_kept_by_the_ground_fill_too(tmp_path):
     """The made-up page's case: a bubble's tail - its two sides, meeting at its tip beyond the box, from the bubble's
     outline - crosses lettering set on white paper. One straight line fitted to both sides was none, so each side is
