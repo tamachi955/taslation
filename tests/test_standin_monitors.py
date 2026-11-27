@@ -267,6 +267,54 @@ def test_a_window_maximised_at_once_is_never_hidden_in_its_step():
     assert block["panes"]["left"]["hidden_ms_after_first_size"] is None
 
 
+def test_the_window_has_heard_of_the_viewer_s_place_once_it_took_it():
+    from taslation.capture.seethrough import SeeThrough
+
+    over = SeeThrough()  # (no window of its own: only what its looks and its hook on the viewer's moves keep)
+    over._panes_hide = lambda why: None
+    assert sm.told(over, (8, 0, 944, 1024)) is False  # (before its first look)
+    over._rect_tick(((0, 0, 1920, 1032), (0, 0, 1920, 1032)), 10.0)
+    assert sm.told(over, (0, 0, 1920, 1032)) is True
+    assert sm.told(over, (8, 0, 944, 1024)) is False  # (restored: not heard yet)
+    over._rect_tick(((8, 0, 944, 1024), (0, 0, 960, 1032)), 10.01)
+    assert sm.told(over, (8, 0, 944, 1024)) is True
+    assert sm.told(over, (0, 0, 1920, 1032)) is False
+    assert sm.told(SimpleNamespace(_rect=None), (8, 0, 944, 1024)) is False  # (before its first look)
+    assert sm.told(SimpleNamespace(), (8, 0, 944, 1024)) is False
+    assert sm.told(SimpleNamespace(_rect=(None,)), (8, 0, 944, 1024)) is None
+
+
+def test_a_pane_seen_outside_before_the_window_heard_of_the_change_counts_apart():
+    """A restore from maximised at 1000 ms (r7 on the runners): the first look, 4 ms in, already sees the client at
+    its new place with both panes where they lay maximised - the window not told yet -; it hid them at 9 ms (its own
+    notes), the next look sees them hidden, and they come back in the window. Counted apart, not as a pane left
+    outside; the same look once the window had heard of the place counts, and so does a pane at rest outside."""
+    big, small = (0, 0, 1920, 1032), (8, 0, 952, 1024)
+    rows = [row(t, client=big, right=(1700, 5, 1900, 300)) for t in (900, 950)]
+    raced = row(1004, client=small, overlay=big, set_size=(1920, 1032))
+    raced["panes"]["right"]["box"] = (1700, 5, 1900, 300)  # (the maximised place: past the client's right edge)
+    raced["told"] = False
+    rows += [raced] + [row(t, client=small, left=None, right=None, why="moving") for t in (1055, 1105)]
+    rows += [row(t, client=small, right=(700, 5, 900, 300)) for t in range(1400, 1600, 50)]
+    for r in rows:
+        r.setdefault("told", True)
+    notes = SimpleNamespace(lock=threading.Lock(), jobs=[], margins=[], lookups=[])
+    facts = {"first_t": 1000, "last_t": 1006, "sizes": 1, "button": False}
+    hides = [(500.0, "right:none"), (1009.4, "left:moving"), (1009.6, "right:moving")]
+    right = sm.drag_block(rows, facts, notes, 2000, hides=hides)["panes"]["right"]
+    assert right["outside_the_viewer_looks"] == 0 and right["outside_before_told_looks"] == 1
+    assert right["outside_before_told_ms"] == 0 and right["window_hid_ms_after_first_size"] == 10
+    assert right["hidden_ms_after_first_size"] == 55 and right["at_end"] == "shown"
+    raced["told"] = True
+    right = sm.drag_block(rows, facts, notes, 2000)["panes"]["right"]
+    assert right["outside_the_viewer_looks"] == 1 and right["outside_before_told_looks"] == 0
+    assert right["window_hid_ms_after_first_size"] is None
+    del raced["told"]  # (a look of a tool before `told`: counted as ever)
+    assert sm.drag_block(rows, facts, notes, 2000)["panes"]["right"]["outside_the_viewer_looks"] == 1
+    rows[-1]["panes"]["right"]["box"] = (1700, 5, 1900, 300)
+    assert sm.drag_block(rows, facts, notes, 2000)["panes"]["right"]["at_end"] == "shown outside the window"
+
+
 def test_a_pane_a_window_above_the_viewer_meets_is_told_covered():
     import numpy as np
 

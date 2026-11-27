@@ -13,9 +13,9 @@ changed, nothing of another program's is moved, no key or click goes to the syst
   or with no button (a resize by a tool or the keyboard). A real drag runs the window's own sizing loop
   (WM_ENTERSIZEMOVE); these sizes come as a program's moves do.
 * `Sampler`: a thread that looks every SAMPLE_S (FAST_SAMPLE_S while the window changes) at the stand-in's window and
-  client area, the lettering's window and the set it shows, the side panes and why each is not shown, the editing
-  marks, the region editor's place, the hidden window's monitor, the scales in force and the page's regions as each
-  result has them; numbers only.
+  client area, the lettering's window and the set it shows, whether that window had heard of the viewer's place
+  (`told`), the side panes and why each is not shown, the editing marks, the region editor's place, the hidden
+  window's monitor, the scales in force and the page's regions as each result has them; numbers only.
 * `Tour`: on the Tk thread, once the window is at rest at a place, the window's dialogs and menus opened through
   their own objects one after the other (the viewer chooser, Series and Volume, Settings, the legal notice, the GPU's
   box, How to use, the region editor and the place entry on the first region, the Menu and the list of target
@@ -93,6 +93,20 @@ def inside(box: Any, area: Any, slack: int = FOOT_PX) -> bool:
     """Whether the rectangle *box* (left, top, right, bottom) lies in *area*."""
     return (box is not None and area is not None and box[0] >= area[0] - slack and box[1] >= area[1] - slack
             and box[2] <= area[2] + slack and box[3] <= area[3] + slack)
+
+
+def told(over: Any, client: tuple[int, int, int, int]) -> bool | None:
+    """Whether the see-through window *over* had heard of the viewer's client area at *client* (x, y, width, height)
+    as a look reads it: the place its own last look or its hook on the viewer's moves took (`_rect_tick`), which it
+    takes only once it has hidden the side panes for the change. Windows tells it of a change only after the viewer's
+    window has made it, and a look on another thread may see the new place first (at a restore from maximised: inside
+    the restore's own call) - the panes still where they were, the window not yet told to hide them. None: not
+    known."""
+    rect = getattr(over, "_rect", None)
+    try:
+        return rect is not None and tuple(int(v) for v in rect[0]) == tuple(int(v) for v in client)
+    except (TypeError, IndexError, ValueError):
+        return None
 
 
 def where(e: BaseException) -> list[str]:
@@ -480,6 +494,7 @@ class Sampler(threading.Thread):
                                 "final": bool(chosen.final) if chosen is not None else None}
             hwnd = int(getattr(over, "hwnd", 0) or 0)
             row["overlay"] = window_rect(hwnd) if hwnd and _u.IsWindowVisible(hwnd) else None
+            row["told"] = told(over, (x, y, w, h))  # (read before the panes: `drag_block`)
             panes = {}
             for side in ("left", "right"):
                 box = over.pane_shown(side)
@@ -1106,7 +1121,7 @@ class WindowRun:
             block["overlay_pane_hides"] = dict(Counter(w for t, w in hides if t0 <= t < t1))
             if rec is not None and name in R_NAMES:
                 facts = dict(rec["facts"].get("drag") or rec["facts"])
-                block["resize"] = drag_block(rows, facts, notes, t1, self.sampler.page_rects, top)
+                block["resize"] = drag_block(rows, facts, notes, t1, self.sampler.page_rects, top, hides)
                 if name == "r1" and self.opened_on is not None and block["resize"].get("editor") is not None:
                     block["resize"]["editor"]["opened_on"] = self.opened_on
                     block["resize"]["editor"]["look_errors"] = dict(self.sampler.tk_errors)
@@ -1181,16 +1196,25 @@ def _stale_looks(rows: list[dict[str, Any]], t0: float, t1: float) -> list[tuple
     another scale, ms since the first look that saw the client at its place and size - the change came up to a look's
     time before that -, patches on show: False for the editing ground alone, which draws nothing one sees)."""
     out: list[tuple[float, bool, bool, float, bool]] = []
+    since = _seen_since(rows)
+    for r in rows:
+        if not t0 <= r["t"] < t1 or r.get("overlay") is None:
+            continue
+        place, scale = _stale(r)
+        if place or scale:
+            out.append((r["t"], place, scale, r["t"] - since[id(r)], bool((r.get("shown") or {}).get("n"))))
+    return out
+
+
+def _seen_since(rows: list[dict[str, Any]]) -> dict[int, float]:
+    """For each look of *rows* (by its id) the time of the first look that saw the client at its place and size."""
+    out: dict[int, float] = {}
     since, last = 0.0, None
     for r in rows:
         client = tuple(r.get("client") or ())
         if client != last:
             since, last = r["t"], client
-        if not t0 <= r["t"] < t1 or r.get("overlay") is None:
-            continue
-        place, scale = _stale(r)
-        if place or scale:
-            out.append((r["t"], place, scale, r["t"] - since, bool((r.get("shown") or {}).get("n"))))
+        out[id(r)] = since
     return out
 
 
@@ -1307,12 +1331,19 @@ def place_block(rows: list[dict[str, Any]], screens: Screens) -> dict[str, Any]:
 
 
 def drag_block(rows: list[dict[str, Any]], facts: dict[str, Any], notes: Any, t_end: float,
-               page_rects: dict[Any, Any] | None = None, top: int = 0) -> dict[str, Any]:
+               page_rects: dict[Any, Any] | None = None, top: int = 0,
+               hides: list[tuple[float, str]] | None = None) -> dict[str, Any]:
     """One window step that changed the size (a drag, or a size given without the button): from its first size to
     the end of its segment *t_end* - the lettering drawn at a stale place or scale (how long after the look that saw
     the client so, with patches on show or the editing ground alone), the patches hidden, back at the new size (patches
-    of a set of that size on show, its page done: of a final set) and the ms; the panes; the jobs started while the button was down and on the sizes between; an open region editor
-    (`editor_block`: *results*, *page_rects*, *top* as `region_fit` has them)."""
+    of a set of that size on show, its page done: of a final set) and the ms; the panes; the jobs started while the
+    button was down and on the sizes between; an open region editor (`editor_block`: *results*, *page_rects*, *top* as
+    `region_fit` has them).
+
+    A side pane on show outside the client area counts at a look where the see-through window had heard of the
+    viewer's place (`told`); one seen so before it had - the look and the change raced, the window not yet told to
+    hide it - is counted apart, with how long after the look that saw the client so. *hides*: the window's own notes
+    of a pane hidden ((ms, "side:why"), `WindowRun.report`), for when it hid each after the first size."""
     first = facts.get("first_t") or facts.get("t")
     release = facts.get("release_t") or facts.get("last_t") or first
     if first is None:
@@ -1334,22 +1365,33 @@ def drag_block(rows: list[dict[str, Any]], facts: dict[str, Any], notes: Any, t_
 
     back = next((r["t"] for r in after if lettered(r)), None)
     final_back = next((r["t"] for r in after if lettered(r) and r["shown"].get("final")), None)
+    since = _seen_since(rows)
     panes: dict[str, Any] = {}
     for side in ("left", "right"):
         on_during = [r for r in during if r.get("panes") and r["panes"][side]["box"] is not None]
-        outside = [r for r in rows if first <= r["t"] < t_end and r.get("panes")
-                   and r["panes"][side]["box"] is not None and not inside(r["panes"][side]["box"], r["client"])]
+        out = [r for r in rows if first <= r["t"] < t_end and r.get("panes")
+               and r["panes"][side]["box"] is not None and not inside(r["panes"][side]["box"], r["client"])]
+        outside = [r for r in out if r.get("told") is not False]  # (a look of before `told`: counted as ever)
+        untold = [r["t"] - since[id(r)] for r in out if r.get("told") is False]
         hidden_at = next((r["t"] for r in rows if first <= r["t"] < t_end and r.get("panes")
                           and r["panes"][side]["box"] is None), None)
+        hid_at = next((t for t, w in hides or [] if first <= t < t_end and w.startswith(f"{side}:")), None)
         back_at = next((r["t"] for r in after if r.get("panes") and r["panes"][side]["box"] is not None
                         and inside(r["panes"][side]["box"], r["client"])), None)
-        last = after[-1]["panes"][side] if after and after[-1].get("panes") else None
+        last = after[-1] if after and after[-1].get("panes") else None
+        at_end = None
+        if last is not None:
+            box = last["panes"][side]["box"]
+            at_end = (f"hidden: {last['panes'][side]['why'] or '?'}" if box is None else
+                      "shown" if inside(box, last["client"]) else "shown outside the window")
         panes[side] = {"looks_shown_during": len(on_during), "looks_during": len(during),
                        "outside_the_viewer_looks": len(outside),
+                       "outside_before_told_looks": len(untold),
+                       "outside_before_told_ms": round(max(untold)) if untold else None,
                        "hidden_ms_after_first_size": _ms(hidden_at, first),
+                       "window_hid_ms_after_first_size": _ms(hid_at, first),
                        "back_ms_after_release": _ms(back_at, release),
-                       "at_end": None if last is None else ("shown" if last["box"] is not None else
-                                                           f"hidden: {last['why'] or '?'}")}
+                       "at_end": at_end}
     with notes.lock:
         jobs = [dict(j) for j in notes.jobs if j["started"] and first - 50 <= j["t"] < t_end]
         margins = [dict(m) for m in notes.margins if first <= m["t"] < t_end]

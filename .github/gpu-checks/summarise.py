@@ -82,7 +82,8 @@ K_STAYED_MS = 800  # standin_e2e.K_STAYED_MS: a page flipped past whose sharp fr
 TAB_NAMES = ("tab0", "tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # standin_e2e.TAB_SCENARIOS: another tab shown
 TAB_AFTER_TITLE_MS = 1000  # no lettering, and no mouse taken, over the other tab's page so long after its title came
 R_NAMES = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # standin_e2e.R_STEPS: the stand-in's window resized
-PANE_AT_REST = ("shown", "hidden: no room")  # (`standin_monitors.drag_block`: a side pane at the end of a step)
+PANE_AT_REST = ("shown", "hidden: no room")  # (`standin_monitors.drag_block`: a side pane at the end of a step;
+# not "shown outside the window")
 
 
 def read_json(path: Path | None) -> Any:
@@ -455,8 +456,10 @@ def _tab_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
 def _resize_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
     """The resize scenarios' criteria (`standin_monitors.WindowRun.report`, its places' ``resize``), true on any
     computer however slow: each step done to the stand-in's window; while the window was sized with the button held
-    (r1-r4) no page job started and nothing asked; at no look a side pane outside the viewer's window; at the end of
-    each step each pane shown, or hidden for want of room beside the page."""
+    (r1-r4) no page job started and nothing asked; at no look a side pane outside the viewer's window once the window
+    had heard of the viewer's place (a look that saw the new place first, the window not yet told to hide the pane,
+    is counted apart: ``outside_before_told_looks``); at the end of each step each pane shown in the viewer's window,
+    or hidden for want of room beside the page."""
     mine = [n for n in names if n in R_NAMES]
     if not mine:
         return
