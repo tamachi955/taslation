@@ -25,7 +25,11 @@ Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
 What follows holds for TASlation's own process (`taslation gui` and the
 other `taslation` commands). Ollama is a program of its own, which TASlation starts
 when it is not running and asks to load, release and run the translation
-model on 127.0.0.1; what else Ollama does is not under TASlation's control.
+model on 127.0.0.1; what else Ollama does is not under TASlation's control. The
+server TASlation starts is told not to use Ollama's cloud features
+(`OLLAMA_NO_CLOUD=1`), which keeps it from asking ollama.com by itself (see "Ollama's
+own requests to ollama.com (2026-11-27)" below); a server the person started is
+theirs and runs with its own settings.
 The installer, `setup_models.py` and `check_update.py`, which use the network, run
 without the guard.
 
@@ -5039,3 +5043,44 @@ the request's cancel (`ollama_start._wait_answer`), and a line stream's run's ca
 `wait`. The pages after it were not lettered; that run is not in the figures above. Run again, it did not come back,
 nor in 1.0.0's two runs, so it is not known to come from the slants. The run's cancel now waits as a
 `threading.Event` does (`tests/test_stream_lines.py`), so such a restart goes as for any other request.
+
+## Ollama's own requests to ollama.com (2026-11-27)
+
+Measured on Ollama 0.40.18 (`ollama.exe serve`): the server asks ollama.com:443 by itself, with no request from
+TASlation, two HTTPS GETs at each start - its "model recommendations" and a "model show cloud cache hydration" - and
+the recommendations again about every 4 hours while it runs. With `OLLAMA_NO_CLOUD=1` in the server's environment its
+log says "Ollama cloud disabled: true", both are skipped, no connection to ollama.com was seen, and the translation
+was the same (12 of 12 lines).
+
+Read from the binary offline (its strings; no server started for it): the variable is described as "Disable Ollama
+cloud features (remote inference and web search)", and the server's messages for it are "skipping model
+recommendations refresh because cloud is disabled", "skipping model show cloud cache hydration because cloud is
+disabled" and two of the same kind for the refreshes it makes on a read. Ollama reads the variable as a flag: set
+and not "0", "f" or "false", it is on.
+
+What TASlation does with it:
+
+- **Every server TASlation itself starts** (`ollama_start`: the window's session, the restart after a request with no
+  answer, the banner's restart, the other `taslation` commands, the Installer in the window and in the console, and
+  the tools and the GPU workflow, which use the same starter) gets `OLLAMA_NO_CLOUD=1` on top of the environment it
+  inherits, whatever TASlation's own environment says. The record `ollama-started.json` keeps it (`no_cloud` in its
+  `setup`). A server an earlier version started has no such mark and counts as one without it: the log says so once,
+  `taslation doctor` and the problem report say so too, and it is used as it is, not stopped; the next server
+  TASlation starts (after a request with no answer, or in the next session) gets the variable.
+- **`setup_models.py`**, run by hand with no server answering, starts one for PLaMo's import with the variable, and
+  one without it for a pull from Ollama's library (Qwen's `ollama pull`, `--ollama-model NAME`), as a pull has not been
+  tried with it set.
+- **`install.ps1`** starts its server with the variable for PLaMo (`Start-OwnOllama -NoCloud`) and without it for
+  Qwen's pull, setting it in its own environment for that start alone; when it restarts an Ollama that was already
+  there (`Restart-Ollama`), that server keeps its own settings. **`uninstall.ps1`** starts its server, for
+  `ollama rm` alone, with it. **`update.ps1`** starts none of its own (it runs `install.ps1`).
+- **An Ollama the person started** (or Ollama's own app) is theirs and runs with its own settings: TASlation gives it
+  nothing, this variable neither. `taslation doctor` says which kind of server answers.
+- The weekly install check (`.github/workflows/install-check.yml`) checks that the server it holds runs with
+  `OLLAMA_NO_CLOUD=1`.
+
+Not shown: a pull from Ollama's library with the variable set - the window's and the console's Installer pull Qwen
+through the session's server, which has it, and the binary's description names no pull; whether Ollama 0.40.17, the
+version the GPU workflow pins, knows the variable; the install check's new step, not yet run on the runners. No
+server was started for the code change itself: its tests use fakes (`tests/test_ollama_start.py`,
+`tests/test_install_scripts.py`).

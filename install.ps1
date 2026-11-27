@@ -1175,23 +1175,31 @@ function Start-OllamaServer([string]$Exe) {
 }
 
 # `ollama serve` itself in a hidden window (never Ollama's app: its first start would make Ollama start with Windows);
-# the process, $null when it did not start.
-function Start-HiddenServe([string]$Exe) {
+# the process, $null when it did not start. With -NoCloud it is told not to use Ollama's cloud features
+# (OLLAMA_NO_CLOUD=1, in this process's environment for the start alone, which the server inherits): without it,
+# Ollama's server asks ollama.com by itself (its model recommendations, at its start and every few hours).
+function Start-HiddenServe([string]$Exe, [switch]$NoCloud) {
+    $before = $env:OLLAMA_NO_CLOUD
     try {
+        if ($NoCloud) { $env:OLLAMA_NO_CLOUD = '1' }
         return (Start-Process -FilePath $Exe -ArgumentList 'serve' -WindowStyle Hidden -PassThru)
     } catch {
         Write-Detail "ollama serve did not start: $_"
         return $null
+    } finally {
+        if ($NoCloud) { $env:OLLAMA_NO_CLOUD = $before }
     }
 }
 
 # Ollama's server for this run's import of the translation model, when it does not answer: started by this run
 # (Start-HiddenServe) and stopped again once the run no longer needs it (Stop-OwnOllama), so that the run leaves
 # Ollama as it found it. 'running' when it answered already, 'serve' when it answers now, '' when it does not.
-function Start-OwnOllama([string]$Exe) {
+# -NoCloud: PLaMo's import, which asks Ollama's library for nothing (Qwen's `ollama pull` gets a server without it:
+# a pull was never tried with OLLAMA_NO_CLOUD set).
+function Start-OwnOllama([string]$Exe, [switch]$NoCloud) {
     if (Test-OllamaServer) { return 'running' }
     Write-Info (T 'Starting Ollama for the installation; it is stopped again at the end.')
-    $script:OwnServer = Start-HiddenServe $Exe
+    $script:OwnServer = Start-HiddenServe $Exe -NoCloud:$NoCloud
     if ($null -ne $script:OwnServer -and (Wait-OllamaServer)) {
         Write-Ok (T 'Ollama started (ollama serve, in a hidden window)')
         return 'serve'
@@ -1765,7 +1773,7 @@ if ($modelPresent) {
                 ' --ollama-exe OLLAMA --keep-partial, then stop the server it started')
 } elseif ($wantModel -and $ollamaExe) {
     Invoke-Attempts {
-        if (-not (Start-OwnOllama $ollamaExe)) {
+        if (-not (Start-OwnOllama $ollamaExe -NoCloud:($model.Kind -eq 'plamo'))) {
             return (New-Failure (T 'Ollama did not start, so the translation model could not be installed') (T 'Start Ollama from the Start menu, or restart the PC.'))
         }
         $listedNow = Get-OllamaModels

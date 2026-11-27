@@ -587,12 +587,15 @@ def program_lines(app: Any) -> list[str]:
               else "not editing")
     for key, value in _models(app).items():
         lines.add(key, value)
-    from ..ollama_start import own_server
+    from ..ollama_start import own_server, setup_of
 
     url = getattr(settings, "ollama_url", "")
     ours = _get(lambda: own_server(url), None)
     port = _get(lambda: settings.ollama_port, None)
-    lines.add("server", f"{'started by TASlation' if ours else 'not started by TASlation'}; "
+    setup = _get(lambda: setup_of(url, getattr(settings, "state_dir", None)), None)
+    cloud = ("its own settings" if setup is None else "cloud features off" if setup.no_cloud
+             else "cloud features not turned off")  # (TASlation tells only the server it starts: `ollama_start`)
+    lines.add("server", f"{'started by TASlation' if ours else 'not started by TASlation'}; {cloud}; "
                         f"{_get(lambda: errorlog.ollama_line(port), 'not asked')}")
     lines.add("offline_guard", errorlog.guard_line())
     changed = errorlog.settings_lines(settings)

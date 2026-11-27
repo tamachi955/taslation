@@ -11,10 +11,17 @@ the PATH: `find_ollama`), never the tray app, which would start Ollama with Wind
 in the tray after TASlation. The process has a console of its own that is never shown (``CREATE_NO_WINDOW``) and a
 process group of its own (``CREATE_NEW_PROCESS_GROUP``: what lets it be asked to stop), no shell, nothing shared with
 this process (standard streams, the working folder: a folder in use could not be removed), and it is not ended with
-TASlation's process by Windows. Its environment is TASlation's (what the reader set for Ollama comes with it), with
-three variables added when TASlation's lacks them (`server_setup`, `server_env`; a value that is set anywhere is never
-changed):
+TASlation's process by Windows. Its environment is TASlation's (what the reader set for Ollama comes with it), always
+with ``OLLAMA_NO_CLOUD=1`` (whatever TASlation's own environment says), and with three variables added when TASlation's
+lacks them (`server_setup`, `server_env`; a value of theirs that is set anywhere is never changed):
 
+* ``OLLAMA_NO_CLOUD``, Ollama's switch for its cloud features ("remote inference and web search", as Ollama describes
+  it): Ollama 0.40.18's server asks ollama.com by itself otherwise, at every start (its model recommendations, and a
+  "cloud" cache of what it shows of its models) and every 4 hours or so after (the recommendations); with it, its log
+  says "Ollama cloud disabled: true", both are skipped, and no connection of its own was seen, while it translated as
+  before (docs/OFFLINE_VERIFICATION.md, "Ollama's own requests to ollama.com"). The one exception is a server started
+  for a pull from Ollama's library and nothing else (`OllamaStarter`'s *library_pull*: setup_models.py's ``ollama
+  pull``, by hand), which is left without it, as a pull was never tried with it set;
 * ``OLLAMA_KV_CACHE_TYPE``, the KV cache's precision: the value Windows keeps for the user or the computer (as a
   process started now would get it), else ``q8_0`` on an NVIDIA GPU of 6 GB or less (`small_gpu`, as install.ps1
   decides from the same number, NVML's, which nvidia-smi gives it), where the model's whole context fits in video
@@ -32,9 +39,14 @@ changed):
   one whose ``context`` differs finds the state before it), else 0 (with checkpoints a saved prompt took 1.5 to 2 GB,
   for no speed with a GPU).
 
-What the server got (`ServerSetup`: the KV type, the window, the RAM cache, why) is kept for the address
-(`setup_of`, `server_cache`: `taslation.ocr.place` counts the translation model by it) and in the record below, and
-the log says it once (numbers only).
+What the server got (`ServerSetup`: the KV type, the window, the RAM cache, why, whether it was told not to use the
+cloud) is kept for the address (`setup_of`, `server_cache`: `taslation.ocr.place` counts the translation model by it)
+and in the record below, and the log says it once (numbers only). A record written before the record kept
+``no_cloud`` names a server an earlier TASlation started without the variable: it is used as ever (a server that
+answers is not started again for it), counts as one without it (`ServerSetup.from_record`, `taslation doctor`, the
+report), and the log says so once; the next server TASlation starts gets it.
+
+An Ollama the person runs is theirs, with their settings: TASlation gives it nothing, ``OLLAMA_NO_CLOUD`` neither.
 
 Only the address Ollama serves by default is started (`startable`): an Ollama set up elsewhere is the setup of whoever
 set it up, and starting one here would not answer there.
@@ -154,6 +166,12 @@ SMALL_GPU_MIB = 6144
 SWA_FULL_VAR = "LLAMA_ARG_SWA_FULL"
 SWA_FULL_ON = "1"
 TRUE_VALUES = ("1", "true", "on", "enabled")  # what llama.cpp's server takes as true for a flag's variable
+# Ollama's cloud features off ("Disable Ollama cloud features (remote inference and web search)", its own words for
+# the variable): every server TASlation starts gets it (`server_setup`), but one for a pull from Ollama's library
+NO_CLOUD_VAR = "OLLAMA_NO_CLOUD"
+NO_CLOUD_ON = "1"
+# what Ollama reads as false for a flag's variable (Go's strconv.ParseBool; empty is unset, any other value true)
+OLLAMA_FALSE_VALUES = ("0", "f", "false")
 WINDOW_CACHE_VALUES = ("auto", "off", "on")  # ``ollama_window_cache``
 # why the server's window cache is as it is (`ServerSetup.why`)
 WHY_SET, WHY_SETTING = "set", "setting"
@@ -226,29 +244,37 @@ def is_true(value: Any) -> bool:
     return str(value or "").strip().lower() in TRUE_VALUES
 
 
+def ollama_true(value: Any) -> bool:
+    """Whether *value* of a flag's variable is true as Ollama reads it: set, and not one of `OLLAMA_FALSE_VALUES`."""
+    text = str(value or "").strip().strip("\"'").lower()
+    return bool(text) and text not in OLLAMA_FALSE_VALUES
+
+
 @dataclass(frozen=True)
 class ServerSetup:
     """What the Ollama TASlation starts is given (`server_setup`): its KV cache type *kv_cache* (`KV_CACHE_DEFAULT`
     where it is set nowhere), whether its window cache is full-size (*full_window*), its RAM cache in MiB
-    (*cache_ram*), *why* the window cache is as it is (`WHY_SET`, `WHY_SETTING`), and the variables TASlation adds to
-    its own environment (*added*)."""
+    (*cache_ram*), *why* the window cache is as it is (`WHY_SET`, `WHY_SETTING`), the variables TASlation adds to
+    its own environment (*added*), and whether it was told not to use Ollama's cloud features (*no_cloud*: False for a
+    server started for a pull from Ollama's library, and in a record an earlier version wrote)."""
 
     kv_cache: str
     full_window: bool
     cache_ram: str
     why: str
     added: dict[str, str] = field(default_factory=dict, compare=False)
+    no_cloud: bool = True
 
     def to_record(self) -> dict[str, Any]:
         return {"kv_cache": self.kv_cache, "full_window": self.full_window, "cache_ram": self.cache_ram,
-                "why": self.why}
+                "why": self.why, "no_cloud": self.no_cloud}
 
     @classmethod
     def from_record(cls, data: Any) -> "ServerSetup | None":
         if not isinstance(data, dict) or not isinstance(data.get("full_window"), bool):
             return None
         return cls(str(data.get("kv_cache") or KV_CACHE_DEFAULT), data["full_window"], str(data.get("cache_ram") or ""),
-                   str(data.get("why") or ""))
+                   str(data.get("why") or ""), no_cloud=data.get("no_cloud") is True)
 
 
 def window_setting(settings: Any) -> str:
@@ -276,11 +302,16 @@ def _settings_or_saved(settings: Any) -> Any:
         return Settings()
 
 
-def server_setup(settings: Any = None) -> ServerSetup:
+def server_setup(settings: Any = None, library_pull: bool = False) -> ServerSetup:
     """What the Ollama TASlation starts for *settings* (the saved ones when None) is given, the module's docstring's
-    three variables: each one TASlation's environment lacks as this user or the computer has it set (TASlation was
-    started before it was), else as TASlation decides it. A value that is set anywhere is never changed."""
+    variables: ``OLLAMA_NO_CLOUD=1`` always, whatever TASlation's environment says - but for a server started for a
+    pull from Ollama's library (*library_pull*), which gets what TASlation's environment has, as before -; and each of
+    the other three TASlation's environment lacks as this user or the computer has it set (TASlation was started
+    before it was), else as TASlation decides it, a value of theirs that is set anywhere never changed."""
     added: dict[str, str] = {}
+    if not library_pull:
+        added[NO_CLOUD_VAR] = NO_CLOUD_ON
+    no_cloud = not library_pull or ollama_true(os.environ.get(NO_CLOUD_VAR))
     kv = os.environ.get(KV_CACHE_VAR)
     if kv is None:
         kv = stored_value(KV_CACHE_VAR) or (KV_CACHE_SMALL_GPU if small_gpu() else None)
@@ -306,14 +337,15 @@ def server_setup(settings: Any = None) -> ServerSetup:
             with_window = full and window_setting(_settings_or_saved(settings)) != "off"
             ram = CACHE_RAM_WITH_WINDOW if with_window else CACHE_RAM_OFF
         added[CACHE_RAM_VAR] = ram
-    return ServerSetup(kv, full, ram, why, added)
+    return ServerSetup(kv, full, ram, why, added, no_cloud=no_cloud)
 
 
-def server_env(settings: Any = None, setup: ServerSetup | None = None) -> dict[str, str] | None:
-    """The environment of the Ollama TASlation starts: TASlation's own (None: inherited) when it has the module's
-    docstring's three variables; else TASlation's with what *setup* adds (`server_setup` for *settings* when None)."""
-    added = (setup if setup is not None else server_setup(settings)).added
-    return {**os.environ, **added} if added else None
+def server_env(settings: Any = None, setup: ServerSetup | None = None, library_pull: bool = False) -> dict[str, str]:
+    """The environment of the Ollama TASlation starts: TASlation's own with what *setup* adds (`server_setup` for
+    *settings* and *library_pull* when None) - ``OLLAMA_NO_CLOUD=1`` among it always, but for a library pull's server.
+    Always a whole environment of its own, never the bare inherited one."""
+    added = (setup if setup is not None else server_setup(settings, library_pull)).added
+    return {**os.environ, **added}
 
 
 WHY_TEXT = {  # the log's and the tests' words for `ServerSetup.why`
@@ -325,8 +357,30 @@ WHY_TEXT = {  # the log's and the tests' words for `ServerSetup.why`
 def _say_setup(setup: ServerSetup) -> None:
     """The log's line on what the server TASlation started got (numbers and settings only)."""
     LOG.info("Ollama started by TASlation: the full-size window cache %s (%s), KV cache %s, prompt cache in RAM %s "
-             "MiB", "on" if setup.full_window else "off", WHY_TEXT.get(setup.why, setup.why), setup.kv_cache,
-             setup.cache_ram)
+             "MiB, %s", "on" if setup.full_window else "off", WHY_TEXT.get(setup.why, setup.why), setup.kv_cache,
+             setup.cache_ram, CLOUD_TEXT[setup.no_cloud])
+
+
+CLOUD_TEXT = {  # the log's words for `ServerSetup.no_cloud` of a server TASlation started
+    True: "Ollama's cloud features off (OLLAMA_NO_CLOUD=1)",
+    False: "Ollama's cloud features not turned off (no OLLAMA_NO_CLOUD)",
+}
+_told_cloud: set[tuple[Any, Any]] = set()  # the servers (pid, started) the log said have no OLLAMA_NO_CLOUD
+
+
+def _say_cloud(record: dict[str, Any], setup: ServerSetup | None) -> None:
+    """The log's line, once a server in this process, on a server TASlation started that is used without
+    OLLAMA_NO_CLOUD: one an earlier version started (its record has no ``no_cloud``, or no ``setup`` at all), or one
+    started for a pull from Ollama's library."""
+    if setup is not None and setup.no_cloud:
+        return
+    key = (record.get("pid"), record.get("started"))
+    if key in _told_cloud:
+        return
+    _told_cloud.add(key)
+    LOG.info("the Ollama server TASlation started runs without OLLAMA_NO_CLOUD (started by an earlier version, or for "
+             "a pull from Ollama's library): it may ask ollama.com by itself; the next server TASlation starts is told "
+             "not to")
 
 
 _setups: dict[str, ServerSetup] = {}  # address -> what the server TASlation started there got (this process, a record)
@@ -830,10 +884,12 @@ def _claim(path: Path, url: str, own: Iterable[str]) -> None:
 
 def _use(path: Path, record: dict[str, Any], url: str, own: Iterable[str]) -> None:
     """This process among the users of the recorded server (written when it was not), and its claim on it; what the
-    server got (``setup``) kept for its address (`setup_of`)."""
+    server got (``setup``) kept for its address (`setup_of`); the log's line when it has no OLLAMA_NO_CLOUD
+    (`_say_cloud`)."""
     setup = ServerSetup.from_record(record.get("setup"))
     if setup is not None:
         _keep_setup(url, setup)
+    _say_cloud(record, setup)
     me = this_process()
     if not any(_is(u, me) for u in record["users"]):
         record["users"] = [u for u in record["users"] if _alive(u)] + [me]
@@ -1124,9 +1180,10 @@ def own_models(settings: Any) -> tuple[str, ...]:
 
 # ------------------------------------------------------------------ starting
 def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[], None] | None,
-             path: Path | None, own: Iterable[str], settings: Any = None) -> Message | None:
-    """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* (or the server
-    TASlation started and recorded at *path* adopted) and waited for (see the module's docstring). TASlation's end
+             path: Path | None, own: Iterable[str], settings: Any = None, library_pull: bool = False) -> Message | None:
+    """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* and
+    *library_pull* (or the server TASlation started and recorded at *path* adopted) and waited for (see the module's
+    docstring). TASlation's end
     (`finish_all`) while this is under way: nothing launched after it, and what was adopted or launched meanwhile given
     up at once (a server left running by a window closed during its start, else)."""
     began = _ends
@@ -1141,7 +1198,7 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
         elif _ends != began:
             return Message("health.ollama_down", url=url)  # (TASlation ended meanwhile: nothing launched)
         else:
-            failed = _launch(url, on_starting, path, own, settings)
+            failed = _launch(url, on_starting, path, own, settings, library_pull=library_pull)
             if failed is not None:
                 return failed
     if _ends != began:  # (it ended while this was launched or adopted: given up as its end gives up the others)
@@ -1157,16 +1214,18 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
 
 
 def _launch(url: str, on_starting: Callable[[], None] | None, path: Path | None, own: Iterable[str],
-            settings: Any = None, users: Iterable[dict[str, Any]] = ()) -> Message | None:
-    """``ollama serve`` started for *url* with what `server_setup` gives it for *settings*, and recorded at *path* with
-    this process and *users* (the TASlation processes that used the server it replaces) as its users. Under the
-    record's lock. None when it was started; else what stands in the way."""
+            settings: Any = None, users: Iterable[dict[str, Any]] = (), library_pull: bool = False) -> Message | None:
+    """``ollama serve`` started for *url* with what `server_setup` gives it for *settings* and *library_pull*
+    (``OLLAMA_NO_CLOUD=1`` but for a library pull's server), and recorded at *path* with this process and *users* (the
+    TASlation processes that used the server it replaces) as its users. Under the record's lock. The one place a
+    server is launched (`OllamaStarter.start`, `OllamaStarter.restart`). None when it was started; else what stands in
+    the way."""
     command = find_ollama()
     if command is None:
         return Message("health.ollama_not_installed")
     if on_starting is not None:
         on_starting()
-    setup = server_setup(settings)
+    setup = server_setup(settings, library_pull)
     try:
         proc = launch(command, server_env(setup=setup))
     except OSError:
@@ -1203,15 +1262,18 @@ class OllamaStarter:
     TASlation's to stop at the end (`finish_all`); None records nothing (a server started then is never stopped).
     *own*: the names of models that count as TASlation's own at the end besides `MODELS` (`own_models`). *settings*:
     those a server started is given its window cache by (`server_setup`; the saved ones when None), read at each
-    start."""
+    start. *library_pull*: a server this starter starts is for a pull from Ollama's library and nothing else
+    (setup_models.py's ``ollama pull``), and is not told OLLAMA_NO_CLOUD (`server_setup`); never the window's or a
+    command's, whose server serves the whole session."""
 
     def __init__(self, url: str, on_starting: Callable[[], None] | None = None, state_dir: Path | str | None = None,
-                 own: Iterable[str] = (), settings: Any = None):
+                 own: Iterable[str] = (), settings: Any = None, library_pull: bool = False):
         self.url = url
         self.on_starting = on_starting
         self.record = record_path(state_dir)
         self.own = tuple(own)
         self.settings = settings
+        self.library_pull = library_pull
         self._last: float | None = None  # when the last try began
         self._lock = threading.Lock()
         self._restarted: float | None = None  # when the last restart began (`restart`)
@@ -1229,7 +1291,7 @@ class OllamaStarter:
             if self._last is not None and now - self._last < RETRY_GAP_S:
                 return Message("health.ollama_down", url=self.url)
             self._last = now
-        return _started(self.url, cancel, self.on_starting, self.record, self.own, self.settings)
+        return _started(self.url, cancel, self.on_starting, self.record, self.own, self.settings, self.library_pull)
 
     def _join(self) -> None:
         """The Ollama that answers, when it is the server TASlation started (recorded), used by this process too, so
@@ -1301,7 +1363,7 @@ class OllamaStarter:
                                 "request was cancelled before it was started again", stopped)
                     return False
                 users = [u for u in record["users"] if _alive(u)]
-                failed = _launch(self.url, None, path, self.own, self.settings, users)
+                failed = _launch(self.url, None, path, self.own, self.settings, users, self.library_pull)
             if failed is not None:
                 LOG.warning("no answer: the translation program TASlation started was stopped (%.1f s) and could not "
                             "be started again (%s)", stopped, failed.code)
@@ -1315,10 +1377,11 @@ class OllamaStarter:
 
 @contextlib.contextmanager
 def held(url: str, state_dir: Path | str | None, own: Iterable[str] = (),
-         settings: Any = None) -> Iterator[Message | None]:
-    """Ollama at *url* made to answer for a block (`OllamaStarter.start`, with *settings*), and what this process
-    started or used of it given up at the block's end (`finish_all`). What stands in the way, None when it answers."""
+         settings: Any = None, library_pull: bool = False) -> Iterator[Message | None]:
+    """Ollama at *url* made to answer for a block (`OllamaStarter.start`, with *settings* and *library_pull*), and what
+    this process started or used of it given up at the block's end (`finish_all`). What stands in the way, None when
+    it answers."""
     try:
-        yield OllamaStarter(url, state_dir=state_dir, own=own, settings=settings).start()
+        yield OllamaStarter(url, state_dir=state_dir, own=own, settings=settings, library_pull=library_pull).start()
     finally:
         finish_all()

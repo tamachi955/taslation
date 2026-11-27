@@ -428,6 +428,25 @@ def ollama_down_line(url: str, tried: bool = False) -> str:
 
 
 DOCTOR_STARTED = "  (it was not running: it was started for this check, and is stopped again when the check ends)"
+# doctor's line on the server's own settings (`server_settings_line`; no word "Ollama" in them: install.ps1's final
+# check shows a failed doctor's lines that have it)
+SERVER_NO_CLOUD = "  started by TASlation, told not to use the cloud features (OLLAMA_NO_CLOUD=1)"
+SERVER_WITH_CLOUD = ("  started by TASlation without OLLAMA_NO_CLOUD (by an earlier version, or for a pull): the next one "
+                     "TASlation starts is told not to use the cloud features")
+SERVER_THEIRS = ("  not started by TASlation: it runs with its own settings (TASlation tells only the server it starts not "
+                 "to use the cloud features)")
+
+
+def server_settings_line(settings: Settings) -> str:
+    """Doctor's line on the server that answers: one TASlation started (this check's, the window's, another
+    command's: the record says) and whether it was told not to use Ollama's cloud features, or one TASlation did not
+    start, whose settings are its own."""
+    from .ollama_start import setup_of
+
+    setup = setup_of(settings.ollama_url, settings.state_dir)
+    if setup is None:
+        return SERVER_THEIRS
+    return SERVER_NO_CLOUD if setup.no_cloud else SERVER_WITH_CLOUD
 
 
 def doctor_ollama(settings: Settings) -> bool:
@@ -679,6 +698,7 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             print(f"Ollama: reachable at {settings.ollama_url} (v{tr.version()}); {len(models)} model(s) installed")
             if tried:
                 print(DOCTOR_STARTED)
+            print(server_settings_line(settings))
             how = "run install.cmd again" if is_default_model(wanted) else pull_command(wanted)
             which = (f"for {settings.target_language} (ollama_model \"auto\")" if is_auto(settings.ollama_model)
                      else "configured")

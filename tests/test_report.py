@@ -198,6 +198,26 @@ def test_the_report_keeps_its_sections_and_keys(tmp_path):
     assert dict(sections)["page"].count("region") == 2
 
 
+def test_the_server_line_says_whether_ollama_s_cloud_features_are_off(tmp_path, monkeypatch):
+    """TASlation tells only the server it starts not to use Ollama's cloud features; a server it did not start runs
+    with its own settings (English, as every value of the report)."""
+    from taslation import ollama_start
+    from taslation.ollama_start import ServerSetup
+
+    app = _app(tmp_path)
+    asked: list[tuple] = []
+    for ours, setup, said in ((None, None, "not started by TASlation; its own settings; Ollama: not asked in the tests"),
+                              ((1, 2), ServerSetup("f16", True, "256", "setting"),
+                               "started by TASlation; cloud features off; Ollama: not asked in the tests"),
+                              ((1, 2), ServerSetup("f16", True, "256", "setting", no_cloud=False),
+                               "started by TASlation; cloud features not turned off; Ollama: not asked in the tests")):
+        monkeypatch.setattr(ollama_start, "own_server", lambda url, ours=ours: ours)
+        monkeypatch.setattr(ollama_start, "setup_of", lambda url, state=None, setup=setup: asked.append((url, state))
+                            or setup)
+        assert _values(report.report_text(app), "program")["server"] == said
+    assert asked[0] == (app.settings.ollama_url, app.settings.state_dir)
+
+
 def test_a_region_report_holds_why_its_lettering_is_not_shown(tmp_path):
     from taslation.ui import seethrough as ui
 

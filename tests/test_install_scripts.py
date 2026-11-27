@@ -2314,6 +2314,58 @@ def test_an_ollama_there_before_that_does_not_run_is_started_for_the_import_and_
     assert "with its app" not in out and "TASlation is installed." in out
 
 
+@needs_venv
+@pytest.mark.parametrize("answers, told", [({PLAMO_QUESTION: "y"}, "True"),
+                                           ({LANGUAGE_QUESTION: "10", "Download the translation model": "y"}, "False")],
+                         ids=["PLaMo's import", "Qwen's pull"])
+def test_the_server_started_for_plamo_s_import_is_told_not_to_use_ollama_s_cloud_and_one_for_a_pull_is_not(
+        tmp_path, answers, told):
+    """(Ollama's server asks ollama.com by itself unless OLLAMA_NO_CLOUD is set; a pull was never tried with it set)"""
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    log = tmp_path / "user-env.txt"
+    _override(co / "install.ps1", "$script:asks = 0",
+              "function Test-OllamaServer { $script:asks++; return ($script:asks -gt 1) }",
+              f"function Start-HiddenServe([string]$Exe, [switch]$NoCloud) {{ Add-Content -LiteralPath '{log}' "
+              "\"started serve, no cloud: $NoCloud\"; return [pscustomobject]@{ Id = 4242; HasExited = $false } }",
+              "$OllamaStartWaitS = 5")
+    _answering(co / "install.ps1", answers)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path)[:2] == [f"started serve, no cloud: {told}", "ended process 4242"]
+
+
+def _hidden_serve(tmp: Path, script: str, call: str, before: str | None) -> tuple[str, str]:
+    """The real Start-HiddenServe of *script* called as *call* (``$fake`` is a stand-in of ``ollama.exe``, a batch file
+    that writes down the OLLAMA_NO_CLOUD it got) in a PowerShell whose own OLLAMA_NO_CLOUD is *before*: what the
+    started program had, and what the PowerShell has afterwards."""
+    fake = tmp / "ollama.cmd"
+    seen = tmp / "seen.txt"
+    fake.write_text(f'@echo off\r\necho [%OLLAMA_NO_CLOUD%] %*> "{seen}"\r\n')
+    preset = "$env:OLLAMA_NO_CLOUD = $null; " if before is None else f"$env:OLLAMA_NO_CLOUD = '{before}'; "
+    command = (_functions("Start-HiddenServe", script=script) + "function Write-Detail { }; " + preset
+               + f"$fake = '{fake}'; $p = {call}; $null = $p.WaitForExit(20000); "
+               + "\"after=[$env:OLLAMA_NO_CLOUD]\"")
+    r = _ps(RUN_SHELL, command, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return seen.read_text().strip(), r.stdout.strip().splitlines()[-1]
+
+
+@pytest.mark.parametrize("call, before, got", [
+    ("Start-HiddenServe $fake -NoCloud", None, "[1] serve"),
+    ("Start-HiddenServe $fake -NoCloud", "0", "[1] serve"),
+    ("Start-HiddenServe $fake -NoCloud:$false", None, "[] serve"),
+    ("Start-HiddenServe $fake", "mine", "[mine] serve")])
+def test_install_s_hidden_server_gets_ollama_no_cloud_for_its_start_alone(tmp_path, call, before, got):
+    assert _hidden_serve(tmp_path, "install.ps1", call, before) == (got, f"after=[{before or ''}]")
+
+
+@pytest.mark.parametrize("before", [None, "0"])
+def test_uninstall_s_hidden_server_for_ollama_rm_gets_ollama_no_cloud_for_its_start_alone(tmp_path, before):
+    assert _hidden_serve(tmp_path, "uninstall.ps1", "Start-HiddenServe $fake", before) == (
+        "[1] serve", f"after=[{before or ''}]")
+
+
 def _ollama_there_starting_with_windows(co: Path, tmp: Path, ollama_server) -> tuple[dict, Path]:
     env = _whole_install(co, tmp)  # (the guard's variables: no setting is made)
     env["FAKE_OLLAMA_RUNNING"] = "1"

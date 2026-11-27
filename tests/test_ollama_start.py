@@ -165,6 +165,8 @@ def machine(nothing_starts_ollama, monkeypatch, tmp_path):
     monkeypatch.setenv("LLAMA_ARG_CACHE_RAM", "0")  # (the environment's own tests take them away)
     monkeypatch.setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
     monkeypatch.setenv("LLAMA_ARG_SWA_FULL", "0")
+    monkeypatch.delenv("OLLAMA_NO_CLOUD", raising=False)  # (the tests that want it set it)
+    monkeypatch.setattr(ollama_start, "_told_cloud", set())  # (the fakes' process numbers come again in every test)
     monkeypatch.setattr(ollama_start, "window_choice", m.choose)  # (the settings it is asked with are kept)
     monkeypatch.setattr(ollama_start, "START_WAIT_S", 0.05)
     monkeypatch.setattr(ollama_start, "POLL_S", 0.005)
@@ -247,22 +249,24 @@ def test_the_server_is_started_hidden_in_a_process_group_of_its_own_with_no_shel
     assert options["shell"] is False
     assert (options["stdin"], options["stdout"], options["stderr"]) == (subprocess.DEVNULL,) * 3
     assert options["cwd"] == str(home)  # not TASlation's folder, which an uninstall removes
-    assert "env" not in options  # the variables are TASlation's own: what the reader set for Ollama is inherited
+    # TASlation's own environment (what the reader set for Ollama comes with it), Ollama's cloud features off
+    assert options["env"] == {**os.environ, "OLLAMA_NO_CLOUD": "1"}
 
 
 # ------------------------------------------------------------------------------------------ the server's environment
 VARIABLES = ("LLAMA_ARG_CACHE_RAM", "OLLAMA_KV_CACHE_TYPE", "LLAMA_ARG_SWA_FULL")
 
 
-def _started_env(machine, tmp_path, monkeypatch, stored=None, small=False, settings=None, state=None):
-    """The environment the Ollama started gets (None: TASlation's own, inherited) when Windows keeps *stored* for the
-    user, on a GPU of 6 GB or less (*small*), for *settings*; and the variables looked up."""
+def _started_env(machine, tmp_path, monkeypatch, stored=None, small=False, settings=None, state=None,
+                 library_pull=False):
+    """The environment the Ollama started gets when Windows keeps *stored* for the user, on a GPU of 6 GB or less
+    (*small*), for *settings*, by a starter for *library_pull*; and the variables looked up."""
     _install(tmp_path)
     machine.after_start = 0
     asked: list[str] = []
     monkeypatch.setattr(ollama_start, "stored_value", lambda name: asked.append(name) or (stored or {}).get(name))
     monkeypatch.setattr(ollama_start, "small_gpu", lambda: small)
-    assert REAL_START(OllamaStarter(URL, state_dir=state, settings=settings)) is None
+    assert REAL_START(OllamaStarter(URL, state_dir=state, settings=settings, library_pull=library_pull)) is None
     return machine.started[0][1].get("env"), asked
 
 
@@ -281,7 +285,8 @@ def test_where_no_variable_is_set_the_server_gets_the_window_cache_256_mib_in_ra
     assert env["OLLAMA_KV_CACHE_TYPE"] == "q8_0" == ollama_start.KV_CACHE_SMALL_GPU
     assert env["LLAMA_ARG_SWA_FULL"] == "1" == ollama_start.SWA_FULL_ON
     assert env["LLAMA_ARG_CACHE_RAM"] == "256" == ollama_start.CACHE_RAM_WITH_WINDOW
-    assert {k: v for k, v in env.items() if k not in VARIABLES} == dict(os.environ)
+    assert env["OLLAMA_NO_CLOUD"] == "1"
+    assert {k: v for k, v in env.items() if k not in (*VARIABLES, "OLLAMA_NO_CLOUD")} == dict(os.environ)
 
 
 def test_without_the_window_cache_the_server_gets_no_ram_cache_either(machine, tmp_path, monkeypatch):
@@ -317,8 +322,9 @@ def test_a_value_in_taslation_s_own_environment_is_never_changed(machine, tmp_pa
     monkeypatch.setenv("LLAMA_ARG_CACHE_RAM", "4096")
     monkeypatch.setenv("OLLAMA_KV_CACHE_TYPE", "f16")
     monkeypatch.setenv("LLAMA_ARG_SWA_FULL", "0")
-    assert _started_env(machine, tmp_path, monkeypatch, {"LLAMA_ARG_CACHE_RAM": "1"}, small=True) == (None, [])
-    assert machine.chosen == []
+    env, asked = _started_env(machine, tmp_path, monkeypatch, {"LLAMA_ARG_CACHE_RAM": "1"}, small=True)
+    assert asked == [] and machine.chosen == []
+    assert env == {**os.environ, "OLLAMA_NO_CLOUD": "1"}  # (theirs as they are, and the cloud features off)
 
 
 @pytest.mark.parametrize("window, full, cache", [("1", True, "256"), ("0", False, "0"), ("off", False, "0"),
@@ -395,10 +401,10 @@ def test_the_decision_is_made_once_per_start_kept_in_the_record_and_logged_witho
         assert REAL_START(OllamaStarter(URL, state_dir=_state(tmp_path), settings=s)) is None  # (another joins it)
     assert len(machine.started) == 1 and machine.chosen == [s]
     assert _record(tmp_path)["setup"] == {"kv_cache": "q8_0", "full_window": True, "cache_ram": "256",
-                                          "why": ollama_start.WHY_SETTING}
+                                          "why": ollama_start.WHY_SETTING, "no_cloud": True}
     said = [r.getMessage() for r in caplog.records if "window cache" in r.getMessage()]
     assert said == ["Ollama started by TASlation: the full-size window cache on (as ollama_window_cache says), KV "
-                    "cache q8_0, prompt cache in RAM 256 MiB"]
+                    "cache q8_0, prompt cache in RAM 256 MiB, Ollama's cloud features off (OLLAMA_NO_CLOUD=1)"]
     # what the server got, for the readers' rule and the System page: this process's, and another's from the record
     assert ollama_start.server_cache(URL) == ("q8_0", True)
     with ollama_start._setups_lock:
@@ -446,6 +452,101 @@ def test_the_saved_settings_decide_where_the_caller_has_none(machine, tmp_path, 
     monkeypatch.setattr(Settings, "config_file", classmethod(lambda cls, path=None: saved))
     _started_env(machine, tmp_path, monkeypatch, small=True)
     assert machine.chosen and machine.chosen[0].ollama_window_cache == "off"
+
+
+# ---------------------------------------------------------------------------- Ollama's cloud features off
+@pytest.mark.parametrize("own", [None, "0", "false", "1", ""])
+def test_the_server_taslation_starts_is_told_not_to_use_ollama_s_cloud_whatever_its_own_environment_says(
+        machine, tmp_path, monkeypatch, own):
+    """(Ollama 0.40.18's server asked ollama.com by itself at every start, and every 4 hours or so, unless told so)"""
+    if own is not None:
+        monkeypatch.setenv("OLLAMA_NO_CLOUD", own)
+    env, _asked = _started_env(machine, tmp_path, monkeypatch, settings=Settings(state_dir=_state(tmp_path)),
+                               state=_state(tmp_path))
+    assert env["OLLAMA_NO_CLOUD"] == "1" == ollama_start.NO_CLOUD_ON
+    assert ollama_start.setup_of(URL).no_cloud is True and _record(tmp_path)["setup"]["no_cloud"] is True
+    for setting in ("auto", "off"):  # (never the bare inherited one)
+        built = ollama_start.server_env(Settings(state_dir=tmp_path, ollama_window_cache=setting))
+        assert isinstance(built, dict) and built["OLLAMA_NO_CLOUD"] == "1"
+    assert ollama_start.server_setup(Settings(state_dir=tmp_path)).added["OLLAMA_NO_CLOUD"] == "1"
+
+
+@pytest.mark.parametrize("own, told", [(None, False), ("1", True), ("0", False), ("yes", True)])
+def test_a_server_for_a_pull_from_ollama_s_library_alone_is_left_as_taslation_s_environment_has_it(
+        machine, tmp_path, monkeypatch, caplog, own, told):
+    """setup_models.py's ``ollama pull`` by hand: a pull was never tried with OLLAMA_NO_CLOUD set, so its server gets
+    TASlation's own environment's value (none, usually), as before; the record and the log say so."""
+    if own is not None:
+        monkeypatch.setenv("OLLAMA_NO_CLOUD", own)
+    with caplog.at_level(logging.INFO, logger="taslation.ollama_start"):
+        env, _asked = _started_env(machine, tmp_path, monkeypatch, settings=Settings(state_dir=_state(tmp_path)),
+                                   state=_state(tmp_path), library_pull=True)
+    assert env.get("OLLAMA_NO_CLOUD") == own and env == {**os.environ}
+    assert ollama_start.setup_of(URL).no_cloud is told and _record(tmp_path)["setup"]["no_cloud"] is told
+    assert ("runs without OLLAMA_NO_CLOUD" in caplog.text) is not told
+    assert ollama_start.server_env(Settings(state_dir=tmp_path), library_pull=True).get("OLLAMA_NO_CLOUD") == own
+
+
+def test_a_record_an_earlier_version_wrote_counts_as_a_server_without_it_and_the_log_says_so_once(
+        machine, tmp_path, caplog):
+    """(the starter keeps no ``no_cloud`` in records it wrote before; the server is used as ever, not started again)"""
+    _install(tmp_path)
+    server = machine.spawn(str(tmp_path / "Programs" / "Ollama" / "ollama.exe"))
+    older = {"kv_cache": "q8_0", "full_window": True, "cache_ram": "256", "why": "setting"}
+    _write_record(tmp_path, pid=server, exe=machine.procs[server].exe, started=machine.procs[server].started,
+                  setup=older, users=[{"pid": 99, "started": 5}])
+    assert ollama_start.ServerSetup.from_record(older).no_cloud is False
+    assert ollama_start.ServerSetup.from_record({**older, "no_cloud": True}).no_cloud is True
+    machine.answers = True
+    with caplog.at_level(logging.INFO, logger="taslation.ollama_start"):
+        assert start_ollama(URL, state=_state(tmp_path)) is None  # (adopted: the TASlation that started it is gone)
+        assert OllamaStarter(URL, state_dir=_state(tmp_path)).start() is None  # (joined again)
+    assert machine.started == [] and owns_server()
+    assert caplog.text.count("runs without OLLAMA_NO_CLOUD") == 1
+    assert ollama_start.setup_of(URL, _state(tmp_path)).no_cloud is False
+    assert finish_all() == [STOPPED]
+    # the next server TASlation starts gets it
+    machine.answers, machine.after_start = False, 0
+    assert start_ollama(URL, state=_state(tmp_path)) is None and len(machine.started) == 1
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1" and _record(tmp_path)["setup"]["no_cloud"] is True
+
+
+def test_the_restart_after_no_answer_gives_the_new_server_the_variable_too(machine, tmp_path):
+    """(a server an earlier version started, recorded without ``no_cloud``, comes back with it)"""
+    _install(tmp_path)
+    server = machine.spawn(str(tmp_path / "Programs" / "Ollama" / "ollama.exe"))
+    _write_record(tmp_path, pid=server, exe=machine.procs[server].exe, started=machine.procs[server].started,
+                  setup={"kv_cache": "f16", "full_window": True, "cache_ram": "256", "why": "setting"})
+    machine.loaded = None  # (hung: /api/ps is silent too)
+    machine.after_start = 0
+    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart() is True
+    assert machine.asked == [server] and len(machine.started) == 1
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1" and _record(tmp_path)["setup"]["no_cloud"] is True
+    assert finish_all() == [STOPPED]
+
+
+@pytest.mark.parametrize("pull", [False, True])
+def test_held_passes_on_whether_its_server_is_for_a_library_pull(machine, tmp_path, pull):
+    _install(tmp_path)
+    machine.after_start = 0
+    with ollama_start.held(URL, _state(tmp_path), library_pull=pull) as failed:
+        assert failed is None and len(machine.started) == 1
+        assert ("OLLAMA_NO_CLOUD" in machine.started[0][1]["env"]) is not pull
+    assert machine.asked == machine.pids and not owns_server()
+
+
+def test_the_only_launch_is_the_starter_s_own_and_it_always_passes_an_environment():
+    """`_launch` is the one place ``ollama serve`` is started (the start and the restart), with `server_env`'s whole
+    environment: no other call of `launch` or `server_env` in the program could give a server the bare inherited one."""
+    import re
+
+    package = ROOT / "taslation"
+    calls = {path.relative_to(ROOT).as_posix(): len(re.findall(r"(?<!def )\blaunch\(command", path.read_text("utf-8")))
+             for path in package.rglob("*.py")}
+    assert {name: n for name, n in calls.items() if n} == {"taslation/ollama_start.py": 1}
+    source = (package / "ollama_start.py").read_text("utf-8")
+    assert "launch(command, server_env(setup=setup))" in source
+    assert source.count("_launch(") == 3  # (its definition, the start's and the restart's)
 
 
 @pytest.mark.parametrize("mib, small", [(6144, True), (4096, True), (6145, False), (8192, False), (0, False)])
@@ -569,7 +670,8 @@ def test_the_server_taslation_starts_is_written_down_with_who_uses_it(machine, t
     pid = _started_one(machine, tmp_path)
     record = _record(tmp_path)
     assert set(record) == {"what", "pid", "exe", "started", "url", "setup", "users"}  # no text of a book
-    assert record["setup"] == {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "set"}
+    assert record["setup"] == {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "set",
+                               "no_cloud": True}
     assert (record["pid"], record["started"], record["url"]) == (pid, machine.procs[pid].started, URL)
     assert record["exe"] == str(tmp_path / "Programs" / "Ollama" / "ollama.exe")
     assert record["users"] == [{"pid": ME, "started": 1}] and owns_server()
@@ -835,6 +937,7 @@ def test_the_window_starts_ollama_before_the_setup_check_and_owns_it(machine, st
     assert worker(start.order)[0] == "health"  # and from here on as if it had been running
     assert ("warm-up", "qwen3.5:4b") in start.order
     assert owns_server() and _record(tmp_path)["users"] == [{"pid": ME, "started": 1}]
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1"  # (the session's server: Ollama's cloud off)
 
 
 def test_the_window_s_close_counts_its_model_as_taslation_s(machine, tmp_path):
@@ -906,6 +1009,7 @@ def test_the_banner_s_start_again_owns_what_it_starts(machine, tmp_path):
         if thread.name == "taslation-start-ollama":
             thread.join(5)
     assert posted == [("translator_restarted", {"message": None})] and owns_server()
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1"
 
 
 def test_a_failed_start_is_said_in_the_status_line_and_no_box_comes_up(monkeypatch):
@@ -940,6 +1044,7 @@ def test_the_window_starts_its_server_again_for_a_request_without_an_answer(mach
     told: list[str] = []
     assert jobs.JobsMixin._restart_ollama(w, None, lambda: told.append("x")) is True and len(machine.started) == 2
     assert checked == [] and told == ["x"]
+    assert [options["env"]["OLLAMA_NO_CLOUD"] for _command, options in machine.started] == ["1", "1"]
     assert jobs.JobsMixin._restart_ollama(w) is False and checked == ["checked"]  # (within ten minutes)
     assert jobs.JobsMixin._restart_ollama(SimpleNamespace(_ollama=None)) is None
 
@@ -1055,6 +1160,7 @@ def test_a_command_that_translates_starts_ollama(machine, engine, tmp_path, caps
     machine.after_start = 0
     pipeline = cli.build_pipeline(Settings(state_dir=_state(tmp_path)), "ollama", None, warm_first=warm_first)
     assert len(machine.started) == 1 and pipeline.translator.revive is not None
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1"
     assert pipeline.translator.restart is not None  # (a request without an answer: the server started again)
     assert "note: Starting the translation program..." in capsys.readouterr().err
 
@@ -1099,9 +1205,11 @@ def test_a_command_with_no_use_for_ollama_leaves_it_alone(machine, engine, tmp_p
     assert machine.started == [] and machine.looks == 0
 
 
-def test_a_language_s_model_install_starts_the_server_first(machine, tmp_path, monkeypatch):
+@pytest.mark.parametrize("language", ["French", "Turkish"])  # (PLaMo's import, Qwen's pull)
+def test_a_language_s_model_install_starts_the_server_first(machine, tmp_path, monkeypatch, language):
     """An ``ollama`` command that finds no server starts Ollama's tray app (and with it Ollama's start with Windows):
-    the install of a translator model starts the server first, as TASlation starts it."""
+    the install of a translator model starts the server first, as TASlation starts it. That server is the window's
+    (or the command's) for the rest of its session, Ollama's cloud features off for Qwen's pull too."""
     _install(tmp_path)
     machine.after_start = 0
     script = tmp_path / "setup_models.py"
@@ -1115,19 +1223,43 @@ def test_a_language_s_model_install_starts_the_server_first(machine, tmp_path, m
 
     monkeypatch.setattr(ti, "find_ollama", next_step)
     with pytest.raises(Next):
-        ti.Installer("French", tmp_path / "models", _state(tmp_path), URL, script=script).run()
+        ti.Installer(language, tmp_path / "models", _state(tmp_path), URL, script=script).run()
     assert len(machine.started) == 1 and owns_server()
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1"
 
 
-def test_setup_models_starts_the_server_first_and_stops_it_at_its_end(machine, tmp_path, monkeypatch):
+def _setup_models():
     spec = importlib.util.spec_from_file_location("setup_models_ollama_start", ROOT / "setup_models.py")
     setup_models = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(setup_models)
+    return setup_models
+
+
+@pytest.mark.parametrize("language, told", [("French", True), ("Turkish", False)])  # (PLaMo's import, Qwen's pull)
+def test_setup_models_starts_the_server_first_and_stops_it_at_its_end(machine, tmp_path, monkeypatch, language, told):
+    """Run by hand with no server running: its own, told not to use Ollama's cloud features for PLaMo's import, and
+    left without the variable for a pull from Ollama's library (a pull was never tried with it set)."""
+    setup_models = _setup_models()
     _install(tmp_path)
     machine.after_start = 0
     monkeypatch.setattr(setup_models.tinstall, "find_ollama", lambda: None)  # (then it says so and ends)
-    assert setup_models.install_translator("French", tmp_path / "models", _state(tmp_path), URL) == 1
+    assert setup_models.install_translator(language, tmp_path / "models", _state(tmp_path), URL) == 1
     assert len(machine.started) == 1 and machine.asked == machine.pids and not owns_server()
+    assert (machine.started[0][1]["env"].get("OLLAMA_NO_CLOUD") == "1") is told
+
+
+def test_setup_models_pull_by_name_starts_a_server_for_the_pull_alone(machine, tmp_path, monkeypatch):
+    setup_models = _setup_models()
+    _install(tmp_path)
+    machine.after_start = 0
+    pulled: list[list[str]] = []
+    monkeypatch.setattr(setup_models, "_settings_for_translator", lambda: (_state(tmp_path), URL, "English"))
+    monkeypatch.setattr(setup_models.shutil, "which", lambda name: "C:/fake/ollama.exe" if name == "ollama" else None)
+    monkeypatch.setattr(setup_models.subprocess, "run", lambda command, **_k: pulled.append(command))
+    setup_models.pull_ollama("someone/theirs:4b")
+    assert pulled == [["C:/fake/ollama.exe", "pull", "someone/theirs:4b"]]
+    assert len(machine.started) == 1 and "OLLAMA_NO_CLOUD" not in machine.started[0][1]["env"]
+    assert machine.asked == machine.pids and not owns_server()
 
 
 @pytest.fixture
@@ -1154,6 +1286,8 @@ def test_doctor_starts_ollama_for_its_check_and_stops_it_again(machine, doctor, 
     assert f"Ollama: reachable at {URL}" in out and cli.DOCTOR_STARTED in out
     assert out.index(STOPPED) < out.index("Result:") and out.rstrip().splitlines()[-1].startswith("Result:")
     assert len(machine.started) == 1 and machine.asked == machine.pids and not owns_server()
+    assert machine.started[0][1]["env"]["OLLAMA_NO_CLOUD"] == "1"
+    assert cli.SERVER_NO_CLOUD in out.splitlines() and cli.SERVER_THEIRS not in out
 
 
 def test_doctor_leaves_a_running_ollama_alone(machine, doctor, tmp_path, capsys):
@@ -1163,6 +1297,26 @@ def test_doctor_leaves_a_running_ollama_alone(machine, doctor, tmp_path, capsys)
     out = doctor(Settings(state_dir=_state(tmp_path)))
     assert f"Ollama: reachable at {URL}" in out and cli.DOCTOR_STARTED not in out and STOPPED not in out
     assert machine.started == [] and machine.asked == []
+    # the person's own: theirs, with its own settings
+    assert cli.SERVER_THEIRS in out.splitlines() and cli.SERVER_NO_CLOUD not in out
+
+
+def test_doctor_says_which_server_has_ollama_s_cloud_off(machine, doctor, tmp_path, capsys):
+    """The window's server (the record names it), and one an earlier version started (its record has no ``no_cloud``)."""
+    doctor.capsys = capsys
+    _install(tmp_path)
+    server = machine.spawn(str(tmp_path / "Programs" / "Ollama" / "ollama.exe"))
+    window = machine.spawn(sys.executable)  # (the window that uses it, still running)
+    setup = {"kv_cache": "f16", "full_window": True, "cache_ram": "256", "why": "setting"}
+    machine.answers = True
+    for recorded, line in (({**setup, "no_cloud": True}, cli.SERVER_NO_CLOUD), (setup, cli.SERVER_WITH_CLOUD)):
+        _write_record(tmp_path, pid=server, exe=machine.procs[server].exe, started=machine.procs[server].started,
+                      setup=recorded, users=[{"pid": window, "started": machine.procs[window].started}])
+        out = doctor(Settings(state_dir=_state(tmp_path)))
+        assert line in out.splitlines() and machine.started == [] and server in machine.procs
+    # (install.ps1's final check shows a failed doctor's lines that name Ollama: these never do)
+    for line in (cli.SERVER_NO_CLOUD, cli.SERVER_WITH_CLOUD, cli.SERVER_THEIRS):
+        assert "Ollama" not in line and line.startswith("  ")
 
 
 def test_doctor_says_what_to_do_when_ollama_is_not_there_or_does_not_start(machine, doctor, tmp_path, capsys):

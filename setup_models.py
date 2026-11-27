@@ -440,7 +440,9 @@ def pull_ollama(model: str) -> None:
         sys.exit("ollama was not found on PATH. Install it from https://ollama.com and run: ollama pull " + model)
     print(f"Running: ollama pull {model}")
     state_dir, url, _language = _settings_for_translator()
-    with ollama_start.held(url or Settings.ollama_url, state_dir):  # (as `install_translator`)
+    # (as `install_translator`; a server started here is for the pull alone: `ollama_start.OllamaStarter`'s
+    # *library_pull*, no OLLAMA_NO_CLOUD, as a pull was never tried with it set)
+    with ollama_start.held(url or Settings.ollama_url, state_dir, library_pull=True):
         subprocess.run([exe, "pull", model], check=False)
 
 
@@ -581,8 +583,12 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
     code: 0 ready, 1 failed, CANCELLED, NO_ROOM, REFUSED (the server refused the file or no longer has it: running
     this again does not help, `refused_text`). Ollama's server is started first when it does not answer, as TASlation
     starts it (an ``ollama`` command that finds none would start Ollama's tray app, and with it Ollama's start with
-    Windows), and stopped again at the end (`taslation.ollama_start.held`)."""
-    with ollama_start.held(url or Settings.ollama_url, state_dir):
+    Windows), and stopped again at the end (`taslation.ollama_start.held`): told not to use Ollama's cloud features
+    (OLLAMA_NO_CLOUD=1) for PLaMo's import, which asks Ollama's library for nothing, and left without it for Qwen's
+    ``ollama pull`` (*library_pull*: a pull was never tried with it set). A server that answers already - the window's,
+    install.ps1's, the person's - is used as it is."""
+    pull = model_for_language(language).ollama_name != PLAMO.ollama_name
+    with ollama_start.held(url or Settings.ollama_url, state_dir, library_pull=pull):
         return _install_translator(language, models_dir, state_dir, url, ollama_exe, agreed, cancel, keep_partial)
 
 

@@ -362,7 +362,8 @@ jobs:
           # Ollama with the installed program's own starter, loads the translation model in it and holds the server
           # while this step reads the environment of its processes, llama.cpp's server among them (it runs the model,
           # and reads the variables); then it lets the product stop the server, as a command does at its end. This
-          # step's own environment has neither variable: nothing here passes them on.
+          # step's own environment has neither variable: nothing here passes them on. The server is also told not to
+          # use Ollama's cloud features (OLLAMA_NO_CLOUD=1, ollama_start.server_setup), which this step reads too.
           Add-LifetimeCheck $step 'no process of Ollama runs before' (@(Get-OllamaProcesses).Count -eq 0)
           # Ollama's processes: those of its program folder and every process they started, each with its kind (the
           # app in the tray, the server `ollama serve`, or one that runs a model: llama.cpp's server, wherever it is)
@@ -385,14 +386,18 @@ jobs:
                   elseif ($p.Name -ieq 'ollama.exe' -and "$($p.CommandLine)" -match '\sserve(\s|$)') { $kind = 'server' }
                   $value = $null
                   $window = $null
+                  $cloud = $null
                   try { $value = Get-ProcessVariable $p.ProcessId 'LLAMA_ARG_CACHE_RAM' } catch { $value = $null }
                   try { $window = Get-ProcessVariable $p.ProcessId 'LLAMA_ARG_SWA_FULL' } catch { $window = $null }
+                  try { $cloud = Get-ProcessVariable $p.ProcessId 'OLLAMA_NO_CLOUD' } catch { $cloud = $null }
                   $shown = 'unreadable'
                   if ($null -ne $value) { $shown = $(if ($value) { $value } else { 'not set' }) }
                   $shownWindow = 'unreadable'
                   if ($null -ne $window) { $shownWindow = $(if ($window) { $window } else { 'not set' }) }
-                  Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}, LLAMA_ARG_SWA_FULL {5}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown, $shownWindow)
-                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Id = $p.ProcessId; Value = $value; Window = $window }
+                  $shownCloud = 'unreadable'
+                  if ($null -ne $cloud) { $shownCloud = $(if ($cloud) { $cloud } else { 'not set' }) }
+                  Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}, LLAMA_ARG_SWA_FULL {5}, OLLAMA_NO_CLOUD {6}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown, $shownWindow, $shownCloud)
+                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Id = $p.ProcessId; Value = $value; Window = $window; Cloud = $cloud }
               }
           }
           $state = Join-Path $CheckDir 'hold-ollama.json'
@@ -433,6 +438,13 @@ jobs:
               Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" $null 'its environment could not be read here'
           } else {
               Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" (@($read | Where-Object { $_.Value -ne '256' -or $_.Window -ne '1' }).Count -eq 0) (($read | ForEach-Object { "$(if ($_.Value) { $_.Value } else { 'not set' }) / $(if ($_.Window) { $_.Window } else { 'not set' })" }) -join ', ')
+          }
+          # its cloud features off: without OLLAMA_NO_CLOUD Ollama's server asks ollama.com by itself
+          $read = @($servers | Where-Object { $null -ne $_.Cloud })
+          if ($read.Count -eq 0) {
+              Add-Check $step "Ollama's server runs with OLLAMA_NO_CLOUD=1 (its cloud features off)" $null 'its environment could not be read here'
+          } else {
+              Add-Check $step "Ollama's server runs with OLLAMA_NO_CLOUD=1 (its cloud features off)" (@($read | Where-Object { $_.Cloud -ne '1' }).Count -eq 0) (($read | ForEach-Object { $(if ($_.Cloud) { $_.Cloud } else { 'not set' }) }) -join ', ')
           }
           $read = @($processes | Where-Object { $_.Kind -eq 'model' -and $null -ne $_.Value -and $null -ne $_.Window })
           if ($read.Count -eq 0) {

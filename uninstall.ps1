@@ -262,11 +262,19 @@ function Wait-OllamaServer {
 }
 
 # `ollama serve` itself in a hidden window (never Ollama's app, which would stay in the tray, and whose first start
-# would make Ollama start with Windows); the process, $null when it did not start.
+# would make Ollama start with Windows); the process, $null when it did not start. It serves `ollama rm` alone, and is
+# told not to use Ollama's cloud features (OLLAMA_NO_CLOUD=1, in this process's environment for the start alone,
+# which the server inherits): without it, Ollama's server asks ollama.com by itself at its start.
 function Start-HiddenServe([string]$Exe) {
+    $before = $env:OLLAMA_NO_CLOUD
     try {
+        $env:OLLAMA_NO_CLOUD = '1'
         return (Start-Process -FilePath $Exe -ArgumentList 'serve' -WindowStyle Hidden -PassThru)
-    } catch { return $null }
+    } catch {
+        return $null
+    } finally {
+        $env:OLLAMA_NO_CLOUD = $before
+    }
 }
 
 # A process this run started ended with the processes it started (taskkill /T, as Ollama's own uninstaller ends

@@ -117,6 +117,9 @@ def test_the_steps_run_in_an_order_that_shows_what_the_install_left_running():
     assert "hold-ollama.py" in held and "Get-ProcessVariable" in held
     # (a runner has no NVIDIA GPU: "auto" gives the server the full window cache, and the 256 MiB beside it)
     assert "'LLAMA_ARG_SWA_FULL'" in held and "$_.Value -ne '256' -or $_.Window -ne '1'" in held
+    # (and told not to use Ollama's cloud features: it asks ollama.com by itself otherwise)
+    assert "'OLLAMA_NO_CLOUD'" in held and "$_.Cloud -ne '1'" in held
+    assert "\"Ollama's server runs with OLLAMA_NO_CLOUD=1 (its cloud features off)\"" in held
     assert "'no process of Ollama is left running'" in held
     translation = _step("Translate a synthetic test page")[1]["run"]
     assert ("'no process of Ollama runs before the translation'" in translation
