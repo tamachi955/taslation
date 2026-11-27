@@ -62,6 +62,7 @@ import re
 import threading
 import time
 import unicodedata
+import weakref
 from collections import Counter, deque
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, fields, replace
@@ -111,7 +112,7 @@ from .detect import (
 from .ocr.charspot import (CharspotReading, OcrEngine, charspot_accepts, looks_japanese, read_crop, size_sample,
                            usual_size)
 from .regions import ERASED, apply_order_hints, region_meta, Box, PageResult, TextRegion, box_iou
-from .render import artwork
+from .render import artwork, pagescale
 from .render import (FontSpec, Lettering, balance_marks, erase_region, find_font, layout_text, make_lettering,
                      resolve_font, text_room)
 from .annotations import LetteringStyle, RegionStyle, ink_of
@@ -1930,6 +1931,24 @@ class Pipeline:
         (`order_on_page`)."""
         return self.annotations.rtl if self.annotations is not None else True
 
+    def page_scale(self, rgb: np.ndarray) -> float:
+        """The scale of the page(s) the capture *rgb* shows, at which the erase takes its measures in px
+        (`pagescale.page_scale`): the height of the paper on a viewer with a dark background (`fp.paper_box`), else
+        of the capture area - a page shown whole is about as high, a spread's pages too. (Not a page unit's: a unit is
+        cropped to the ink.) The last capture's is kept for the next ask (a page's reading asks it more than once; the
+        paper is looked for in some 18 ms on a large capture)."""
+        margins = tuple(self.settings.margins)
+        seen = _SCALE_SEEN[0]
+        if seen is not None and seen[0]() is rgb and seen[1] == margins:
+            return seen[2]
+        box = fp.paper_box(rgb, margins) or fp.capture_area(rgb.shape[1], rgb.shape[0], margins)
+        scale = pagescale.page_scale(box[3] - box[1])
+        try:
+            _SCALE_SEEN[0] = (weakref.ref(rgb), margins, scale)
+        except TypeError:  # (no weak reference to it)
+            pass
+        return scale
+
     def units_of(self, rgb: np.ndarray) -> list[fp.PageUnit]:
         """The page units of the capture *rgb* in the capture area (`fingerprint.analyze`), a spread's two pages in
         the book's reading direction: the boxes and the fingerprints are the same either way; a book read right to
@@ -2177,6 +2196,7 @@ class Pipeline:
         # (and can be shown) before the first of them is read
         owners = self._owners(rgb, regions, units)
         before = _units_before(rgb, s.margins)
+        scale = self.page_scale(rgb)
 
         def completes(page: CachedPage) -> bool:
             """This reading adds what the cached *page* lacks: in translator mode, and a page marked as lacking it."""
@@ -2189,7 +2209,7 @@ class Pipeline:
             if unit.index in reused:  # read behind the reader: its regions as read, held to the cache as it is now
                 unit_regions = reused[unit.index]
                 for r in unit_regions:
-                    r.unit = unit.index
+                    _place(r, unit, scale)
                 self._take_corrections(unit, unit_regions)  # (a misreading corrected since it was read)
                 cached = self._lookup(unit, before) if self.cache is not None else None
                 if cached is not None:
@@ -2206,7 +2226,7 @@ class Pipeline:
             unit_regions = [r for r in regions if owners[id(r)] is unit]
             unit_regions = apply_order_hints(order_on_page(rgb, unit.box, unit_regions, self.rtl))
             for r in unit_regions:
-                r.unit = unit.index
+                _place(r, unit, scale)
             cached = self._lookup(unit, before) if use_cache and self.cache is not None else None
             if cached is not None:
                 page, distance = cached
@@ -2944,6 +2964,7 @@ class Pipeline:
             return regions
         s = self.settings
         h, w = rgb.shape[:2]
+        scale = self.page_scale(rgb)
         capture = self._capture(rgb)
         out = list(regions)
         if self.annotations.areas:
@@ -2969,7 +2990,7 @@ class Pipeline:
                     continue
                 out = [r for r in out if box_iou(r.bbox, box) < 0.3 and not _inside(box, _center(r.text_box))]
                 region = manual_region(rgb, box, s.dark_threshold)
-                region.unit = unit.index
+                _place(region, unit, scale)
                 out.append(region)
             if not page.notes and not page.order:
                 continue
@@ -3629,7 +3650,7 @@ class Pipeline:
         region.from_model, region.tier, region.joined = False, 0, False
         region.pieces = region.edge_pieces = 0
         region.glyph = 0.0
-        region.unit = unit.index
+        _place(region, unit, self.page_scale(rgb))
         region.angle, region.tilt, region.char_quads = 0.0, None, []
         self._measure_slants(rgb, [region])  # (its lettering's slant in its new box)
         grew = box[0] < old_box[0] or box[1] < old_box[1] or box[2] > old_box[2] or box[3] > old_box[3]
@@ -5035,6 +5056,7 @@ class Pipeline:
         mostly inside one of *areas* (ignored on every page: `_areas_of`) is not drawn, its translation kept."""
         s = self.settings
         height, width = rgb.shape[:2]
+        scale = self.page_scale(rgb)
         used: set[int] = set()
         regions: list[TextRegion] = []
         scores = bubble_scores([[unit.normalize(r.bbox)] for r in live], [cb.box for cb in page.bubbles], s.match_min_iou)
@@ -5078,7 +5100,7 @@ class Pipeline:
             r.translated_text = cb.text
             r.status = "translated"
             r.from_cache = True
-            r.unit = unit.index
+            _place(r, unit, scale)
             r.flags = list(cb.flags)
             r.reader_note = cb.note
             r.reused_text = cb.text if cb.reused else ""
@@ -5129,7 +5151,7 @@ class Pipeline:
         q = copy.copy(region)
         q.kind = "text-dark" if dark else "text"  # lettering on the page: its strokes and the ground right round them
         mask = np.zeros((region.height, region.width), np.uint8)
-        grow = max(2, int(CHAR_GROW * (region.glyph or 20.0)))
+        grow = max(2, int(CHAR_GROW * (region.glyph or 20.0 * pagescale.of(region))))
         if region.char_quads:  # slanted lettering: each character's own box as it is turned on the page, grown
             for quad in region.char_quads:
                 pts = np.array(quad, np.float64) - (region.x0, region.y0)
@@ -5166,7 +5188,9 @@ class Pipeline:
         tb = region.text_box
         tx0, ty0, tx1, ty1 = tb[0] - region.x0, tb[1] - region.y0, tb[2] - region.x0, tb[3] - region.y0
         h, w = gray.shape
-        longest = GLYPH_REACH_ERASE * (region.glyph or 20.0)
+        scale = pagescale.of(region)  # (the measures in px at the page's scale)
+        edge = pagescale.px(EDGE_KEEP, scale)
+        longest = GLYPH_REACH_ERASE * (region.glyph or 20.0 * scale)
         # a thin line's anti-aliasing breaks it at the dark threshold, not a little above it: a piece of a longer line
         # there is a stretch of the outline (or of the drawing), however short
         linked = (gray > 255 - dark_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
@@ -5177,8 +5201,8 @@ class Pipeline:
         out = np.zeros(gray.shape, bool)
         for i in range(1, n):
             x, y, bw, bh, area = (int(v) for v in stats[i])
-            if (area < 8 or max(bw, bh) > longest or x < EDGE_KEEP or y < EDGE_KEEP or x + bw > w - EDGE_KEEP
-                    or y + bh > h - EDGE_KEEP or x + bw <= tx0 or x >= tx1 or y + bh <= ty0 or y >= ty1):
+            if (area < 8 or max(bw, bh) > longest or x < edge or y < edge or x + bw > w - edge
+                    or y + bh > h - edge or x + bw <= tx0 or x >= tx1 or y + bh <= ty0 or y >= ty1):
                 continue
             piece = labels == i
             if line[joined[piece]].any():
@@ -5474,7 +5498,7 @@ class Pipeline:
         return region_digest(page.shape, s.erase_mode, s.white_threshold, s.dark_threshold,
                              eraser.setting if eraser is not None and not eraser.failed else "",
                              region.bbox, region.text_box, region.letter_box, region.kind, region.tier,
-                             region.from_model, region.glyph, list(region.char_boxes), is_dark(region),
+                             region.from_model, region.glyph, region.scale, list(region.char_boxes), is_dark(region),
                              np.asarray(region.mask), crop,
                              *(("slant", region.angle, region.char_quads) if region.char_quads else ()))
 
@@ -5564,6 +5588,7 @@ def manual_region(rgb: np.ndarray, box: Box, dark_threshold: int = 140) -> TextR
 
 
 _POOL: list[ThreadPoolExecutor] = []
+_SCALE_SEEN: list[Any] = [None]  # (a weak reference to the last capture, its margins, its scale): `page_scale`
 _ON_SHOW = threading.local()  # the capture `process` detects on this thread now, and its units
 _POOL_LOCK = threading.Lock()
 
@@ -5574,6 +5599,13 @@ def _detect_pool() -> ThreadPoolExecutor:
         if not _POOL:
             _POOL.append(ThreadPoolExecutor(max_workers=2, thread_name_prefix="taslation-detect"))
         return _POOL[0]
+
+
+def _place(region: TextRegion, unit: Any, scale: float) -> None:
+    """*region* placed on the page unit *unit* (`fp.PageUnit`, `ScannedUnit`): its index, and *scale*, the scale of
+    its page (`Pipeline.page_scale`) at which the erase takes its measures in px."""
+    region.unit = unit.index
+    region.scale = scale
 
 
 def _measure_key(region: TextRegion, held: list[Any]) -> tuple[Any, ...]:

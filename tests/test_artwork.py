@@ -790,3 +790,63 @@ def test_a_model_region_shaped_by_a_classical_one_on_the_art_still_goes_to_the_m
     eraser._model = FakeModel()
     eraser.erase(page, r)
     assert not calls and eraser.counts["art"] == 1
+
+
+# ------------------------------------------------------------------ the page's scale
+def test_the_page_scale_holds_the_measures_to_pages_smaller_than_the_sample_sets_and_never_grows_them():
+    from taslation.render import pagescale
+
+    assert pagescale.page_scale(pagescale.TUNED_HEIGHT) == 1.0 and pagescale.page_scale(2400) == 1.0
+    assert pagescale.page_scale(1000) == pytest.approx(1000 / 1170)
+    assert pagescale.page_scale(100) == pagescale.LEAST and pagescale.page_scale(0) == 0.0
+    assert pagescale.of(region()) == 1.0 and pagescale.of(region(scale=0.5)) == 0.5
+    # (at the scale the measures were set at, every one is as it was: nothing changes on the sample set's pages)
+    assert [pagescale.side(n, 1.0) for n in (5, 7, 9, 13, 15, 21)] == [5, 7, 9, 13, 15, 21]
+    assert pagescale.px(artwork.RING_OUT, 1.0) == artwork.RING_OUT and pagescale.area(60, 1.0) == 60
+    assert pagescale.side(13, 1000 / 1170) == 11 and pagescale.px(artwork.RING_OUT, 1000 / 1170) == 12
+    assert pagescale.side(7, 0.4) == 3 and pagescale.side(3, 0.1) == 3  # (a kernel reaches a pixel at the least)
+
+
+def _open_box_on_hatching(gap):
+    """A white rectangle *gap* px round a column of lettering, its 3 px outline open at the top, on hatching."""
+    page = flat(255, (600, 600))
+    page[::5] = 40  # the drawing round the bubble
+    x0, y0, x1, y1 = 260, 150, 320, 450
+    cv2.rectangle(page, (x0 - gap - 3, y0 - gap - 3), (x1 + gap + 2, y1 + gap + 2), (0, 0, 0), -1)
+    page[y0 - gap:y1 + gap, x0 - gap:x1 + gap] = 255
+    page[y0 - gap - 3:y0 - gap, x0 + 20:x0 + 40] = 255  # the opening: no paper closed all round
+    for y in range(y0 + 5, y1 - 30, 40):
+        page[y:y + 26, x0 + 17:x0 + 43] = 0
+    return page, (x0, y0, x1, y1)
+
+
+def test_lettering_on_a_smaller_page_is_judged_on_a_ring_as_far_out_as_on_the_full_size_page():
+    """The same bubble at the sample set's size (18 px of paper round its lettering) and at half that: the ring of
+    `RING_OUT` 14 px stays on the paper of the first and reached the outline and the hatching past it on the second,
+    which went to the inpainting; at its page's scale (`TextRegion.scale`) it stays on the paper there too."""
+    full, box = _open_box_on_hatching(18)
+    assert artwork.closed_interior(full, box) is None and not on_art(full, region("text-on-page", box))
+    small = cv2.resize(full, (300, 300), interpolation=cv2.INTER_AREA)
+    half = tuple(v // 2 for v in box)
+    assert artwork.closed_interior(small, half, scale=0.5) is None
+    assert on_art(small, region("text-on-page", half))  # the measures of the full-size page
+    assert not on_art(small, region("text-on-page", half, scale=0.5))
+
+
+def test_the_pipeline_takes_the_page_scale_from_the_paper_or_the_capture_area():
+    host = SimpleNamespace(settings=SimpleNamespace(margins=(0, 0, 0, 0)))
+    white = flat(255, (1000, 1400))
+    assert Pipeline.page_scale(host, white) == pytest.approx(1000 / 1170)
+    viewer = flat(30, (1000, 1400))  # a dark viewer round a page 800 px high
+    viewer[100:900, 300:1100] = 255
+    viewer[300:340, 500:540] = 0
+    assert Pipeline.page_scale(host, viewer) == pytest.approx(800 / 1170, abs=0.01)
+    host.settings.margins = (0, 85, 0, 0)  # the capture area the margins leave
+    assert Pipeline.page_scale(host, white) == pytest.approx(915 / 1170)
+    assert Pipeline.page_scale(host, flat(255, (1600, 1200))) == 1.0
+    r = region()
+    unit = SimpleNamespace(index=1, box=(0, 0, 10, 10))
+    from taslation import pipeline as pl
+
+    pl._place(r, unit, 0.8)
+    assert (r.unit, r.scale) == (1, 0.8)

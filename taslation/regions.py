@@ -47,6 +47,9 @@ class TextRegion:
     edge_pieces: int = 0  # dark pieces taken in from against the outline (counted in *pieces*)
     letter_box: Box | None = None  # text blocks: box of the lettering that is erased (None = the text box)
     glyph: float = 0.0  # typical size of a piece of the lettering, as the detector measured it (0 = not measured)
+    # the scale of the page it lies on, which the erase's measures in pixels are taken at (`render.pagescale`: its
+    # page unit's height against the sample set's, at most 1; 0 = not placed on a unit, taken as 1)
+    scale: float = 0.0
     beyond_box: Box | None = None  # a column taken in past the interior (dark bubbles): kept only if the OCR reads it
     before_beyond: Any = None  # (bbox, text box, mask, pieces taken) as the region was before that column
     room: int = 0  # characters of translation the region has room for at the size of its lettering (0 = plenty)

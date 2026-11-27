@@ -28,10 +28,11 @@ import numpy as np
 from ..detect.beyond import big_dark, rings_on_dark
 from ..detect.bubbles import fill_holes
 from ..regions import Box, TextRegion
+from . import pagescale
 
 STRAY_KINDS = frozenset({"bubble", "dark-bubble"})  # regions whose mask is an interior the lettering can leave
-_HALO = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))  # takes a glyph's outline (2-3 px) with it
-_AROUND = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))  # the drawing just beyond the outline
+HALO = 7  # px (a disc): takes a glyph's outline (2-3 px) with it ...
+AROUND = 13  # px (a disc): ... and the drawing just beyond the outline
 
 PAPER_DE = 10.0  # CIELAB distance within which a pixel is the bubble's own paper
 RING_DE = 12.0  # ... within which the ring of an outlined glyph is white or the paper's colour
@@ -43,7 +44,7 @@ MARGIN = 8  # px around a region looked at for its outline and its surroundings
 INTERIOR_SHARE = 0.5  # of what a light piece encloses: this much of the mask makes it the paper round the interior
 MANUAL_KINDS = frozenset({"manual", "manual-dark"})  # a rectangle the reader drew
 ON_PAGE_KINDS = frozenset({"text", "text-dark", "text-on-page", "text-on-dark"})  # lettering set on the page's ground
-_REACH = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))  # a mask's erosion margin and anti-aliasing
+MASK_REACH = 15  # px (a disc): a mask's erosion margin and anti-aliasing
 LEAK_BEYOND = 20  # px of a cut-off part lying beyond the mask's reach that make it part of the page beyond
 LEAK_GROUND = 12  # px of a cut-off part from which its ground, when it is not the bubble's paper, makes it so too
 LETTER_SHARE = 0.1  # glyph-sized ink in the text box, a tenth of a glyph's square, makes a cut-off part lettering
@@ -51,6 +52,9 @@ LEAK_MIN = 60  # px: a closing that cuts off less than this from the lettering s
 RECT_WHOLE = 0.97  # a reader's rectangle whose paper is this much of it lies within the paper: wiped whole
 RECT_LETTER_SIDE, RECT_LETTER_AREA = 5, 8  # px: a dark piece at least so long and so large may be lettering
 RECT_OUTSIDE = 0.5  # lettering beyond the paper, this share of the lettering on it: the rectangle is wiped as drawn
+BIG_LIGHT = 90  # px: a light area longer than this beside stray lettering is the page's, never painted over
+# (the measures in px are the page's at the sample set's size: a region's erase takes them at its page's scale,
+# `pagescale`, the classic erase as they are)
 
 # (light, x, y, w, h, the piece's own pixels and the piece with its holes, both in its box) -> lettering or not
 PieceTest = Callable[[bool, int, int, int, int, np.ndarray, np.ndarray], bool]
@@ -64,7 +68,9 @@ def _disc(size: int) -> np.ndarray:
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
 
 
-def _window(image: np.ndarray, region: TextRegion, margin: int = MARGIN) -> Box:
+def _window(image: np.ndarray, region: TextRegion, margin: int | None = None) -> Box:
+    if margin is None:
+        margin = pagescale.px(MARGIN, pagescale.of(region))
     h, w = image.shape[:2]
     return (max(0, region.x0 - margin), max(0, region.y0 - margin),
             min(w, region.x1 + margin), min(h, region.y1 + margin))
@@ -115,7 +121,7 @@ def paper_colour(crop: np.ndarray, mask: np.ndarray, dark: bool = False) -> tupl
 
 
 def _glyph(region: TextRegion) -> float:
-    return region.glyph if region.glyph > 0 else 24.0
+    return region.glyph if region.glyph > 0 else 24.0 * pagescale.of(region)
 
 
 def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark_threshold: int = 140,
@@ -135,6 +141,7 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
     the reader's rectangle: no outline encloses it)."""
     if region.kind not in STRAY_KINDS or not mask.any():
         return mask
+    scale = pagescale.of(region)  # (the measures in px at the page's scale)
     wx0, wy0, wx1, wy1 = _window(image, region)
     window = np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3])
     gray = cv2.cvtColor(window, cv2.COLOR_RGB2GRAY)
@@ -149,7 +156,7 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
     near = cv2.dilate(mk.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     total = np.bincount(labels.ravel(), minlength=n)
     out_of = np.bincount(labels[~near].ravel(), minlength=n)
-    longest = max(OUTLINE_GLYPHS * _glyph(region), 2 * MARGIN)
+    longest = max(OUTLINE_GLYPHS * _glyph(region), 2 * pagescale.px(MARGIN, scale))
     lines = (out_of >= np.maximum(4, 0.2 * total)) | (np.maximum(stats[:, 2], stats[:, 3]) > longest)
     lines[0] = False
     outline = lines[labels].astype(np.uint8)
@@ -163,9 +170,9 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
     core = mk & box & ~ink
     if int(core.sum()) < 16:
         core = mk & ~ink
-    reach = cv2.dilate(mk.astype(np.uint8), _REACH) > 0
+    reach = cv2.dilate(mk.astype(np.uint8), pagescale.disc(MASK_REACH, scale)) > 0
     lab: np.ndarray | None = None
-    for size in SEAL_SIZES:
+    for size in sorted({pagescale.side(n, scale) for n in SEAL_SIZES}):
         barrier = ink | (cv2.morphologyEx(outline, cv2.MORPH_CLOSE, _disc(size)) > 0)
         nf, free = cv2.connectedComponents((~barrier).astype(np.uint8), connectivity=4)
         ids, counts = np.unique(free[core & ~barrier], return_counts=True)
@@ -173,7 +180,7 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
             continue
         inner = free == ids[int(np.argmax(counts))]
         cut = mk & ~barrier & ~inner
-        if int(cut.sum()) < LEAK_MIN:
+        if int(cut.sum()) < pagescale.area(LEAK_MIN, scale):
             continue
         in_mask = np.bincount(free[mk].ravel(), minlength=nf)
         beyond = np.bincount(free[~reach].ravel(), minlength=nf)
@@ -184,14 +191,16 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
         leaks: list[int] = []
         paper: np.ndarray | None = None
         for i in (int(v) for v in np.unique(free[cut])):
-            if in_mask[i] < LEAK_GROUND or int(letters[np.unique(parts[rest & (free == i)])].sum()) >= letter_ink:
+            if (in_mask[i] < pagescale.area(LEAK_GROUND, scale)
+                    or int(letters[np.unique(parts[rest & (free == i)])].sum()) >= letter_ink):
                 continue  # too small to matter, or it holds lettering: part of the text, whatever lies under it
             if lab is None:
                 lab = _lab(window)
             if paper is None:
                 paper = np.median(lab[inner & mk], axis=0)
             ground = np.median(lab[(free == i) & mk], axis=0)
-            if float(np.sqrt(((paper - ground) ** 2).sum())) >= PAPER_DE or beyond[i] >= LEAK_BEYOND:
+            if float(np.sqrt(((paper - ground) ** 2).sum())) >= PAPER_DE or beyond[i] >= pagescale.area(LEAK_BEYOND,
+                                                                                                    scale):
                 leaks.append(i)  # another ground than the bubble's paper, or the page beyond the bubble
         if not leaks:
             continue
@@ -377,17 +386,17 @@ class StrayJudge:
     drawing or of a window, or the sliver of paper where two lobes of an outline meet, is not. With *rings_interior*
     (a layout model's region, whose mask may stop a few pixels short of its outline) neither is a light piece that
     encloses the mask itself: the bubble's own paper between the mask and its outline, which a small bubble's text
-    box takes in whole."""
+    box takes in whole. *scale*: the page's (`pagescale`), the least reach of a piece at it."""
 
     def __init__(self, crop: np.ndarray, mask: np.ndarray, glyph: float, paper: tuple[int, int, int],
                  dark_threshold: int = 140, white_threshold: int = 225, dark: bool = False,
-                 rings_interior: bool = False):
+                 rings_interior: bool = False, scale: float = 1.0):
         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
         self.interior = mask > 0 if rings_interior else None
         self.lab = _lab(crop)
         self.dark = dark
         self.strokes = gray > white_threshold if dark else gray < dark_threshold
-        self.reach = max(12.0, GLYPH_REACH * glyph)
+        self.reach = max(12.0 * scale, GLYPH_REACH * glyph)
         # a thin line's anti-aliasing breaks it at the dark threshold, not a little above it (a glyph's ring does)
         linked = (gray > white_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
         n, labels, stats, _ = cv2.connectedComponentsWithStats((linked & (mask == 0)).astype(np.uint8),
@@ -431,11 +440,14 @@ class StrayJudge:
 
 def stray_pieces(gray: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
                  white_threshold: int = 225, min_size: int = 5, max_size: int = 90,
-                 accept: PieceTest | None = None) -> list[np.ndarray]:
+                 accept: PieceTest | None = None, scale: float = 1.0) -> list[np.ndarray]:
     """The pieces of lettering that lie outside *mask* but inside the text *box* (crop coordinates), each as a
     boolean mask of the crop: glyph-sized pieces of either polarity (dark strokes, or the light rings of outlined
-    glyphs on a dark drawing), each with the holes it encloses, grown to take its outline. Art is larger than a
-    glyph or outside the box, so it stays. *accept*, when given, has the last word on each piece."""
+    glyphs on a dark drawing), each with the holes it encloses, grown to take its outline (`HALO`). Art is larger than
+    a glyph or outside the box, so it stays. *accept*, when given, has the last word on each piece. *max_size* and the
+    growth at the page's *scale* (`pagescale`)."""
+    max_size = pagescale.px(max_size, scale)
+    halo = pagescale.disc(HALO, scale)
     h, w = gray.shape
     x0, y0, x1, y1 = max(0, box[0] - 2), max(0, box[1] - 2), min(w, box[2] + 2), min(h, box[3] + 2)
     if x1 <= x0 or y1 <= y0:
@@ -460,18 +472,19 @@ def stray_pieces(gray: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: i
                 continue
             full = np.zeros((h, w), np.uint8)
             full[y:y + bh, x:x + bw] = filled
-            pieces.append(cv2.dilate(full, _HALO) > 0)
+            pieces.append(cv2.dilate(full, halo) > 0)
     return pieces
 
 
 def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
                 white_threshold: int = 225, accept: PieceTest | None = None,
-                keep: np.ndarray | None = None) -> int:
+                keep: np.ndarray | None = None, scale: float = 1.0) -> int:
     """Paint each stray piece of lettering outside *mask* with the colour of the drawing around it (the median
-    of a band just beyond the piece, the interior and other pieces left out). Returns how many were painted.
-    *accept* is passed on to `stray_pieces`; the pixels of *keep* are never painted."""
+    of a band just beyond the piece, `AROUND`, the interior and other pieces left out). Returns how many were painted.
+    *accept* is passed on to `stray_pieces`; the pixels of *keep* are never painted, nor a light area longer than
+    `BIG_LIGHT`. Measures in px at the page's *scale* (`pagescale`)."""
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-    pieces = stray_pieces(gray, mask, box, dark_threshold, white_threshold, accept=accept)
+    pieces = stray_pieces(gray, mask, box, dark_threshold, white_threshold, accept=accept, scale=scale)
     if not pieces:
         return 0
     interior = mask > 0
@@ -481,14 +494,16 @@ def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
     dark = big_dark(gray, dark_threshold)  # the drawing's dark: the hair, the outline
     big = dark.copy()  # with the large light areas: never painted over
     n, labels, stats, _ = cv2.connectedComponentsWithStats((gray > white_threshold).astype(np.uint8), connectivity=8)
+    big_light = pagescale.px(BIG_LIGHT, scale)
     for i in range(1, n):
-        if max(int(stats[i][2]), int(stats[i][3])) > 90:
+        if max(int(stats[i][2]), int(stats[i][3])) > big_light:
             big |= labels == i
     if keep is not None:
         big |= keep
     painted = 0
+    beside = pagescale.disc(AROUND, scale)
     for piece in pieces:
-        around = cv2.dilate(piece.astype(np.uint8), _AROUND) > 0
+        around = cv2.dilate(piece.astype(np.uint8), beside) > 0
         band = around & ~piece & ~interior & ~taken
         if band.sum() < 12:
             continue
@@ -501,10 +516,11 @@ def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
 
 
 def erase_rings(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
-                white_threshold: int = 225, accept: Callable[[np.ndarray], bool] | None = None) -> int:
+                white_threshold: int = 225, accept: Callable[[np.ndarray], bool] | None = None,
+                scale: float = 1.0) -> int:
     """Paint the white rings of outlined glyphs that lie against the drawing's dark (over hair, over black) with
-    that dark's colour, so the glyphs merge into the drawing. Returns how many rings were painted. *accept*, when
-    given, has the last word on each ring (a boolean mask of the crop)."""
+    that dark's colour (the dark within `AROUND` at the page's *scale*), so the glyphs merge into the drawing. Returns
+    how many rings were painted. *accept*, when given, has the last word on each ring (a boolean mask of the crop)."""
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     rings = rings_on_dark(gray, mask, box, dark_threshold, white_threshold)
     if not rings.any():
@@ -514,7 +530,7 @@ def erase_rings(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
     painted = 0
     for i in range(1, n):
         ring = labels == i
-        near = (cv2.dilate(ring.astype(np.uint8), _AROUND) > 0) & dark
+        near = (cv2.dilate(ring.astype(np.uint8), pagescale.disc(AROUND, scale)) > 0) & dark
         if near.sum() < 12:
             continue
         if accept is not None and not accept(ring):
@@ -555,7 +571,8 @@ def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None
     lettering on the drawing goes - and its darker pixels alone when the ring is that ground (`RING_SAME`): the page's
     white round lettering set on it stays and is what the strokes are filled from (filled from beyond it, the drawing
     nearby was smeared into the page). Returns the region's paper colour, as `erase_region` does (what its lettering
-    is drawn against)."""
+    is drawn against). Measures in px at the page's scale (`pagescale`)."""
+    scale = pagescale.of(region)
     wx0, wy0, wx1, wy1 = _window(image, region)
     win = image[wy0:wy1, wx0:wx1]
     crop = image[region.y0:region.y1, region.x0:region.x1]
@@ -568,11 +585,12 @@ def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None
     light = _lab(win)[..., 0]
     if dark:
         light = 100.0 - light
-    level = cv2.medianBlur(np.clip(np.round(light * 2.55), 0, 255).astype(np.uint8), GROUND_WINDOW) / 2.55
+    level = cv2.medianBlur(np.clip(np.round(light * 2.55), 0, 255).astype(np.uint8),
+                           pagescale.side(GROUND_WINDOW, scale)) / 2.55
     n, labels, stats, _ = cv2.connectedComponentsWithStats((inside & (light < level - STROKE_DROP)).astype(np.uint8),
                                                            connectivity=8)
     x0, y0, x1, y1 = region.x0 - wx0, region.y0 - wy0, region.x1 - wx0, region.y1 - wy0
-    limit = max(STROKE_PIECE, 1.15 * min(x1 - x0, y1 - y0))
+    limit = max(STROKE_PIECE * scale, 1.15 * min(x1 - x0, y1 - y0))
     sx, sy, sw, sh = stats[:, 0], stats[:, 1], stats[:, 2], stats[:, 3]
     glyph = (np.maximum(sw, sh) <= limit) & (sx > x0) & (sy > y0) & (sx + sw < x1) & (sy + sh < y1)
     glyph[0] = False
@@ -583,7 +601,7 @@ def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None
         if dark:
             gray = 255 - gray
         n, parts = cv2.connectedComponents(taken.astype(np.uint8), connectivity=8)
-        near = cv2.dilate(parts.astype(np.float32), _disc(GROUND_BAND)).astype(np.int32)  # the piece a pixel is by
+        near = cv2.dilate(parts.astype(np.float32), pagescale.disc(GROUND_BAND, scale)).astype(np.int32)  # (its piece)
         band = (near > 0) & ~taken & inside
         ring = taken & (gray >= RING_LIGHT)
         kept = np.zeros(n, bool)
@@ -642,10 +660,13 @@ def _erase(image: np.ndarray, crop: np.ndarray, region: TextRegion, mask: np.nda
     if region.kind in STRAY_KINDS and region.text_box is not None:
         kept = inside.astype(np.uint8) * 255 if cut else mask
         local = _local_box(region)  # also over what was cut off: the judge keeps the drawing there
-        judge = StrayJudge(crop, kept, _glyph(region), bg, dark_threshold, white_threshold, dark, region.from_model)
-        erase_stray(crop, kept, local, dark_threshold, white_threshold, accept=judge.piece, keep=judge.drawing)
+        scale = pagescale.of(region)
+        judge = StrayJudge(crop, kept, _glyph(region), bg, dark_threshold, white_threshold, dark, region.from_model,
+                           scale)
+        erase_stray(crop, kept, local, dark_threshold, white_threshold, accept=judge.piece, keep=judge.drawing,
+                    scale=scale)
         if not dark:
-            erase_rings(crop, kept, local, dark_threshold, white_threshold, accept=judge.ring)
+            erase_rings(crop, kept, local, dark_threshold, white_threshold, accept=judge.ring, scale=scale)
     if mode == "inpaint":
         _inpaint(crop, inside.astype(np.uint8) * 255, dark_threshold, dark)
     elif region.kind in MANUAL_KINDS:
