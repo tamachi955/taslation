@@ -227,7 +227,8 @@ class Watch:
 # ------------------------------------------------------------------ one screen read
 def unit_row(line: dict[str, Any]) -> str:
     """One screen's numbers: its time, ocr stage, each unit's reading (start - end, ms), the readers' processor calls
-    (for a request under way), CPT's calls and ms, and the spread's gap from the first unit's last request."""
+    (for a request under way) and their GPU calls through a request, CPT's calls and ms, and the spread's gap from the
+    first unit's last request."""
     from taslation import analysis
 
     units = [u for u in line.get("read_units") or [] if int(u.get("unit", -1)) >= 0]
@@ -236,10 +237,12 @@ def unit_row(line: dict[str, Any]) -> str:
         readers = u.get("readers") or {}
         cpu = sum(int(r.get("cpu", 0)) for r in readers.values() if isinstance(r, dict))
         req = sum(int(r.get("cpu_translating", 0)) for r in readers.values() if isinstance(r, dict))
+        through = sum(int(r.get("gpu_translating", 0)) for r in readers.values() if isinstance(r, dict))
         cpt = readers.get("cpt") or {}
         parts.append(f"u{int(u['unit'])}{'b' if u.get('beside') else ''} {float(u.get('read_start_ms', 0)):6.0f}-"
                      f"{float(u.get('read_end_ms', 0)):6.0f} ({float(u.get('read_ms', 0)):6.0f} ms, "
-                     f"{int(u.get('crops', 0)):3d} crops, cpu {cpu:3d}/{req:3d} req, cpt {int(cpt.get('calls', 0))} "
+                     f"{int(u.get('crops', 0)):3d} crops, cpu {cpu:3d}/{req:3d} req, gpu req {through:3d}, "
+                     f"cpt {int(cpt.get('calls', 0))} "
                      f"{float(cpt.get('ms', 0.0)):5.0f} ms, wait {float(u.get('wait_ms', 0.0)):4.0f})")
     outside = [u for u in line.get("read_units") or [] if int(u.get("unit", -1)) < 0]
     for u in outside:  # (the readers' calls outside any unit's reading: a unit's lines judged again as it is translated)

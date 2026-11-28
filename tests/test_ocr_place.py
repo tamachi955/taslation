@@ -624,7 +624,16 @@ def test_only_the_memory_running_out_is_out_of_memory():
     assert not place.out_of_memory(RuntimeError("CUDA error: an illegal memory access was encountered"))
 
 
-def test_while_the_translator_computes_they_read_on_the_cpu_and_keep_the_gpu_s_copy(given_back):
+def _short_start() -> Plan:
+    """The session's plan of a start short of room that went on all the same (a setting forced the readers onto the
+    GPU): left at the peak under the margin."""
+    return place.settle(judge(_card(2000), _needs(fixed=(READERS,))))
+
+
+def test_where_the_start_was_short_while_the_translator_computes_they_read_on_the_cpu_and_keep_the_gpu_s_copy(
+        given_back):
+    plan = _short_start()
+    assert plan.why == place.SHORT and plan.left < MARGIN_MIB and not place.plain_beside_requests()
     m = FakeModels()
     m.to("cuda")
     with place.translating():
@@ -638,6 +647,56 @@ def test_while_the_translator_computes_they_read_on_the_cpu_and_keep_the_gpu_s_c
     assert place._translating == 0 and m.read() == "x read with net@cuda"
 
 
+def test_a_copy_without_graphs_reads_on_the_gpu_through_a_request_wherever_the_plan_has_room(given_back):
+    """The plain pass on the GPU beside the translator's requests read a made-up unit of 44 crops in 3.2 s against
+    21.0 on the processor (2026-11-28): it needs no memory beyond the copy's own, counted in the readers' need, so it
+    stays on the GPU wherever the start's plan has room for what it put there - its graphs left off for the room or
+    not -, and without a plan; only a start short of room that went on all the same (forced, or nothing could go)
+    reads on the processor meanwhile, and so does every copy without graphs with the tool's switch off."""
+    m = FakeModels()
+    m.to("cuda")
+    assert place.session() is None and place.plain_beside_requests()  # (no plan: a tool's readers, a test)
+    with place.translating():
+        assert m.read() == "x read with net@cuda"
+    bare = place.settle(judge(_card(1535), _needs(graphs=READERS_GRAPHS_MIB)))  # (the graphs left off for the room)
+    assert bare.why == place.ROOM and not bare.graphs and place.plain_beside_requests()
+    with place.translating():
+        assert m.read() == "x read with net@cuda" and m.device == "cuda"
+    moved = place.settle(judge(_card(1805), _needs(fixed=(READERS,)), "processor"))  # (LaMa sent there: room again)
+    assert moved.why == place.PROCESSOR and moved.left >= MARGIN_MIB and place.plain_beside_requests()
+    still = place.settle(judge(_card(5000), _needs(fixed=(READERS,)), "processor"))  # (all that could go went: short)
+    assert still.why == place.PROCESSOR and still.left < MARGIN_MIB and not place.plain_beside_requests()
+    with place.translating():
+        assert m.read() == "x read with net@cpu" and m.device == "cuda"
+    place.settle(Plan(why=place.NO_GPU))  # (nothing judged)
+    assert place.plain_beside_requests()
+    place.settle(bare)
+    try:
+        place.PLAIN_BESIDE = False  # (the tool's switch: the rule before)
+        assert not place.plain_beside_requests()
+        with place.translating():
+            assert m.read() == "x read with net@cpu"
+    finally:
+        place.PLAIN_BESIDE = True
+    assert m.reads == ["net@cuda", "net@cuda", "net@cpu", "net@cpu"] and not given_back
+
+
+def test_a_failure_on_the_gpu_through_a_request_reads_that_crop_on_the_cpu_and_stays_there(given_back):
+    """What the person sees when the GPU fails under a plain pass beside a request (out of memory, a CUDA error):
+    the crop read again on the CPU at once, the same reading, the page going on; the readers on the CPU for the rest
+    of the session, said to the readers' owner (the System page)."""
+    told = []
+    m = FakeModels("charspot")
+    m.on_gpu_failure = lambda reader, why: told.append((reader, why))
+    m.to("cuda")
+    m.broken = True
+    with place.translating():
+        assert m.read("crop") == "crop read with net@cpu"
+    assert m.reads == ["net@cuda", "net@cpu"] and m.device == "cpu" and told == [("charspot", "MemoryError_")]
+    m.broken = False
+    assert m.read() == "x read with net@cpu" and not m.to("cuda")
+
+
 class GraphedModels(FakeModels):
     """A fake reader whose GPU copy holds its CUDA graphs (one kept), as charspot's and nar's do."""
 
@@ -649,14 +708,16 @@ class GraphedModels(FakeModels):
         return (f"net@{device}", self.graphs)
 
 
-def test_a_copy_with_its_cuda_graphs_reads_on_the_gpu_while_the_translator_computes_and_one_without_on_the_cpu(
+def test_a_copy_with_its_cuda_graphs_reads_on_the_gpu_while_the_translator_computes_even_where_the_start_was_short(
         given_back, tmp_path):
     """A graph's replay is one launch, which takes its turn on the GPU beside the translator's work: the copy with
-    graphs stays on the GPU through a request; one whose graphs were dropped (a replay failed) or were never captured
-    (the plan left them off) reads on the CPU meanwhile, as before. The analysis log counts each read by device, those
-    on the CPU for a request under way apart."""
+    graphs stays on the GPU through a request, also where the start was short; there one whose graphs were dropped (a
+    replay failed) or were never captured reads on the CPU meanwhile, as before - and on the GPU where the plan has
+    room. The analysis log counts each read by device, those begun while a request was under way apart (on the GPU
+    through it, on the CPU for it)."""
     from taslation import analysis
 
+    _short_start()
     m = GraphedModels("charspot")
     m.to("cuda")
     assert place.graphed(m._gpu[1]) and not place.graphed(("net@cuda", None))
@@ -669,15 +730,19 @@ def test_a_copy_with_its_cuda_graphs_reads_on_the_gpu_while_the_translator_compu
                 m.graphs.drop()  # (a replay failed: the plain pass from now on)
                 assert not place.graphed(m._gpu[1]) and m.read() == "x read with net@cpu"
             assert m.read() == "x read with net@cuda"
+            place.settle(judge(_card(1000), _needs()))  # (a plan with room)
+            with place.translating():
+                assert m.read() == "x read with net@cuda"
         (unit,) = analysis.end(page, None)["read_units"]
         counted = unit["readers"]["charspot"]
-        assert (counted["gpu"], counted["cpu"], counted["cpu_translating"]) == (2, 1, 1)
+        assert (counted["gpu"], counted["cpu"], counted["cpu_translating"], counted["gpu_translating"]) == (3, 1, 1, 2)
     finally:
         analysis.stop()
+    _short_start()
     plain = FakeModels("nar")
     plain.to("cuda")
     with place.translating():
-        assert plain.read() == "x read with net@cpu"  # (no graphs: on the CPU while the model computes)
+        assert plain.read() == "x read with net@cpu"  # (no graphs, the start short: on the CPU while it computes)
 
 
 def test_a_copy_that_cannot_be_made_leaves_it_on_the_cpu_for_the_session(given_back):

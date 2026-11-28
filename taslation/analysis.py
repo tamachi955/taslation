@@ -22,11 +22,15 @@ One JSON line per page read or shown from the cache (`begin` / `end` round `Pipe
   flag, those found by the layout model, those read with low confidence and left as drawn (``low_as_drawn``);
 * ``read_units``: each page unit's reading (`unit_span`, `unit_facts`) - read beside the unit before or not, its
   reading's, its wait's and its translation's start, end and ms from the page's start, the crops read, each OCR
-  reader's calls, ms and longest call on the GPU and on the processor (those on the processor while a request to the
-  translator ran: ``cpu_translating``), its passes with no CUDA graph, and the ms waited for the readers' graphs -,
-  and ``requests``: the translator's requests that began in the page's time, [start, ms] each (`requested`);
+  reader's calls, ms and longest call on the GPU and on the processor (those begun while a request to the translator
+  ran: ``gpu_translating`` on the GPU, ``cpu_translating`` on the processor while the copy on the GPU waited), its
+  passes with no CUDA graph, and the ms waited for the readers' graphs -, and ``requests``: the translator's requests
+  that began in the page's time, [start, ms] each (`requested`);
 * ``first_letter_ms`` (ms from the start to its first lettering told to the window), ``gpu_free_mb`` (before, after:
-  only where torch has CUDA up already, never started for it) and ``self_ms``, what the log itself cost;
+  torch's ``mem_get_info``, only where torch has CUDA up already, never started for it - on Windows it counts this
+  process's GPU memory and a part of the driver's that does not change, about 940 MiB on the 6 GB card, not the
+  translator's nor other programs': 4,000-4,170 there with the card's own free memory 1.3-1.5 GB, measured
+  2026-11-28; the card's is the judgement's, `ocr.place`) and ``self_ms``, what the log itself cost;
 * ``cases``: each defect of level S1 or S2 found on the page itself (`page_defects`), one by one with its numbers - the
   region's index, box, kind, tier, confidence, the helpers that acted on it -, and ``minor``: the S3 and S4 ones
   counted by code.
@@ -529,14 +533,15 @@ def _reader(page: Page, name: str) -> dict[str, Any]:
     got = readers.get(name)
     if got is None:
         got = readers[name] = {"calls": 0, "ms": 0.0, "max_ms": 0.0, "gpu": 0, "gpu_ms": 0.0, "cpu": 0,
-                               "cpu_ms": 0.0, "cpu_translating": 0, "plain": 0}
+                               "cpu_ms": 0.0, "cpu_translating": 0, "gpu_translating": 0, "plain": 0}
     return got
 
 
 def reader(name: str, seconds: float, device: str = "cpu", translating: bool = False) -> None:
     """One call of the OCR reader *name* (`READERS`) that took *seconds* on *device* ("cpu", or the GPU's "cuda..."),
-    counted for the unit read on this thread (`unit_span`) of the page timed on it; *translating*: on the processor
-    for a request to the translator under way while its copy on the GPU waits (`ocr.place.translating`)."""
+    counted for the unit read on this thread (`unit_span`) of the page timed on it; *translating*: a request to the
+    translator was under way as it began (`ocr.place.translating`) - on the processor while its copy on the GPU waited
+    (``cpu_translating``), or on the GPU through it (``gpu_translating``)."""
     page = getattr(_TL, "page", None)
     if page is None:
         return
@@ -549,8 +554,8 @@ def reader(name: str, seconds: float, device: str = "cpu", translating: bool = F
         got["max_ms"] = max(got["max_ms"], ms)
         got["gpu" if gpu else "cpu"] += 1
         got["gpu_ms" if gpu else "cpu_ms"] += ms
-        if translating and not gpu:
-            got["cpu_translating"] += 1
+        if translating:
+            got["gpu_translating" if gpu else "cpu_translating"] += 1
 
 
 def reader_plain(name: str) -> None:
@@ -599,8 +604,9 @@ def unit_facts(page: Page) -> list[dict[str, Any]]:
     """Each page unit's reading as the page's line keeps it (``read_units``), in the order of their places: its place
     (``unit``; -1 for reads outside any unit's), read beside the one before or not, its reading's and its translation's
     start, end and wall ms from the page's start, the crops read (charspot's calls: one a crop, the memo aside), each
-    reader's calls, ms, longest call, calls and ms on the GPU and on the processor, those on the processor for a
-    request under way, passes with no CUDA graph, and the ms waited for a lock or a gate."""
+    reader's calls, ms, longest call, calls and ms on the GPU and on the processor, those begun while a request was
+    under way (on the GPU through it, on the processor for it), passes with no CUDA graph, and the ms waited for a lock
+    or a gate."""
     out: list[dict[str, Any]] = []
     with page.lock:
         units = {k: v for k, v in page.units.items()}
@@ -1201,8 +1207,10 @@ def unit_lines(lines: Sequence[dict[str, Any]], slowest: int = 10) -> list[str]:
             gpu = sum(int(g.get("gpu", 0)) for g in got)
             out.append(f"    {reader_name[:9]:9} calls {calls:5d}, {_median(ms):7.0f} ms a page (p95 "
                        f"{_quantile(ms, 0.95):.0f}), longest {max(float(g.get('max_ms', 0.0)) for g in got):6.0f} ms; "
-                       f"gpu {gpu} ({gpu_ms / max(1, gpu):.0f} ms a call), cpu {cpu} ({cpu_ms / max(1, cpu):.0f} ms a "
-                       f"call; {sum(int(g.get('cpu_translating', 0)) for g in got)} for a request under way); "
+                       f"gpu {gpu} ({gpu_ms / max(1, gpu):.0f} ms a call; "
+                       f"{sum(int(g.get('gpu_translating', 0)) for g in got)} through a request), cpu {cpu} "
+                       f"({cpu_ms / max(1, cpu):.0f} ms a call; "
+                       f"{sum(int(g.get('cpu_translating', 0)) for g in got)} for a request under way); "
                        f"no graph {sum(int(g.get('plain', 0)) for g in got)}")
     gaps = [(p, g) for p in pages if (g := _spread_gap(p)) is not None]
     if gaps:

@@ -325,7 +325,8 @@ on a real book, which is why the candidates wait for the read-through.
 
 A page's line keeps each page unit's reading (``read_units``: read beside the unit before or not; its reading's, its
 wait's and its translation's start, end and ms from the page's start; the crops; each reader's calls, ms and longest
-call on the GPU and on the processor, those on the processor while a request to the translator ran apart; its passes
+call on the GPU and on the processor, those begun while a request to the translator ran apart - ``gpu_translating``
+on the GPU through it, ``cpu_translating`` on the processor while the copy on the GPU waited; its passes
 with no CUDA graph; the ms it waited for the readers' graphs) and the translator's requests that began in the page's
 time (``requests``). `tools/analysis_summary.py` tables unit 0 against unit 1, the time from the first unit's last
 request to the next unit's first with the slowest spreads, and the see-through watch's duty from the window's counts
@@ -350,12 +351,28 @@ priority):
 | on the GPU without graphs (the plain pass), beside the requests, normal | 3,163 | 23.4 / 47 | 270 | 419 ms |
 | the translator alone | - | - | - | 296 ms |
 
-So: a reader whose copy has its CUDA graphs reads on the GPU through a request (`place.graphed`; a copy without them
-- the start short of room - still reads on the processor then), and the reading beside keeps the page's priority
-(`pipeline.READ_BESIDE_PRIORITY`). What it can cause: a request while a unit is read on the GPU beside it takes some
-24 % longer (366 ms against 296), for the seconds the reading lasts. The plain pass on the GPU beside the requests was
-measured fast too (the 687 ms a crop of before was not seen again), but it is the case of a card with too little room
-for the graphs, where the driver moves memory: left as it was. The watch decides a frame whose rows of the client
+So: a reader reads on the GPU through a request, with its CUDA graphs or without them, and the reading beside keeps
+the page's priority (`pipeline.READ_BESIDE_PRIORITY`). A copy without graphs (the graphs left out by the start's
+judgement, or a shape they do not hold) reads on the processor through a request only where the start was short of
+room and went on all the same (`place.plain_beside_requests`: the plan leaves less than `MARGIN_MIB`, a setting having
+forced a part onto the GPU or nothing being able to go): the plain pass needs nothing on the card beyond the copy and
+a crop's work, which the readers' need already counts, so the 687 ms a crop of before - a card past its memory, the
+driver moving memory - is the over-full card that rule keeps out. What it can cause: a request while a unit is read on
+the GPU beside it takes some 24 % longer with the graphs (366 ms against 296) and 42 % by the plain pass (419), for the
+seconds the reading lasts. The two rules taken in turn page by page on made-up spreads at 1920 x 1032 (12 to 22 crops
+a unit; the graphs left off; 2 x 16 pages, each frame read as often by either rule; the computer shared with other
+work, about half its processor; 2026-11-28), the GPU through the requests against the processor through them, in
+all: unit 0 read in 16,609 ms against 21,242 (its readers' calls through a request 260 on the GPU at 23-26 ms
+charspot and 43-46 nar, against 159 on the processor at 46-56 and 122-132), unit 1 in 12,401 against 11,500, the
+requests 138 and 157 ms median in the two runs against 108 and 118, the first bubble 24,867 ms against 27,042 and the
+pages 57,101 against 55,063: the first bubble 8 % sooner, the page 4 % later, where the processor had room; with
+less room the processor's way grows as in the table above (21.0 s a unit against 3.2). A failure on the GPU through
+a request re-reads that crop on the processor at once and keeps the reader there for the session (`place.failed`,
+the System page says so), as any failure on the GPU does.
+`DeviceModels.run` decides at the start of each read; `PLAIN_BESIDE` False brings back the rule before (every copy
+without graphs on the processor through a request) for a measurement.
+
+The watch decides a frame whose rows of the client
 area hold the very bytes of the frame compared last, with the same sets, box and DPI, as that frame was decided,
 by a memcmp (`seethrough.same_rows`, `SeeThrough._decide`): a change of any byte there is compared at the frame that
 shows it, as before.

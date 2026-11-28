@@ -997,7 +997,7 @@ A computer without an NVIDIA GPU never sees the box. Neither do the `taslation` 
 
 The memory other programs take after the start is theirs: TASlation does not look again. On Windows a card used past its memory gives no error; it gets slower, because the driver moves memory to and fro and the reading and the translation wait for it (on the 6 GB card a request began 0.2 to 0.5 s later, and with another program computing on the card the OCR read more slowly than on the CPU). The System page still says GPU meanwhile. Close the other program, or start TASlation again, which checks again.
 When a part fails on the GPU (its memory runs out, a CUDA error), it goes on on the CPU until the session ends, the page comes out as usual, and the System page says so. The readings are the same on both.
-While the translation model answers (the next page of a spread is read meanwhile, for one), the two OCR readers read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
+While the translation model answers (the next page of a spread is read meanwhile, for one), the two OCR readers go on reading on the GPU (about 0.02 to 0.05 s a line; on the CPU meanwhile, shared with the page's other work, about 0.2 to 0.5 s). Only when a part was put on the GPU by a setting and the start was short of memory do they read on the CPU meanwhile.
 
 Ollama's model is put in GPU memory only while it is needed. TASlation loads it at start, while the OCR models load (`load_model_at_start = true`, the default,
 in the settings file), so the first page to translate does not wait for it. Nothing is shown for this load,

@@ -56,14 +56,22 @@ System page says so. A check of reads that crawl on the GPU is not kept: on a ca
 computing on it, the readers' reads took 1.5 to 1.9 times the CPU's - below any factor that a wait behind this process's
 own page models does not also reach - so it never took them off such a card.
 
-While a request to the translation model is under way (`translating`, for the translator to wrap its requests in) a
-reader whose GPU copy has no CUDA graphs reads with its CPU copy, then with the GPU's again: both stay loaded, only the
-device of a read changes - the two processes share the GPU in time slices, and the plain pass's many small steps would
-wait (a crop on the GPU while PLaMo generated 687 ms, both readers, on the CPU 127, about 40 on an idle GPU). A copy
-with its graphs (`graphed`) stays on the GPU: a replay is one launch. Measured 2026-11-28 (GTX 1660 Ti, PLaMo
-answering requests of three lines back to back, a made-up page unit of 44 crops): on the GPU through the requests
-charspot 18.6 ms a crop and nar 39 against 182 and 487 on the CPU, which the page's other work shares - the unit read
-in 5.0 s against 21.0 -, the requests 366 ms each against 296 with the reads on the CPU and 296 alone.
+While a request to the translation model is under way (`translating`, for the translator to wrap its requests in) the
+readers stay on the GPU, with their CUDA graphs or without them, wherever the session's plan has room for what it put
+there (`plain_beside_requests`). Measured 2026-11-28 (GTX 1660 Ti, PLaMo answering requests of three lines back to
+back, a made-up page unit of 44 crops): on the GPU through the requests charspot 18.6 ms a crop and nar 39 with the
+graphs, 23.4 and 47 by the plain pass, against 182 and 487 on the CPU, which the page's other work shares - the unit
+read in 5.0 s and 3.2 s against 21.0 -, the requests 366 ms each with the graphs beside them and 419 with the plain
+pass, against 296 with the reads on the CPU and 296 alone; the two rules in turn page by page on made-up spreads of
+12-22 crops a unit, the graphs left off, half the processor taken by other work (2 x 16 pages): unit 0 16.6 s in all
+against 21.2, the first bubble 24.9 s against 27.0, the pages 57.1 s against 55.1 (the requests 138-157 ms median
+against 108-118: docs/DEVELOPMENT.md). Only where the start was short of room and went on all the
+same (a setting forced a part onto the GPU, or nothing could go: `Plan.left` under `MARGIN_MIB`) does a copy without
+graphs read with its CPU copy while a request runs, then with the GPU's again (both stay loaded, only the device of a
+read changes): on a card past its memory the driver moves memory to and fro, and the plain pass's many small steps
+wait at each of the translator's time slices (a crop on the GPU while PLaMo generated was once measured at 687 ms, both
+readers, against 127 on the CPU). A copy with its graphs (`graphed`) stays on the GPU there too: a replay is one
+launch.
 
 What the judgement measures (`GpuFacts`, `gather`):
 
@@ -414,6 +422,23 @@ def graphs_on() -> bool:
     session's plan says (`Plan.graphs`); without a plan (a test, a tool's own readers), yes."""
     plan = _plan
     return plan is None or plan.graphs
+
+
+PLAIN_BESIDE = True  # (a tool's switch: False reads every copy without graphs on the CPU through a request, as before)
+
+
+def plain_beside_requests() -> bool:
+    """Whether a reader's GPU copy without its CUDA graphs reads on the GPU while a request to the translation model is
+    under way (`DeviceModels.run`): yes where the session's plan has room for what it put on the GPU (`Plan.left` at
+    least `MARGIN_MIB`, the graphs left off for the room or not; without a plan, or nothing judged, yes) - the plain
+    pass needs no memory beyond the copy's own, counted in its need; no where the start was short and went on all the
+    same (a setting forced a part onto the GPU, or nothing could go to the processor), where the driver moves memory
+    and the plain pass's many launches wait for the translator's time slices: it reads on the CPU meanwhile, as
+    before."""
+    if not PLAIN_BESIDE:
+        return False
+    plan = _plan
+    return plan is None or plan.why == NO_GPU or plan.left is None or plan.left >= MARGIN_MIB
 
 
 def translator_on_processor() -> bool:
@@ -776,12 +801,13 @@ _translating_lock = threading.Lock()
 
 @contextlib.contextmanager
 def translating() -> Iterator[None]:
-    """While a request to the translation model is under way: a reader whose GPU copy has no CUDA graphs reads on the
-    CPU meanwhile, its copy kept; one with its graphs (`graphed`) stays on the GPU. Windows shares the GPU between
-    Ollama's process and this one in time slices: a crop read by the plain pass, a few hundred kernels launched one by
-    one, waits for the translator's slice at many of them (687 ms on the GPU while PLaMo generated, both readers,
-    against 127 on the CPU and about 40 on an idle GPU; the translator about as fast either way, 124 and 121 tokens/s,
-    126 alone), where a graph's replay is one launch. The readings are the same on either device."""
+    """While a request to the translation model is under way: the readers' GPU copies read on the GPU meanwhile, but
+    one without CUDA graphs where the start was short of room (`plain_beside_requests`), which reads on the CPU then,
+    its copy kept. Windows shares the GPU between Ollama's process and this one in time slices: a crop read by the
+    plain pass, a few hundred kernels launched one by one, waits for the translator's slice at some of them (charspot
+    23.4 and nar 47 ms a crop through back-to-back requests, 2026-11-28, against 182 and 487 on the CPU; once 687 ms,
+    both readers, against 127 on the CPU, on a card past its memory), a graph's replay is one launch (18.6 and 39). The
+    readings are the same on either device."""
     global _translating
     from .. import analysis
 
@@ -880,14 +906,16 @@ class DeviceModels:
         return False
 
     def run(self, read: Callable[[str, tuple[Any, ...]], T]) -> T:
-        """*read*(device, networks) with the copy in force - on the CPU while the translation model computes
-        (`translating`) unless the copy has its CUDA graphs (`graphed`) - and on the CPU from a failure on the GPU on
-        (see the class)."""
+        """*read*(device, networks) with the copy in force - through a request to the translation model too
+        (`translating`), but for a copy without CUDA graphs (`graphed`) where the start was short of room
+        (`plain_beside_requests`), which reads on the CPU meanwhile - and on the CPU from a failure on the GPU on (see
+        the class)."""
         from .. import analysis
 
         with self._lock:
             copy = self._gpu
-            held = copy if copy is not None and (not _translating or graphed(copy[1])) else None
+            beside = _translating > 0  # (a request under way as the read begins)
+            held = copy if copy is not None and (not beside or graphed(copy[1]) or plain_beside_requests()) else None
             waiting = copy is not None and held is None  # (its GPU copy waits for the translator)
             if held is not None:
                 self._reading += 1
@@ -905,7 +933,7 @@ class DeviceModels:
             why = type(e).__name__
         finally:
             held = None
-            analysis.reader(self.name, time.perf_counter() - began, device)
+            analysis.reader(self.name, time.perf_counter() - began, device, beside)
             with self._lock:
                 self._reading -= 1
                 late = self._give_back and not self._reading
