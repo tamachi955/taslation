@@ -220,7 +220,7 @@ from ctypes import wintypes
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "tools") not in sys.path:
@@ -5264,7 +5264,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     see_pipeline = run_["see_through"].get("pipeline") or {}
     see_pipeline["present_to_display_ms"] = see_lags(notes, see_pipeline.get("presents_t", []))
     see_pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
-    run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
+    run_["start_clock"] = start_clock(notes, see, made_t, built_t, began, director.chooser_rows)
     if mon is not None:
         try:
             run_["monitors"] = mon.report(notes, top, ended)
@@ -5318,17 +5318,28 @@ def see_lags(notes: Notes, presents: list[float]) -> dict[str, Any]:
     return dist(lags)
 
 
-def start_clock(notes: Notes, see: Any, made_t: float, built_t: float, began: float) -> dict[str, Any]:
-    """The window's start, ms from the call that makes it (`App`): made, its main loop begun, the translator ready,
-    the first page lettered in the window, and with the see-through watch the first side pane and the first patches
-    shown over the viewer (the see-through window's own notes)."""
+def start_clock(notes: Notes, see: Any, made_t: float, built_t: float, began: float,
+                chooser: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+    """The window's start, ms from the call that makes it (`App`): made, its main loop begun, the viewer chooser on
+    the screen and answered (--chooser: *chooser*, the driver's rows), the book's name asked and answered
+    (--book-asked), the start's dialog on the GPU's memory (where it came), the translator ready, the first page
+    lettered in the window, and with the see-through watch the first side pane and the first patches shown over the
+    viewer (the see-through window's own notes)."""
     def since(t: float | None) -> int | None:
         return None if t is None else round(t - made_t)
 
     ready = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
     lettered = next((d["t"] for d in notes.displays if d.get("lettered")), None)
-    out: dict[str, Any] = {"built_ms": since(built_t), "loop_ms": since(began), "ready_ms": since(ready),
-                           "first_lettered_ms": since(lettered), "began_epoch_ms": round(began)}
+    first_chooser = chooser[0] if chooser else {}
+    book = notes.book_dialogs[0] if notes.book_dialogs else {}
+    gpu = notes.gpu_dialogs[0] if notes.gpu_dialogs else {}
+    out: dict[str, Any] = {"built_ms": since(built_t), "loop_ms": since(began),
+                           "chooser_ms": since(first_chooser.get("t")),
+                           "chooser_answered_ms": since(first_chooser.get("answered_t")),
+                           "book_dialog_ms": since(book.get("shown_t", book.get("t"))),
+                           "book_answered_ms": since(book.get("answered_t")), "gpu_dialog_ms": since(gpu.get("t")),
+                           "ready_ms": since(ready), "first_lettered_ms": since(lettered),
+                           "began_epoch_ms": round(began)}
     over = see.over() if see is not None else None
     if over is not None:
         firsts: dict[str, float] = {}
@@ -6054,6 +6065,14 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if run_.get("capture_route"):
         route = run_["capture_route"]
         print(f"capture: {route['used']} (looks {route['looks']}; {route['route']}); frames {run_.get('captures')}")
+    clock = run_.get("start_clock") or {}
+    if clock:
+        print("the start, ms from the window's making: " + ", ".join(
+            f"{name} {clock.get(key)}" for name, key in (
+                ("chooser on show", "chooser_ms"), ("answered", "chooser_answered_ms"),
+                ("book's name asked", "book_dialog_ms"), ("answered", "book_answered_ms"),
+                ("GPU's dialog", "gpu_dialog_ms"), ("ready", "ready_ms"), ("first lettered", "first_lettered_ms"))
+            if clock.get(key) is not None))
     said = run_.get("no_answer") or []
     if said:
         print(f"no answer: {sum(1 for n in said if ', silence ' in n['line'])} silence(s), "

@@ -99,6 +99,8 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _recognise_then = A._recognise_then
     _recognition_hint = A._recognition_hint
     _ask_name = A._ask_name
+    _gpu_box_up = A._gpu_box_up
+    _name_first = A._name_first
     _remember_viewer_name = A._remember_viewer_name
     _resume_start = A._resume_start
     _book_answer = A._book_answer
@@ -893,6 +895,78 @@ def test_the_start_dialog_waits_for_the_book_recognised_in_the_worker(flow, monk
     flow._on_new_page(_viewer(_page(2)), None)
     assert len(flow.dialogs) == 3 and flow._jobs.empty() and flow.dialogs[-1].matches == ["My Story 2"]
     assert flow.dialogs[-1].hint == "last"
+
+
+def _until(cond, seconds=3.0) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.01)
+    return bool(cond())
+
+
+def test_while_the_models_load_the_book_s_name_is_asked_at_once_and_the_page_waits_for_them(flow):
+    """The start holds the worker while the models load (`jobs.JobsMixin._job_init`): a settled page of the viewer
+    chosen that starts a book has its name asked for now (`live._name_first`) - the books its page holds recognised
+    on a thread of their own, not behind the start in the worker -, and the page waits for the models ("Loading the
+    models..." in the right pane's slot) until the window is ready (`_run_queued`); answered once they are in, the
+    page is read at once. A book with a name waits for the models as ever; a ready window asks nothing here."""
+    from taslation.ui import status_slot
+
+    flow.ready, flow._models_loading = False, True
+    assert flow._name_first(_frame(), None)
+    assert isinstance(flow._start_dialog, jobs.Recognising) and flow._jobs.empty()  # (not in the worker)
+    assert _until(lambda: not flow._events.empty())
+    flow.pump()
+    d = flow.dialogs[-1]
+    assert len(flow.dialogs) == 1 and d.generic and d.first  # (the start's own: it takes the keys)
+    assert flow._name_first(_frame(), "later") and flow._start_pending[1] == "later"  # (a later look waits for it)
+    assert len(flow.dialogs) == 1
+    d.on_answer("ok", "Vagabond 4")
+    assert flow.book_var.get() == "Vagabond 4" and not flow.busy and flow._queued == ("auto", ())
+    assert status_slot.wanted(flow, status_slot.SlotState(), 0.0) == (status_slot.MODELS_KEY, False)
+    assert not flow._name_first(_frame(), None)  # (named now: the page waits for the models as ever, `_queue`)
+    flow._handle_event("ready", {"ocr": True})
+    assert flow.ready and flow._queued is None and flow.ticks == 1  # (the viewer looked at again: read now)
+
+    flow.book_var.set("Yomizuq")
+    flow.ready = False
+    assert flow._name_first(_frame(), None)
+    assert _until(lambda: not flow._events.empty())
+    flow.pump()
+    flow._handle_event("ready", {"ocr": True})  # the models in before the answer
+    flow.dialogs[-1].on_answer("ok", "Vagabond 5")
+    assert len(flow.dialogs) == 2 and flow.busy and flow._jobs.qsize() == 1  # read at once
+    flow._handle_event("translate_done", {})
+    flow.book_var.set("Yomizuq")
+    assert not flow._name_first(_frame(), None) and len(flow.dialogs) == 2  # (ready: Auto takes it, `_take`)
+
+
+def test_the_book_s_name_waits_for_the_start_s_dialog_on_the_gpu_s_memory(flow):
+    """The two never come together: the book's name, asked while the start's dialog on the GPU's memory is open, comes
+    once that one is answered (`_gpu_box_up`, looked at again every GPU_HOLD_MS); F5's name too."""
+    flow._gpu_dialog = SimpleNamespace(winfo_exists=lambda: True)  # (on the screen)
+    flow._on_new_page(_frame(), None)
+    flow.run_jobs()
+    assert not flow.dialogs and isinstance(flow._start_dialog, jobs.Recognising)
+    held = [entry for entry in flow.later if entry[0] == jobs.GPU_HOLD_MS]
+    assert len(held) == 1
+    flow.later.remove(held[0])
+    held[0][1]()  # looked at again: still open
+    assert not flow.dialogs and [ms for ms, _f in flow.later].count(jobs.GPU_HOLD_MS) == 1
+    flow._gpu_dialog = None  # answered
+    flow.run_later()
+    assert len(flow.dialogs) == 1 and flow.dialogs[0].generic
+    flow.dialogs[0].on_answer(None, "")
+
+    flow._gpu_dialog = SimpleNamespace(winfo_exists=lambda: True)
+    flow.translate_now()  # F5: the name first, after that dialog
+    flow.run_jobs()
+    assert len(flow.dialogs) == 1
+    flow._gpu_dialog = None
+    flow.run_later()
+    assert len(flow.dialogs) == 2
 
 
 def test_the_name_last_given_in_a_viewer_is_offered_when_nothing_is_recognised(flow, monkeypatch):

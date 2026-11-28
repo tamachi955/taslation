@@ -6,8 +6,9 @@ three OCR readers (charspot and nar; ``ocr_runs_on``: "auto", the default, "cpu"
 reader, which reads a line only where the other two differ, stays on the CPU: its 440 MB of weights would be on the
 GPU for a few crops a page.
 
-THE JUDGEMENT (`judge`), once, as the session starts (the window: `taslation.ui.jobs`, after the legal notice, once
-TASlation's Ollama answers and before any model is loaded; a command: when its readers are placed, `plan_for`): the
+THE JUDGEMENT (`judge`), once, as the session starts (the window: `taslation.ui.jobs`, after the legal notice while
+the viewer chooser is on the screen, once TASlation's Ollama answers and before any model is loaded; a command: when
+its readers are placed, `plan_for`): the
 card's total memory, less what other programs hold now, less every part the settings put on the GPU at its measured
 peak (`Need`, `needs`) and this process's CUDA context, must leave `MARGIN_MIB` free (`left_at_peak`). The answer is
 one number: enough, or short by N MiB (`short_by`). Enough: everything is loaded at the start, where it was judged to

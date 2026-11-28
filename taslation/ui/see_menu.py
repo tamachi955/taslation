@@ -31,8 +31,9 @@ hosts the dialogs), in places of their own.
   on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the
   viewer once the menu has ended (``_see_menu_up`` until then).
 * No viewer followed: the viewer chooser (`ViewerDialog`) is on the screen (`chooser_tick`) - at every start, once
-  the legal notice and the GPU's dialog are over, alone; again when the viewer's window was closed (saying so); never
-  while a dialog holds the window, nor for a viewer named with --window (`ViewerMixin._watch_windows` looks for that
+  the legal notice is over, at once, while the models load behind it (the GPU's dialog, where the start's judgement
+  must ask, waits for it: `chooser_due`); again when the viewer's window was closed (saying so); never while a
+  dialog holds the window, nor for a viewer named with --window (`ViewerMixin._watch_windows` looks for that
   one). TASlation chooses no viewer by itself: the windows that look like it come first and one is preselected,
   Enter or OK chooses it, Quit ends TASlation. Centred over the window preselected, else on the primary monitor,
   topmost; at the start it takes the keys as it shows, after a viewer was closed only while TASlation's window has
@@ -654,16 +655,25 @@ def open_viewer(app: Any, by_itself: bool = False) -> ViewerDialog:
     return dialog
 
 
+def chooser_due(app: Any) -> bool:
+    """Whether the viewer chooser is on the screen or comes there by itself (`chooser_tick`): see-through mode with
+    TASlation's own window hidden, no viewer followed and none named with --window. The start's dialog on the GPU's
+    memory waits while it is (`jobs.JobsMixin._show_gpu_short`): never under the chooser, nor in its way."""
+    if getattr(app, "selected", None) is not None or getattr(app, "window_query", ""):
+        return False
+    return seethrough.on(app) and seethrough.hidden(app)
+
+
 def chooser_tick(app: Any) -> None:
-    """(every half second) While no viewer is followed, the viewer chooser is on the screen: from the start's end on
-    - the legal notice, then the GPU's memory judged and its dialog answered (``_start_judged``) -, never while a
+    """(every half second) While no viewer is followed, the viewer chooser is on the screen: from the window's first
+    tick on - the legal notice answered, the models loading behind it (`jobs.JobsMixin._job_init`) -, never while a
     dialog holds the window, and again once a viewer chosen was closed; it goes as a viewer is chosen in it. Not for
     a viewer named with --window: the window looks for that one itself (`ViewerMixin._watch_windows`)."""
     from .dialogs.help import modal_up
 
     if getattr(app, "selected", None) is not None or getattr(app, "_see_chooser", None) is not None:
         return
-    if getattr(app, "window_query", "") or not getattr(app, "_start_judged", True) or modal_up(app):
+    if getattr(app, "window_query", "") or modal_up(app):
         return
     open_viewer(app, by_itself=True)
 

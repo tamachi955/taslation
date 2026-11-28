@@ -79,6 +79,10 @@ from .progress import LOADING, SLOW, Filling, asks_model, code_of, progress_line
 LOG = logging.getLogger(__name__)
 
 HEALTH_RECHECK_MS = 10_000  # while a setup problem stands, it is looked at again this often
+# the start's dialog on the GPU's memory and the book's name wait for each other, and that dialog for the viewer
+# chooser, looked at again so often (`JobsMixin._show_gpu_short`, `_ask_book`)
+GPU_HOLD_MS = 200
+GPU_CLOSED_S = 0.5  # the start waiting for that dialog's answer looks so often whether the window closed meanwhile
 # what a request without an answer says (`OllamaTranslator`'s rule), in the status line (`JobsMixin._model_status`)
 NO_ANSWER_CODES = frozenset({"ollama.no_answer", "ollama.restarting", "ollama.not_answering"})
 # ui.json: how many saved files this Windows user cannot open here the window last said in a box ("not_here"), so
@@ -336,6 +340,7 @@ class JobsMixin:
         self._start_load_cancel = threading.Event()  # ends that load (the window closes)
         self._models_loading = False  # what loads at the start is under way ("Loading the models...": `_watch_loads`)
         self._gpu_dialog: Any = None  # the start's dialog on the GPU's memory, while it is open (`_show_gpu_short`)
+        self._gpu_held: Any = None  # ... its answer while it waits for the chooser or the book's name to be answered
         self._health: list[Any] = []  # the setup's problems and notices on show (health.check's Messages)
         self._health_after: str | None = None  # the next look at them while one stands
         self._health_checking = False  # a check runs (in a thread of its own)
@@ -442,18 +447,21 @@ class JobsMixin:
         threading.Thread(target=run, name="taslation-start-ollama", daemon=True).start()
 
     def _job_init(self) -> None:
-        """The start: the OCR model loads in a thread of its own (`load_readers`) while, in this order, Ollama is
-        started when it does not answer (what stands in the way said in a popup, once), the setup is checked (the
-        banner from the start on) and the GPU's memory is judged for everything TASlation puts there (`_judge_gpu`:
-        short, the start asks first). Then everything loads where the judgement put it, the window usable all the
-        while: the start waits for the OCR model, says what went wrong with it as ever, and makes the pipeline (the
-        window is ready: a page asked for now is read as soon as what it needs is there); the translation model, when
-        Ollama runs and has it (``load_model_at_start``, on by default: `_load_at_start`; with the setting off it is
-        left for the first page that needs it, `OllamaTranslator.ensure_loaded`, its room counted all the same), and
-        the page models (`_warm_page_models`) load on threads of their own, and the status bar says "Loading the
-        models..." until all of it is loaded (`_watch_loads`). An ``ollama_keep_alive`` that keeps the model for good
-        loads it here, and once ready the status line says what loaded where; one that unloads it after every request
-        loads nothing ahead."""
+        """The start, behind the viewer chooser (on the screen at the window's first tick: `see_menu.chooser_tick`;
+        the person chooses the viewer, and is asked the book's name, while all of this runs): the right pane says
+        "Loading the models..." from the first moment until all of it is loaded (`_watch_loads`). The OCR model loads
+        in a thread of its own (`load_readers`) while, in this order, Ollama is started when it does not answer (what
+        stands in the way said in a popup, once), the setup is checked (the banner from the start on) and the GPU's
+        memory is judged for everything TASlation puts there (`_judge_gpu`: short, the start asks first - once the
+        chooser and the book's name are answered, `_show_gpu_short`). Then everything loads where the judgement put
+        it, the window usable all the while: the start waits for the OCR model, says what went wrong with it as ever,
+        and makes the pipeline (the window is ready: a page asked for meanwhile is read now, `_run_queued`); the
+        translation model, when Ollama runs and has it (``load_model_at_start``, on by default: `_load_at_start`; with
+        the setting off it is left for the first page that needs it, `OllamaTranslator.ensure_loaded`, its room
+        counted all the same), and the page models (`_warm_page_models`) load on threads of their own. An
+        ``ollama_keep_alive`` that keeps the model for good loads it here, and once ready the status line says what
+        loaded where; one that unloads it after every request loads nothing ahead. Quit at the GPU's dialog, or the
+        window closed before the judgement was made (Quit in the chooser): nothing loads after it."""
         from ..ocr import ModelNotInstalled
         from ..pipeline import Pipeline
         from ..translate import TranslationError
@@ -461,6 +469,8 @@ class JobsMixin:
         from ..translate.ollama import loaded_message, never_unloads
 
         s = self.settings
+        closed = getattr(self, "_start_load_cancel", None) or threading.Event()  # (set as the window closes)
+        self._post("models_loading", on=True)  # (the right pane says so while the chooser is on the screen)
         placed = threading.Event()  # the judgement is made: the readers go where it put them (`load_readers`)
         readers = load_readers(s, placed)
         prepare_layout_code(s)  # (beside the OCR model's load: the CPU's work alone)
@@ -474,13 +484,12 @@ class JobsMixin:
                 self._post("ollama_failed", message=failed)
             problems, models = self._check_setup()  # the setup banner from the start on (nothing is loaded for it)
             self._post("health", problems=problems)
-            going = self._judge_gpu(asks_ollama=models is not None)
+            going = not closed.is_set() and self._judge_gpu(asks_ollama=models is not None)
         finally:
             placed.set()
-            self._start_judged = going  # the viewer chooser may come now (`see_menu.chooser_tick`); not after Quit
-        if not going:  # Quit at the GPU's dialog: the window closes, nothing loads
+        if not going or closed.is_set():  # Quit at the GPU's dialog or in the chooser: the window closes, nothing loads
+            self._post("models_loading", on=False)
             return
-        self._post("models_loading", on=True)
         # the model the target language needs (or Qwen for a PLaMo not installed yet: `translate.models.choose`); the
         # translator follows the language from here on (`_use_model`)
         chosen = choose(s.ollama_model, s.target_language, models)
@@ -629,17 +638,23 @@ class JobsMixin:
         """(worker) The start's dialog on the GPU's memory short by *short* MiB, *parts* the ones Start on the
         processor sends there, *loaded* the other models Ollama holds on the card (`place.Loaded`): the "gpu_short"
         event, its answer waited for ("again", "release", "processor" or "quit"; the dialog gone without one, the
-        window closed: "quit") and whether Do not ask again on this computer was ticked."""
+        window closed: "quit", also when it closes before the dialog came) and whether Do not ask again on this computer
+        was ticked."""
         answered = threading.Event()
         reply: list[tuple[str, bool]] = []
+        closed = getattr(self, "_start_load_cancel", None) or threading.Event()  # (set as the window closes)
+        lock = threading.Lock()
 
         def answer(choice: str, remember: bool = False) -> None:
-            if not answered.is_set():
-                reply.append((choice, remember))
-                answered.set()
+            with lock:
+                if not answered.is_set():
+                    reply.append((choice, remember))
+                    answered.set()
 
         self._post("gpu_short", short=short, parts=parts, answer=answer, loaded=tuple(loaded))
-        answered.wait()
+        while not answered.wait(GPU_CLOSED_S):
+            if closed.is_set():  # (the window closed before its dialog came: nothing is to come)
+                answer("quit")
         return reply[0]
 
     def _release_loaded(self, models: list[Any]) -> None:
@@ -662,12 +677,44 @@ class JobsMixin:
         LOG.info("released at the start: %d of TASlation's models, %d MiB", len(released), freed)
         place.wait_freed(before, freed)
 
+    def _gpu_waits(self) -> bool:
+        """Whether the start's dialog on the GPU's memory waits before it comes (`_show_gpu_short`): while the viewer
+        chooser is on the screen or comes there by itself (`see_menu.chooser_due`), and while the book's name is asked
+        for, or about to be (``_start_dialog``: the books the page holds being recognised)."""
+        from . import see_menu
+
+        return see_menu.chooser_due(self) or getattr(self, "_start_dialog", None) is not None
+
+    def _gpu_box_up(self) -> bool:
+        """Whether the start's dialog on the GPU's memory is on the screen (`_show_gpu_short`): the book's name waits
+        for its answer (`_ask_book`, `_ask_name`), looked at again every GPU_HOLD_MS."""
+        dialog = getattr(self, "_gpu_dialog", None)
+        if dialog is None:
+            return False
+        try:
+            return bool(dialog.winfo_exists())
+        except (tk.TclError, AttributeError):
+            return False
+
     def _show_gpu_short(self, short: int, parts: tuple[str, ...], answer: Callable[..., None],
-                        loaded: tuple[Any, ...] = ()) -> None:
+                        loaded: tuple[Any, ...] = (), held: bool = False) -> None:
         """The "gpu_short" event on the Tk thread: the start's dialog (`ui.dialogs.gpu_short.GpuShortDialog`, *loaded*
         the other models Ollama holds on the card), kept as ``_gpu_dialog`` while it is open (a tool answers it through
-        it), the answer handed to *answer*; Quit closes the window."""
+        it), the answer handed to *answer*; Quit closes the window. It never comes under the viewer chooser nor the
+        book's name: while they are due or on the screen (`_gpu_waits`) it waits (``_gpu_held``, looked at again every
+        GPU_HOLD_MS; the judgement and the loads wait with it), and comes alone once they are answered - as a box that
+        comes by itself, once the viewer is chosen (`GpuShortDialog`: the keys stay with the viewer, a click gives them
+        to it). The window closed meanwhile (Quit in the chooser) answers it Quit (`_release_model`). *held*: a look
+        again."""
         from .dialogs.gpu_short import GpuShortDialog
+
+        if held and self._gpu_held is not answer:
+            return  # (answered meanwhile: the window closed)
+        if self._gpu_waits():
+            self._gpu_held = answer
+            self.after(GPU_HOLD_MS, lambda: self._show_gpu_short(short, parts, answer, loaded, held=True))
+            return
+        self._gpu_held = None
 
         def done(choice: str, remember: bool) -> None:
             self._gpu_dialog = None
@@ -807,12 +854,16 @@ class JobsMixin:
         """The window closes: a page being translated is cancelled, and Ollama lets go of the model. Takes a moment at
         most (`ollama.RELEASE_TIMEOUT`). The model the window translated with counts as TASlation's own when the
         Ollama the window started is stopped after the window has gone (`ollama_start.finish_all`, `run_app`): a
-        model named in the settings during the session is not another program's."""
+        model named in the settings during the session is not another program's. The start's dialog on the GPU's
+        memory, waiting for the viewer chooser (Quit there: `_show_gpu_short`), is answered Quit: nothing loads."""
         if self._page_cancel is not None:
             self._page_cancel.set()
         cancel = getattr(self, "_start_load_cancel", None)
         if cancel is not None:
             cancel.set()  # (a load at the start under way ends; what it loaded is released below)
+        held, self._gpu_held = getattr(self, "_gpu_held", None), None
+        if held is not None:
+            held("quit", False)
         count_as_own(getattr(getattr(self, "translator", None), "model", ""),
                      *own_models(getattr(self, "settings", None)))
         if self.pipeline is not None:
@@ -1483,6 +1534,9 @@ class JobsMixin:
         def show(matches: list[str], hint: str) -> None:
             if self._start_dialog is not waiting:  # the window was rebuilt meanwhile: the next page asks again
                 return
+            if self._gpu_box_up():  # (the start's dialog on the GPU's memory first: never the two together)
+                self.after(GPU_HOLD_MS, lambda: show(matches, hint))
+                return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
             self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),
                                              hint=hint if still else "", first=self._first_book_dialog())
@@ -1520,8 +1574,11 @@ class JobsMixin:
         """*then(matches, hint)* with what the start dialog offers (`_recognition`, `recognised_books` and
         `_recognition_hint`), the heavy part in the worker: the
         frames fingerprinted in their areas and every cache's pages looked through (`recognised_books`: some 150 ms
-        for two full-HD frames, nearly all of it the fingerprints) never hold up the window. The books come back as a
-        "recognised" event and *then* follows on the Tk thread; at once when the cache is off (nothing to look at)."""
+        for two full-HD frames, nearly all of it the fingerprints) never hold up the window. While the window is not
+        ready yet - the worker busy with the start, `_job_init`: the book's name is asked for as soon as the viewer is
+        chosen, the models loading meanwhile - in a thread of its own instead (the caches' reads are locked,
+        `CacheStore`). The books come back as a "recognised" event and *then* follows on the Tk thread; at once when the
+        cache is off (nothing to look at)."""
         request = self._recognition(*frames)
         if not request.cached:
             then(*self._recognition_hint(request, None))
@@ -1532,7 +1589,10 @@ class JobsMixin:
         def job() -> None:
             self._post("recognised", token=token, names=recognised_books(request))
 
-        self._jobs.put(job)
+        if getattr(self, "ready", True):
+            self._jobs.put(job)
+        else:
+            threading.Thread(target=job, name="taslation-recognise", daemon=True).start()
 
     def _recognition_hint(self, request: Recognition, books: tuple[list[str], str] | None) -> tuple[list[str], str]:
         """The start dialog's *matches* and *hint* from what `recognised_books` found for *request* (None: the caches
@@ -1596,6 +1656,9 @@ class JobsMixin:
 
         def show(matches: list[str], hint: str) -> None:
             if self._start_dialog is not waiting:  # the window was rebuilt meanwhile: nothing follows
+                return
+            if self._gpu_box_up():  # (the start's dialog on the GPU's memory first: never the two together)
+                self.after(GPU_HOLD_MS, lambda: show(matches, hint))
                 return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
             self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),

@@ -243,22 +243,39 @@ def test_a_model_ollama_keeps_loaded_as_asked_for_good_is_only_looked_at(start):
     assert worker(start.order) == ["health", ("warm-up", "qwen3.5:4b")]  # (not so: loaded, or kept for good, now)
 
 
-def test_the_viewer_chooser_waits_for_the_starts_judgement_of_the_gpu_and_never_comes_after_quit(start, monkeypatch):
-    seen = []
-    judge = jobs.JobsMixin._judge_gpu
+def _loading_said(w) -> list[tuple[str, object]]:
+    """What was posted, in order, "models_loading" with its *on* and the rest by kind (the events taken)."""
+    out = []
+    while not w._events.empty():
+        kind, data = w._events.get_nowait()
+        out.append((kind, data.get("on")) if kind == "models_loading" else (kind, None))
+    return out
 
-    def judging(self, asks_ollama=True):
-        seen.append(getattr(self, "_start_judged", None))  # (not yet while the GPU's memory is judged)
-        return judge(self, asks_ollama)
 
-    monkeypatch.setattr(Start, "_judge_gpu", judging)
+def test_loading_is_said_first_and_quit_at_the_gpus_dialog_or_in_the_chooser_loads_nothing(start, monkeypatch):
+    """The viewer chooser is on the screen from the window's first tick (`see_menu.chooser_tick`: nothing waits for
+    the start's judgement): "Loading the models..." is posted before anything else, Ollama's start first among it;
+    Quit at the GPU's dialog, or the window closed before the judgement (Quit in the chooser, `_release_model`),
+    loads nothing after it and the indicator goes."""
     w = start(([], ["qwen3.5:4b"]))
     w._job_init()
-    assert seen == [None] and w._start_judged is True  # (`see_menu.chooser_tick` may bring it now)
+    said = _loading_said(w)
+    assert said[0] == ("models_loading", True) and ("ready", None) in said
     monkeypatch.setattr(Start, "_judge_gpu", lambda self, asks_ollama=True: False)  # Quit at the GPU's dialog
+    start.order.clear()
     w = start(([], ["qwen3.5:4b"]))
     w._job_init()
-    assert w._start_judged is False
+    assert _loading_said(w) == [("models_loading", True), ("health", None), ("models_loading", False)]
+    assert worker(start.order) == ["health"]  # (no warm-up, no pipeline: nothing loads)
+    judged = []
+    monkeypatch.setattr(Start, "_judge_gpu", lambda self, asks_ollama=True: judged.append(1) or True)
+    start.order.clear()
+    w = start(([], ["qwen3.5:4b"]))
+    w._start_load_cancel = threading.Event()
+    w._start_load_cancel.set()  # (the window closed - Quit in the chooser - while Ollama started)
+    w._job_init()
+    assert judged == [] and worker(start.order) == ["health"]
+    assert _loading_said(w)[-1] == ("models_loading", False) and w.pipeline is None
 
 
 def test_the_start_loads_nothing_of_ollama_unless_the_settings_keep_the_model(start):

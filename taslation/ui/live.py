@@ -1085,7 +1085,8 @@ class LiveViewMixin(BlackViewerMixin):
             if self._auto_last is None or frames_differ(self._auto_last, thumb):
                 if self._auto_candidate is not None and not frames_differ(self._auto_candidate, thumb, 0.5):
                     if not self.ready:
-                        self._queue("auto")  # taken as soon as the models are loaded
+                        if not self._name_first(image, thumb):
+                            self._queue("auto")  # taken as soon as the models are loaded
                         return
                     self._auto_last = thumb
                     self._auto_candidate = None
@@ -1723,12 +1724,29 @@ class LiveViewMixin(BlackViewerMixin):
         if not self.ready or self.busy:
             f.taken = None
             self._cancel_page(turned=True)  # the page being read is not on show any more
-            self._queue("auto")
+            if self._name_first(image, thumb):
+                self._mark_taken(image, thumb, frame_detail)  # (as a page taken when ready: a sharper frame waits)
+            else:
+                self._queue("auto")
             return "queued"
         self._auto_last, self._auto_candidate = thumb, None
         self._mark_taken(image, thumb, frame_detail)
         self._on_new_page(image, thumb, complete=complete)
         return "started"
+
+    def _name_first(self, image: Image.Image, thumb: np.ndarray) -> bool:
+        """While the models load at the start (not ready, no job): a settled page of the viewer chosen that starts a
+        book (`_starts_book`: the Book box names none) has the book's name asked for now (`_on_new_page`,
+        `_begin_book`), not once the models are in - the dialog comes as the viewer is chosen and its page seen -, the
+        page itself read once they are (`_translate_pending` queues it as the name is given). Taken as a page is when
+        the window is ready (``_auto_last``): the frame of it Auto sees after the answer is no new page, so the job
+        begun on it is not cancelled and begun again. Whether it was taken so; else the page waits for the models as
+        ever (`_queue`)."""
+        if self.ready or self.busy or self.selected is None or not self._starts_book(image):
+            return False
+        self._auto_last, self._auto_candidate = thumb, None
+        self._on_new_page(image, thumb)
+        return True
 
     def _held_in_viewer(self) -> bool:
         """Whether the mouse's primary button is held down while the viewer is in front (`overlay.button_down`, read

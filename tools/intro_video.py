@@ -196,8 +196,8 @@ SCENES: tuple[Scene, ...] = (
     Scene("chooser", "Choose the viewer",
           "At the start, TASlation asks which window is the viewer. The viewer chosen before comes first in the list "
           "and is already selected: OK is enough.", 5.0, present=chooser_present,
-          follows=cites(MANUAL, "TASlation asks which window is the viewer: a small dialog with a \"Viewer\" list of "
-                                "the windows on the screen",
+          follows=cites(MANUAL, "TASlation asks at once which window is the viewer, while the models load behind it: "
+                                "a small dialog with a \"Viewer\" list of the windows on the screen",
                         "TASlation never chooses a window by itself.",
                         "the viewer you chose before comes first in the list and is already selected, so Enter or "
                         "\"OK\" is enough")),

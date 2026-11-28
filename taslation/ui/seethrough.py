@@ -76,9 +76,10 @@ where no window lies over it - and the viewer the keys alone.
   clicked with the panes on the screen). Its dialogs come up alone, over the viewer (`dialog_centre`,
   `layout.dialog_area`), on the viewer's monitor (`layout.book_monitor`); one the reader asked for (from a pane, the
   menu or the button: `asked`) takes the keys as it shows (`_mapped`), and so do the start's own (the legal notice,
-  the GPU's box at the start, the viewer chooser at the start, the first book's name). One that comes by itself
-  during a session - the setup banner's, a warning box, a question a change of the sheet brought, the GPU's box later
-  than the start, the name of a new book - while the person is in the book or in another program comes quietly
+  the viewer chooser at the start, the first book's name). One that comes by itself during a session - the setup
+  banner's, a warning box, a question a change of the sheet brought, the GPU's box (at the start it waits for the
+  chooser and the book's name: `jobs.JobsMixin._show_gpu_short`), the name of a new book - while the person is in
+  the book or in another program comes quietly
   (`comes_quietly`, `layout.show_by_itself`): shown without being activated (``wm state normal``, never ``wm
   deiconify``, which forces the focus), topmost by SWP_NOACTIVATE, on the viewer's monitor; it takes the keys once
   clicked, and `front_tick` brings none such to the front (`_shown_dialogs`). A dialog the person closes gives the

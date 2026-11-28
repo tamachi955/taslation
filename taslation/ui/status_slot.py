@@ -7,8 +7,9 @@ in the right side pane says what the page cannot show itself, in fixed words, wi
 * the page could not be translated (its job failed, or the translator gave an error): "This page could not be
   translated. F5 tries again." with an orange "!" - while the viewer shows that page;
 * the page has nothing to read: "Nothing to read on this page." for `NOTHING_S` seconds;
-* the models still loading at the start (`jobs.JobsMixin._watch_loads`) while no page is under way: "Loading the
-  models...", in either role, until everything the start loads is there.
+* the models still loading at the start (`jobs.JobsMixin._watch_loads`) while no page is under way - from the first
+  moment, behind the viewer chooser, and while the page seen waits for them: "Loading the models...", in either
+  role, until everything the start loads is there.
 
 Nothing else is said there. The right side pane says it (`seethrough.right_rows`, the "!" ones as a warning). The
 slot is looked at whenever the event pump runs (`tick`, from `StatusMixin._flush_busy`): no timer of its own."""
@@ -91,8 +92,9 @@ def job_on_show(window: Any) -> bool:
 
 def wanted(window: Any, state: SlotState, now: float) -> tuple[str, bool] | None:
     """What the slot says now (its key, and whether it is the orange "!" one), or None."""
-    if getattr(window, "_models_loading", False) and not getattr(window, "_busy_shown", False):
-        return MODELS_KEY, False  # (in either role: the start's loads, no page under way)
+    waits = getattr(window, "_queued", None) is not None and not getattr(window, "ready", True)
+    if getattr(window, "_models_loading", False) and (waits or not getattr(window, "_busy_shown", False)):
+        return MODELS_KEY, False  # (in either role: the start's loads, no page under way - one waits for them)
     if not reader_role(window):
         return None
     result = getattr(window, "last_result", None)

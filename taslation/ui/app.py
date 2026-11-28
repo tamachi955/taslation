@@ -242,9 +242,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self.windows: list[WindowInfo] = []
         self.selected: WindowInfo | None = None
         self.window_query = (window_query or "").strip()
-        # the start's judgement of the GPU's memory made (`JobsMixin._job_init`): the viewer chooser may come from then
-        # on (`see_menu.chooser_tick`), after the legal notice and the GPU's dialog, alone
-        self._start_judged = False
         self._waiting = False  # the viewer window shows another tab; Auto mode is holding back
         self.annotation_store = AnnotationStore(settings.annotations_dir)
         self.glossary_store = GlossaryStore(settings.glossary_dir)

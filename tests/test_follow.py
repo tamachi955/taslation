@@ -932,6 +932,34 @@ def test_a_page_that_settles_while_a_job_runs_is_taken_after_it(setup, monkeypat
     assert len(w.new_pages) == 3
 
 
+def test_a_book_s_first_page_seen_while_the_models_load_is_read_once_after_its_name(setup):
+    """The models still loading, a settled page that starts a book has its name asked for at once
+    (`live._name_first`), taken as a page is when the window is ready: the viewer's next frames of it are no new page,
+    so the job begun on it as the name is given (`_translate_pending`) runs on - not cancelled by a follow of that very
+    page begun meanwhile and begun again (a stand-in's start did so, 40 ms after the answer)."""
+    v = setup.viewer
+    w = setup.make(owner="viewer")
+    w.ready = False
+    asked: list[Image.Image] = []
+    w._on_new_page = live.LiveViewMixin._on_new_page.__get__(w)  # (the App's: the book's start first)
+    w._starts_book = lambda image: not asked or w._start_pending is not None
+    w._begin_book = lambda image, thumb: (asked.append(image), setattr(w, "_start_pending", (image, thumb)))
+    w.start()
+    setup.clock.run(3)
+    assert asked == [v.frames[0][1]] and w._queued is None and not w.busy  # asked once, the page waits for it
+    for _step in range(30):  # (the answer while a follow of that page would be under way: none is begun now)
+        if getattr(w._following, "op", None) is not None:
+            break
+        setup.clock.run(0.05)
+    w.ready = True
+    pending, w._start_pending = w._start_pending, None
+    w._translate_pending(pending)  # the name given, the models in: the page read
+    cancel = w._page_cancel
+    assert w.busy and w._jobs.qsize() == 1
+    setup.clock.run(3)
+    assert not cancel.is_set() and w._queued is None and w._jobs.qsize() == 1 and asked == [v.frames[0][1]]
+
+
 def test_without_the_hooks_the_viewer_is_polled_as_before(hidden_root, monkeypatch):
     monkeypatch.setattr(live.WindowEvents, "start", classmethod(lambda cls: None))
     w = SimpleNamespace(settings=SimpleNamespace(follow="events"), selected=VIEWER)

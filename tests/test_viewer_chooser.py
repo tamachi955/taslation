@@ -1,10 +1,10 @@
-"""The viewer chooser (`ui.see_menu.ViewerDialog`): at every start, once the legal notice and the GPU's dialog are
-over, TASlation asks which window is the viewer and chooses none by itself. A drop-down of the windows named as their
-taskbar buttons, the remembered viewer first and preselected (Enter or OK), nothing preselected and OK greyed when
-none looks like a viewer, List again, Quit (Close while a viewer is followed); again after the viewer was closed,
-saying so, the new window only preselected; none for a viewer named with --window; the right pane's foot names
-the viewer followed ("Viewer: <title>", a long title shortened in the middle). Fake windows (invented titles) and a withdrawn Tk root only: nothing is shown,
-no window of the computer's is touched."""
+"""The viewer chooser (`ui.see_menu.ViewerDialog`): at every start, once the legal notice is over, at once (the
+models load behind it), TASlation asks which window is the viewer and chooses none by itself. A drop-down of the
+windows named as their taskbar buttons, the remembered viewer first and preselected (Enter or OK), nothing
+preselected and OK greyed when none looks like a viewer, List again, Quit (Close while a viewer is followed); again
+after the viewer was closed, saying so, the new window only preselected; none for a viewer named with --window; the
+right pane's foot names the viewer followed ("Viewer: <title>", a long title shortened in the middle). Fake windows
+(invented titles) and a withdrawn Tk root only: nothing is shown, no window of the computer's is touched."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -36,7 +36,6 @@ class FakeApp(tk.Toplevel):
         self.windows = list(screen)
         self.selected = None
         self.window_query = ""
-        self._start_judged = True
         self._viewer_closed = None
         self.window_box = ttk.Combobox(self, values=[w.label() for w in self.windows])
         self.picked, self.closed = [], 0
@@ -129,15 +128,13 @@ def test_quit_ends_taslation_while_no_viewer_is_followed_and_close_leaves_the_vi
     assert app.closed == 1 and app.selected is NOTEPAD and not app.picked
 
 
-def test_the_chooser_comes_once_the_start_is_judged_alone_and_stays_until_a_choice(hidden_root, keys, monkeypatch):
+def test_the_chooser_comes_at_once_alone_and_stays_until_a_choice(hidden_root, keys, monkeypatch):
+    """At the window's first tick, the models loading behind it (nothing waits for the start's judgement of the GPU,
+    whose dialog waits for it instead: `chooser_due`); never while a dialog holds the window."""
     from taslation.ui.dialogs import help as help_dialogs
 
     app = FakeApp(hidden_root, [CHAT, NOTEPAD])
-    app._start_judged = False  # (the legal notice, then the GPU's memory judged: not yet)
-    sm.chooser_tick(app)
-    assert app._see_chooser is None
-    app._start_judged = True
-    monkeypatch.setattr(help_dialogs, "modal_up", lambda window: True)  # the GPU's dialog on the screen
+    monkeypatch.setattr(help_dialogs, "modal_up", lambda window: True)  # a dialog holds the window
     sm.chooser_tick(app)
     assert app._see_chooser is None
     monkeypatch.setattr(help_dialogs, "modal_up", lambda window: False)
@@ -149,6 +146,15 @@ def test_the_chooser_comes_once_the_start_is_judged_alone_and_stays_until_a_choi
     sm.chooser_tick(app)
     assert app._see_chooser is dialog  # (one; it stays: nothing chooses a viewer but the person)
     dialog.destroy()
+    assert not sm.chooser_due(app)  # (no see-through mode in this stand-in: no chooser)
+    monkeypatch.setattr(ui, "on", lambda window: True)  # (see-through mode, TASlation's own window hidden)
+    assert sm.chooser_due(app)  # (no viewer followed: the GPU's dialog of the start waits for it)
+    app.selected = NOTEPAD  # (chosen in it)
+    assert not sm.chooser_due(app)  # (the viewer chosen: the GPU's dialog may come)
+    app.selected, app.window_query = None, "Yomizuq"
+    assert not sm.chooser_due(app)  # (a viewer named with --window: no chooser to wait for)
+    app.window_query, app._see_hidden = "", False
+    assert not sm.chooser_due(app)  # (no hidden window: no chooser)
 
 
 def test_the_viewer_closed_brings_the_chooser_again_saying_so_the_new_window_only_preselected(hidden_root, keys):

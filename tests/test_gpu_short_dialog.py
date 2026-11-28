@@ -315,10 +315,11 @@ def test_ollama_down_at_the_setup_check_is_not_asked_by_the_judgement(tmp_path, 
 def test_the_window_shows_the_dialog_keeps_it_while_open_and_quit_closes_the_window(hidden_root):
     class Win(tk.Toplevel):
         _show_gpu_short = jobs.JobsMixin._show_gpu_short
+        _gpu_waits = jobs.JobsMixin._gpu_waits
 
         def __init__(self, master):
             super().__init__(master)
-            self._gpu_dialog = None
+            self._gpu_dialog = self._gpu_held = None
             self.closed = []
 
         def _on_close(self):
@@ -335,3 +336,88 @@ def test_the_window_shows_the_dialog_keeps_it_while_open_and_quit_closes_the_win
     w.update()
     assert got[-1] == ("quit", False) and w.closed == [1]
     w.destroy()
+
+
+class Held(tk.Toplevel):
+    """The parts of the App the start's dialog and its wait use: the viewer chooser due while *chooser* says so
+    (`see_menu.chooser_due`, patched), the book's name asked while ``_start_dialog`` is set."""
+
+    _show_gpu_short = jobs.JobsMixin._show_gpu_short
+    _gpu_waits = jobs.JobsMixin._gpu_waits
+    _gpu_box_up = jobs.JobsMixin._gpu_box_up
+    _release_model = jobs.JobsMixin._release_model
+
+    def __init__(self, master, tmp_path):
+        super().__init__(master)
+        self.withdraw()
+        self._gpu_dialog = self._gpu_held = self._start_dialog = self._page_cancel = None
+        self.selected, self.chooser, self.closed = None, True, []
+        self._start_load_cancel = threading.Event()
+        self.settings, self.translator, self.pipeline = _settings(tmp_path), None, None
+
+    def _on_close(self):
+        self.closed.append(1)
+
+
+def _pumped(w, until, seconds=3.0) -> bool:
+    """Tk's events and timers run until *until()* holds (or *seconds* have gone)."""
+    import time
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        w.update()
+        if until():
+            return True
+        time.sleep(0.01)
+    return bool(until())
+
+
+@pytest.fixture
+def held(hidden_root, tmp_path, monkeypatch):
+    from taslation.ui import see_menu
+
+    monkeypatch.setattr(jobs, "GPU_HOLD_MS", 10)
+    monkeypatch.setattr(see_menu, "chooser_due", lambda app: app.selected is None and app.chooser)
+    w = Held(hidden_root, tmp_path)
+    yield w
+    w.destroy()
+
+
+def test_the_start_s_dialog_waits_for_the_chooser_and_the_book_s_name_and_then_comes_alone(held):
+    """The judgement asks while the viewer chooser is on the screen (it comes at once, the models loading behind it):
+    the dialog waits - never under the chooser - and so does the book's name's (``_start_dialog``, the books being
+    recognised or the dialog open); it comes once both are answered, and the book's name waits for it in turn."""
+    got = []
+    answer = lambda choice, remember=False: got.append((choice, remember))  # noqa: E731
+    held._show_gpu_short(296, (READERS,), answer)
+    assert held._gpu_dialog is None and held._gpu_held is answer
+    assert not _pumped(held, lambda: held._gpu_dialog is not None, 0.2)  # (the chooser on the screen)
+    held.selected = SimpleNamespace(hwnd=1, title="made-up viewer")  # chosen; the book's name asked at once
+    held._start_dialog = jobs.Recognising()
+    assert not _pumped(held, lambda: held._gpu_dialog is not None, 0.2)
+    held._start_dialog = None  # answered
+    assert _pumped(held, lambda: held._gpu_dialog is not None)
+    assert isinstance(held._gpu_dialog, gpu_short.GpuShortDialog) and held._gpu_held is None and not got
+    assert held._gpu_box_up()  # (a book's name asked now waits for it: `JobsMixin._ask_book`)
+    held._gpu_dialog.choose("processor")
+    assert got == [("processor", False)] and not held._gpu_box_up() and not held.closed
+
+
+def test_quit_in_the_chooser_answers_the_waiting_dialog_quit_and_it_never_comes(held):
+    got = []
+    answer = lambda choice, remember=False: got.append((choice, remember))  # noqa: E731
+    held._show_gpu_short(296, (READERS,), answer)
+    held._release_model()  # (Quit in the chooser: `App._on_close`)
+    assert got == [("quit", False)] and held._gpu_held is None and held._start_load_cancel.is_set()
+    held.chooser = False
+    assert not _pumped(held, lambda: held._gpu_dialog is not None, 0.2)  # (its look again finds it answered)
+
+
+def test_the_start_waiting_for_the_dialog_takes_quit_when_the_window_closes_before_it_came(monkeypatch):
+    """The "gpu_short" event posted as the window closed is never handled: the start's wait ends Quit all the same
+    (the judgement returns, nothing loads)."""
+    monkeypatch.setattr(jobs, "GPU_CLOSED_S", 0.01)
+    w = SimpleNamespace(_start_load_cancel=threading.Event(), posted=[])
+    w._post = lambda kind, **data: w.posted.append(kind)
+    threading.Timer(0.05, w._start_load_cancel.set).start()
+    assert jobs.JobsMixin._ask_gpu_short(w, 296, (READERS,)) == ("quit", False) and w.posted == ["gpu_short"]

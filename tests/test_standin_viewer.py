@@ -127,6 +127,22 @@ def test_the_keys_after_the_start_and_each_turn_are_judged_on_who_was_in_front_a
     assert standin_e2e.keys_report(SimpleNamespace(), events, 0.0, turns, 0.0, lambda t: t) is None
 
 
+def test_the_start_clock_times_the_chooser_the_book_s_name_and_the_gpu_s_dialog_from_the_window_s_making():
+    """(`standin_e2e.start_clock`: the driver's first chooser row, the first book's-name dialog as it was on the
+    screen, the GPU's dialog where it came; None for what did not come)"""
+    notes = SimpleNamespace(app_events=[{"kind": "ready", "t": 3000.0}], displays=[{"t": 4100.0, "lettered": True}],
+                            book_dialogs=[{"t": 1500.0, "shown_t": 1530.0, "answered_t": 3060.0}], gpu_dialogs=[])
+    chooser = [{"t": 430.0, "answered_t": 880.0}, {"t": 9000.0, "answered_t": None}]
+    out = standin_e2e.start_clock(notes, None, 0.0, 190.0, 220.0, chooser)
+    assert {k: out[k] for k in ("chooser_ms", "chooser_answered_ms", "book_dialog_ms", "book_answered_ms",
+                                "gpu_dialog_ms", "ready_ms", "first_lettered_ms")} == {
+        "chooser_ms": 430, "chooser_answered_ms": 880, "book_dialog_ms": 1530, "book_answered_ms": 3060,
+        "gpu_dialog_ms": None, "ready_ms": 3000, "first_lettered_ms": 4100}
+    notes.book_dialogs, notes.gpu_dialogs = [], [{"t": 2000.0}]
+    out = standin_e2e.start_clock(notes, None, 0.0, 190.0, 220.0)
+    assert (out["chooser_ms"], out["book_dialog_ms"], out["gpu_dialog_ms"]) == (None, None, 2000)
+
+
 def _plan(wait_done=None):
     names = standin_e2e.wanted("all")
     first = standin_e2e.pages_needed(names)

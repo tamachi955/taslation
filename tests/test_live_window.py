@@ -115,6 +115,8 @@ class Window(BlackViewerMixin):
     _set_viewer_hidden = app_mod.App._set_viewer_hidden
     translate_now = app_mod.App.translate_now
     _queue = app_mod.App._queue
+    _name_first = app_mod.App._name_first
+    _starts_book = lambda self, image: False  # (the book has its name: the start, tests/test_start_flow.py)
     _run_queued = app_mod.App._run_queued
     _start_translate = app_mod.App._start_translate
     _find_page = app_mod.App._find_page

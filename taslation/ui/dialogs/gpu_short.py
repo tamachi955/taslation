@@ -1,5 +1,7 @@
 """The start's dialog when the GPU's memory is short for everything TASlation puts there (`taslation.ocr.place`: the
-one judgement of the session, `ui.jobs.JobsMixin._judge_gpu`, made after the legal notice, before anything loads).
+one judgement of the session, `ui.jobs.JobsMixin._judge_gpu`, made after the legal notice while the viewer chooser is
+on the screen, before anything loads). It never comes under the chooser nor the book's name: it waits until they are
+answered (`ui.jobs.JobsMixin._show_gpu_short`), and the start with it.
 
 TASlation's own box, as `caches.WarningBox` (its warning icon, its lines broken at `caches.WARNING_CHARS`, centred over
 the window, in front and modal), with three ways out: Check again (the person closed something: the start judges
@@ -10,8 +12,9 @@ System changes it back). Check again has the focus. The other models Ollama hold
 largest first, each with its MB) are named, TASlation's own apart from other programs'; with one of TASlation's
 among them a fourth way comes first, Release and check again (those of TASlation's are released, never another
 program's: `jobs.JobsMixin._release_loaded`). Nothing is sent anywhere: the figures are the card's own (NVML) and
-Ollama's on this computer. At the start it takes the keys as it shows; one that comes once a viewer is followed (later
-than the start, the person reading) is shown without taking them: topmost over the viewer, a click gives it the keys
+Ollama's on this computer. With no viewer followed (a viewer named with --window, not found yet) it takes the keys as
+it shows; one that comes once a viewer is followed (chosen in the chooser just before, or later, the person reading)
+is shown without taking them while the person is in the book: topmost over the viewer, a click gives it the keys
 (`seethrough.comes_quietly`, `layout.show_quietly`).
 
 The dialog never appears without an NVIDIA GPU (nothing is judged), in a command or a tool (they cannot ask: they
@@ -58,8 +61,8 @@ class GpuShortDialog(tk.Toplevel):
                  on_answer: Callable[[str, bool], None], loaded: Sequence[Any] = ()):
         super().__init__(master)
         app = master._root()
-        # (the start's own box takes the keys as it shows; one that comes once a viewer is followed - later than the
-        # start - is shown without taking them from it, `layout.show_quietly`)
+        # (with no viewer followed the box takes the keys as it shows; one that comes once a viewer is followed - the
+        # chooser answered before it, or later - is shown without taking them from it, `layout.show_quietly`)
         self.quiet = getattr(app, "selected", None) is not None and seethrough.comes_quietly(app)
         if self.quiet:
             self.withdraw()
