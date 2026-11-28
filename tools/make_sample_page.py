@@ -45,10 +45,10 @@ def find_jp_font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def draw_vertical_text(draw: ImageDraw.ImageDraw, text: str, cx: float, top: float, font: ImageFont.FreeTypeFont,
-                       size: int, max_rows: int) -> tuple[int, int, int, int]:
-    """Draw text in vertical columns, right to left. Returns the text bounding box."""
+                       size: int, max_rows: int, col_gap: float = 1.15) -> tuple[int, int, int, int]:
+    """Draw text in vertical columns, right to left, *col_gap* sizes apart. Returns the text bounding box."""
     columns: list[str] = [text[i : i + max_rows] for i in range(0, len(text), max_rows)]
-    col_w = size * 1.15
+    col_w = size * col_gap
     total_w = col_w * len(columns)
     x = cx + total_w / 2 - col_w / 2
     boxes = []
@@ -259,7 +259,72 @@ def make_narrow_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[
     return img, truth
 
 
-LAYOUTS = {"panels": make_page, "edges": make_edge_page, "narrow": make_narrow_page}
+LINES_PAIRS = ["まさかそんなことって︙︙", "えっ︙", "ちょっと待ってよ", "やっぱりそうかここで待っててね", "気をつけて︙",
+               "今日はいい天気だね明日また来るよ", "急いで", "信じられない︙", "うそでしょ", "信じられないそんなことって︙",
+               "うそでしょ本当にそうなの"]
+
+
+def make_pairs_page(seed: int, width: int = 1240, height: int = 1754) -> tuple[Image.Image, list[dict]]:
+    """A page of bubbles joined in pairs, each drawn over the one before it (its outline the one they share), as a
+    page shown small has them: a tall narrow bubble of two columns (the left one by its outline, ending in an
+    ellipsis) with a narrower one over its upper right corner; a bubble of three columns with a tall narrow one over
+    its left side; one with a smaller one over its foot; two tall narrow ones side by side, the right one over the
+    left one's right side; a tall narrow bubble by the page's right edge; and two tall narrow ones side by side
+    lettered from outline to outline, three columns each, the columns by the outline they share touching it. For the
+    erase, the rooms and the patches of joined bubbles (`--layout pairs`; the lettering audit's layouts 18 and 19 are
+    the same with their layers apart)."""
+    rng = random.Random(seed)
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    margin, gutter, mid_y, split_x = 60, 24, height // 2, width // 2
+    tr = (split_x + gutter // 2, margin, width - margin, mid_y - gutter // 2)
+    tl = (margin, margin, split_x - gutter // 2, mid_y - gutter // 2)
+    bt = (margin, mid_y + gutter // 2, width - margin, height - margin)
+    for p in (tr, tl, bt):
+        scribble(draw, (p[0] + 10, p[1] + 10, p[2] - 10, p[3] - 10), rng)
+        draw.rectangle(p, outline=(0, 0, 0), width=6)
+    truth: list[dict] = []
+    bubbles: list[tuple[float, float, float, float]] = []
+
+    def bubble(cx: float, cy: float, rx: float, ry: float) -> None:  # (drawn over the ones before it)
+        draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+        bubbles.append((cx, cy, rx, ry))
+
+    def text(k: int, cx: float, cy: float, size: int, rows: int, kind: str, col_gap: float = 1.15) -> None:
+        line = LINES_PAIRS[k]
+        n = min(len(line), rows)
+        tb = draw_vertical_text(draw, line, cx, cy - n * size * 1.05 / 2, find_jp_font(size), size, rows, col_gap)
+        bx, by, brx, bry = bubbles[k]
+        truth.append({"bbox": [int(bx - brx), int(by - bry), int(math.ceil(bx + brx)), int(math.ceil(by + bry))],
+                      "text_box": list(tb), "text": line, "shape": "ellipse", "kind": kind,
+                      "ellipse": [bx, by, brx, bry]})
+
+    bubble(tr[0] + 150, tr[1] + 400, 46, 160)
+    bubble(tr[0] + 200, tr[1] + 250, 30, 118)
+    bubble(tr[2] - 58, tr[1] + 360, 31, 140)
+    bubble(tl[0] + 380, tl[1] + 330, 88, 135)
+    bubble(tl[0] + 262, tl[1] + 370, 40, 165)
+    bubble(bt[0] + 260, bt[1] + 200, 95, 120)
+    bubble(bt[0] + 300, bt[1] + 372, 70, 95)
+    bubble(bt[0] + 640, bt[1] + 330, 40, 170)
+    bubble(bt[0] + 708, bt[1] + 310, 36, 160)
+    bubble(bt[0] + 900, bt[1] + 330, 42, 170)
+    bubble(bt[0] + 975, bt[1] + 310, 42, 160)
+    text(0, tr[0] + 150, tr[1] + 440, 25, 6, "pair-corner-big")
+    text(1, tr[0] + 206, tr[1] + 236, 24, 6, "pair-corner-small")
+    text(2, tr[2] - 58, tr[1] + 360, 24, 12, "narrow-edge")
+    text(3, tl[0] + 392, tl[1] + 330, 25, 5, "pair-side-big")
+    text(4, tl[0] + 258, tl[1] + 370, 25, 12, "pair-side-narrow")
+    text(5, bt[0] + 260, bt[1] + 190, 25, 6, "pair-below-top")
+    text(6, bt[0] + 305, bt[1] + 385, 25, 6, "pair-below-foot")
+    text(7, bt[0] + 634, bt[1] + 340, 26, 12, "pair-narrow-left")
+    text(8, bt[0] + 712, bt[1] + 310, 26, 12, "pair-narrow-right")
+    text(9, bt[0] + 900, bt[1] + 330, 22, 5, "pair-tight-left", col_gap=1.12)
+    text(10, bt[0] + 975, bt[1] + 310, 22, 4, "pair-tight-right", col_gap=1.12)
+    return img, truth
+
+
+LAYOUTS = {"panels": make_page, "edges": make_edge_page, "narrow": make_narrow_page, "pairs": make_pairs_page}
 
 
 def main() -> None:
@@ -268,7 +333,9 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--layout", choices=sorted(LAYOUTS), default="panels",
                     help="panels: the test pages' (the default); edges: bubbles cut by the page's four edges; narrow: "
-                         "tall narrow bubbles with one column each, and bubbles joined side by side")
+                         "tall narrow bubbles with one column each, and bubbles joined side by side; pairs: bubbles "
+                         "joined in pairs, each drawn over the one before it (tall narrow ones side by side, one over "
+                         "another's upper corner, over a side, over a foot)")
     args = ap.parse_args()
     img, truth = LAYOUTS[args.layout](args.seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)

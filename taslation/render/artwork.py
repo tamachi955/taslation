@@ -110,6 +110,8 @@ ROOM_HOLD = 0.8  # of a model bubble's text box at the least: the paper closed r
 #                  its room (`closed_room`; less holds part of its lettering: the paper between the lines of a
 #                  bubble drawn see-through, where the translation came out tiny) ...
 ROOM_IN = 7  # ... drawn in by an ellipse this wide (px at the page's scale), as a white area's (tier 2)
+OWN_PAPER = 0.1  # of the paper in that text box: less, on a piece lying mostly outside the box, is a neighbour's paper
+ROOM_CLOSE = 0.2  # of a glyph: the room closed by a disc of this radius first (strokes of glyphs touching the outline)
 TONE_FILL = True  # a hole on a ground that repeats itself (a screentone, a hatching) is painted from it (`fill_tone`)
 TONE_BAND = 24  # px of ground round the hole its repeats are measured on (`tone_shifts`) ...
 TONE_REPEAT, TONE_DIP = 0.8, 0.3  # ... where it repeats (normalised autocorrelation), after falling under this
@@ -355,16 +357,54 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     x0, y0, x1, y1 = max(region.x0, wx0), max(region.y0, wy0), min(region.x1, wx1), min(region.y1, wy1)
     if x1 <= x0 or y1 <= y0:
         return None
+    inside = _own_paper(inside, region, (wx0, wy0))
     room = np.zeros((region.height, region.width), np.uint8)
     sides = sides_of((wx0, wy0, wx1, wy1), region.bounds, (image.shape[1], image.shape[0]))
     filled = fill_holes(inside.astype(np.uint8) * 255, sides)
     room[y0 - region.y0:y1 - region.y0, x0 - region.x0:x1 - region.x0] = filled[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
+    # (the text box as far as the paper reaches: a model's box round a column by the outline took in the outline)
+    ys, xs = np.nonzero(filled)
+    if not xs.size:
+        return None
     tx0, ty0, tx1, ty1 = region.text_box
+    tx0, ty0 = max(tx0, wx0 + int(xs.min())), max(ty0, wy0 + int(ys.min()))
+    tx1, ty1 = min(tx1, wx0 + int(xs.max()) + 1), min(ty1, wy0 + int(ys.max()) + 1)
     held = room[max(0, ty0 - region.y0):max(0, ty1 - region.y0), max(0, tx0 - region.x0):max(0, tx1 - region.x0)]
     if not held.size or cv2.countNonZero(held) < ROOM_HOLD * held.size:
         return None
+    # (closed over the strokes of glyphs that touch the outline: no bay of the lettering's own drawn in further; the
+    # box's edge carried on beyond it, so that the paper is not grown to an edge it came near)
+    glyph = float(region.glyph or 20.0 * scale)
+    reach = max(1, int(ROOM_CLOSE * glyph))
+    room = cv2.morphologyEx(cv2.copyMakeBorder(room, reach, reach, reach, reach, cv2.BORDER_REPLICATE),
+                            cv2.MORPH_CLOSE, pagescale.disc(2 * reach + 1, 1.0))[reach:-reach, reach:-reach]
     room = cv2.erode(room, pagescale.disc(ROOM_IN, scale))
     return room if cv2.countNonZero(room) else None
+
+
+def _own_paper(inside: np.ndarray, region: TextRegion, corner: tuple[int, int]) -> np.ndarray:
+    """*inside* (the paper `closed_interior` found round *region*'s lettering, a window whose corner lies at *corner* on
+    the page) but for a neighbour's: a piece of it that lies mostly outside *region*'s box and holds under
+    `OWN_PAPER` of the paper in its text box - a bubble joined to it, the outline between them, that the model's text
+    box reached into (its room ran over that outline)."""
+    n, labels = cv2.connectedComponents(inside.astype(np.uint8), connectivity=4)
+    if n <= 2:
+        return inside
+    x0, y0 = corner
+    h, w = inside.shape
+    tx0, ty0, tx1, ty1 = region.text_box
+    tb = labels[max(0, min(h, ty0 - y0)):max(0, min(h, ty1 - y0)), max(0, min(w, tx0 - x0)):max(0, min(w, tx1 - x0))]
+    bx = labels[max(0, min(h, region.y0 - y0)):max(0, min(h, region.y1 - y0)),
+                max(0, min(w, region.x0 - x0)):max(0, min(w, region.x1 - x0))]
+    in_tb = np.bincount(tb.ravel(), minlength=n)
+    in_box = np.bincount(bx.ravel(), minlength=n)
+    total = np.bincount(labels.ravel(), minlength=n)
+    paper = int(in_tb[1:].sum())
+    gone = (2 * in_box < total) & (in_tb < OWN_PAPER * paper)
+    gone[0] = False
+    if not gone.any() or gone[1:].all():
+        return inside
+    return inside & ~gone[labels]
 
 
 def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, scale: float, reach: float,
@@ -415,6 +455,27 @@ def _char_hole(region: TextRegion, shape: tuple[int, ...], x0: int, y0: int, gro
     return hole
 
 
+def _own_seeds(region: TextRegion, labels: np.ndarray, reached: np.ndarray, corner: tuple[int, int]) -> np.ndarray:
+    """The light pieces (*labels*, of a window whose corner lies at *corner* on the page) the grown hole of *region*'s
+    characters reaches (*reached*), but for a neighbour's paper: one it reaches only past the characters' own boxes
+    that lies mostly outside *region*'s box - the paper of a bubble joined to it, whose outline its column touches
+    (the grown hole crossed that outline, and the outline and the neighbour's lettering were taken for the drawing
+    seen through the bubble)."""
+    seeds = np.unique(labels[reached])
+    seeds = seeds[seeds > 0]
+    if seeds.size < 2:
+        return seeds
+    x0, y0 = corner
+    bare = _char_hole(region, labels.shape, x0, y0, 0)
+    box = np.zeros(labels.shape, bool)
+    box[max(0, region.y0 - y0):max(0, region.y1 - y0), max(0, region.x0 - x0):max(0, region.x1 - x0)] = True
+    held = np.bincount(labels[bare].ravel(), minlength=int(labels.max()) + 1)
+    total = np.bincount(labels.ravel(), minlength=int(labels.max()) + 1)
+    in_box = np.bincount(labels[box].ravel(), minlength=int(labels.max()) + 1)
+    kept = seeds[(held[seeds] > 0) | (2 * in_box[seeds] >= total[seeds])]
+    return kept if kept.size else seeds
+
+
 @analysis.timed("see_through")
 def see_through(image: np.ndarray, region: TextRegion,
                 closed: tuple[tuple[int, int, int, int], np.ndarray, np.ndarray]) -> bool:
@@ -438,8 +499,8 @@ def see_through(image: np.ndarray, region: TextRegion,
     if not hole.any():
         return False
     _n, labels = cv2.connectedComponents((gray >= OUTLINE_LEVEL).astype(np.uint8), connectivity=4)
-    seeds = np.unique(labels[hole & inside])
-    own = np.isin(labels, seeds[seeds > 0]) & inside  # the paper the lettering lies on (not a white rim beyond)
+    seeds = _own_seeds(region, labels, hole & inside, (wx0, wy0))
+    own = np.isin(labels, seeds) & inside  # the paper the lettering lies on (not a white rim beyond)
     disc = lambda r: pagescale.disc(2 * r + 1, 1.0)  # noqa: E731 - (radii in px of the page, glyphs already at its scale)
     paper = fill_holes(cv2.morphologyEx(own.astype(np.uint8) * 255, cv2.MORPH_CLOSE, disc(int(glyph) // 2))) > 0
     core = cv2.erode(paper.astype(np.uint8), disc(max(1, int(THROUGH_CORE * glyph)))) > 0

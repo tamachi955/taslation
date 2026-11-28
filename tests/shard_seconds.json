@@ -1,6 +1,7 @@
 {
  "test_analysis_log.py": 4.0,
  "test_artwork.py": 21.1,
+ "test_audit_levels.py": 0.5,
  "test_backup.py": 8.7,
  "test_backup_bundle.py": 0.6,
  "test_balance.py": 1.2,

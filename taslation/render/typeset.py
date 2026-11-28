@@ -2166,12 +2166,14 @@ class TextFormat:
 class Lettered:
     """What lettering a region did: the font size used, what it could not do as formatted (`NO_FIT`) or what the
     checks of an automatic lettering found (`LETTER_CHECKS`), which layout won (`Fit.won`), and the room a bubble's
-    automatic lettering took beyond its own across (*frame*: `TURNED`, `OVERRUN`; "" none, `fitted_frame`)."""
+    automatic lettering took beyond its own across (*frame*: `TURNED`, `OVERRUN`; "" none, `fitted_frame`), and how
+    many words it broke as a last resort (*broken*)."""
 
     size: int
     flags: tuple[str, ...] = ()
     won: str = ""
     frame: str = ""
+    broken: int = 0  # words split as a last resort or left whole past their line (`Fit.split`, `Fit.whole`)
 
 
 # --- fitting a bubble's automatic lettering: what is tried, in order (`Settings.fit_tries`) ----------------------
@@ -2201,16 +2203,23 @@ def gains(size: int, base: int) -> bool:
     return size >= base * TURN_GAIN and size - base >= TURN_GAIN_PX
 
 
+def _measured(got: Sequence[Any]) -> tuple[int, bool, bool]:
+    """A `fitted_frame` *sized* answer as (size, hyphenated, broken): one of two items breaks no word."""
+    return int(got[0]), bool(got[1]), bool(got[2]) if len(got) > 2 else False
+
+
 @analysis.timed("fit_frames")
 def fitted_frame(tries: Sequence[str], sized: Any, floor: int, min_size: int, frames: Sequence[str]) -> str:
     """The room a bubble's automatic lettering takes, by the *tries* in their order (names of `FIT_TRIES`): "" its
     own, across, where the lettering across with every set try (`SET_TRIES`: what would be drawn) is not `poor`;
     else the first frame try (`FRAME_TRIES`, of those this bubble may take: *frames*) whose room gives a size larger
     by a clear margin (`gains`) than the lettering across with the set tries listed before it - those after it are
-    the ones the person put after that room -, never smaller than what would be drawn across, and with no more
-    hyphens; "" where none does. *sized*(frame, sets) gives the (size, hyphenated) of the text in a room ("" across,
-    "turn", "overrun") with the set tries *sets*, in their order."""
-    across, hyphenated = sized("", tuple(t for t in tries if t in SET_TRIES))
+    the ones the person put after that room -, or, where across breaks a word as a last resort (split at the smallest
+    size, a word in three pieces in a narrow bubble, or left whole past its line), sets every word whole, never
+    smaller than what would be drawn across, and with no more hyphens; "" where none does. *sized*(frame, sets) gives
+    the (size, hyphenated[, broken]) of the text in a room ("" across, "turn", "overrun") with the set tries *sets*,
+    in their order (*broken*: a word split as a last resort or left whole past its line, `Fit.split`, `Fit.whole`)."""
+    across, hyphenated, broken = _measured(sized("", tuple(t for t in tries if t in SET_TRIES)))
     if not poor(across, hyphenated, floor, min_size):
         return ""
     sets: list[str] = []
@@ -2220,9 +2229,10 @@ def fitted_frame(tries: Sequence[str], sized: Any, floor: int, min_size: int, fr
             continue
         if name not in frames:
             continue
-        base, base_hyphenated = sized("", tuple(sets))
-        other, other_hyphenated = sized(name, tuple(sets))
-        if gains(other, base) and other >= across and (base_hyphenated or not other_hyphenated):
+        base, base_hyphenated, _base_broken = _measured(sized("", tuple(sets)))
+        other, other_hyphenated, other_broken = _measured(sized(name, tuple(sets)))
+        if ((gains(other, base) or broken and not other_broken) and other >= across
+                and (base_hyphenated or not other_hyphenated)):
             return name
     return ""
 
@@ -2591,9 +2601,9 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
                                    outline_color=tuple(background) if over else outline_color, floor=floor,
                                    hyphen_first=first)
 
-            def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool]:
+            def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool, bool]:
                 done = lettered(None, frame, sets)
-                return done.size, "+hyphens" in done.won
+                return done.size, "+hyphens" in done.won, done.broken > 0
 
             frame = fitted_frame(tries, sized, floor, min_size, frames)
             if frame:
@@ -2657,7 +2667,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     fit = layout_text(region.mask, text, font_path, min_size, max_size, line_spacing, bold_variation, script,
                       on_page, anchor, hyphenate, condense, language, hyphen_first)
     if image is None:
-        return Lettered(fit.size, (), fit.won)
+        return Lettered(fit.size, (), fit.won, broken=fit.split + fit.whole)
     font, placed, size = fit
     lines = [(display_form(ln, script), xc, top) for ln, xc, top in placed]
     if outline is None and lines:
@@ -2672,7 +2682,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     for shown, xc, top in lines:
         font.draw(image, region.x0 + xc - font.width(shown) / 2.0, region.y0 + top, shown, color, contour)
     return Lettered(size, lettering_flags(ground, region.mask, fit, lines, script, color, bool(outline), on_page),
-                    fit.won)
+                    fit.won, broken=fit.split + fit.whole)
 
 
 def _draw_fit(image: Image.Image, region: TextRegion, fit: Fit, script: str, color: Colour,

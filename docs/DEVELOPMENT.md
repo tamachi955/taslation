@@ -169,8 +169,13 @@ What was tried and dropped, on the same pages at full size:
   ア once. A small vowel read for a large one, as common, is folded by `skeleton`. The pairs between readers on the rest
   (ン and ー, イ and ハ, ...) came from drawing read as kana.
 
-The audit (`tools/audit_render.py`, version 8) counts per set and scale the sound words found, set right and left as
-drawn, and the damage codes on the sound effects lettered (`sound_lines`).
+The audit (`tools/audit_render.py`, from version 8) counts per set and scale the sound words found, set right and
+left as drawn, and the damage codes on the sound effects lettered (`sound_lines`). From version 9 its summary goes by
+the owner's levels, S1 to S4, the worst first (`CODE_LEVELS`: each code's level), with the regions a neighbour's
+erase, lettering or patch took lettering from (`OVER_OTHER`, S2) and the specks of lettering left joined to a line the
+erased page keeps or beside an outline two bubbles share (`LEFT_BY_LINE`, `LEFT_SHARED`, S3); an outline counts as cut
+only where the erase broke it (`LINE_CUT` on `line_cut`: not a glyph joined to it erased where it goes on past it); the
+made-up layouts 18 and 19 are bubbles joined in pairs.
 
 `soundwords.RENDERINGS_TEXT` holds an English rendering and a short meaning for the 395 base forms PLaMo 3 Translate
 gets wrong as a sound effect into English, written for the program like the list (no dictionary or site copied);
@@ -371,7 +376,9 @@ rows' languages.
 ## Other scripts
 
 * `tools/make_sample_page.py` draws the synthetic test pages in `tests/fixtures/` (no real book is in the repository);
-  `--layout edges` a page whose bubbles are cut by its four edges, for a case reproduced on the stand-in (`--pages`).
+  `--layout edges` a page whose bubbles are cut by its four edges, for a case reproduced on the stand-in (`--pages`);
+  `--layout pairs` bubbles joined in pairs, each drawn over the one before it (two tall narrow ones side by side, a
+  narrow one over another's upper corner, over a side, over a foot; the lettering audit's layout 18 with its layers).
 * `tools/fake_viewer.py` shows those pages in a window of its own, so the whole flow can be tried without a viewer.
 * `tools/book_screens.py` draws a book's first five screens made up, as a browser-based reader shows them in a
   maximised window (the cover alone; a dark page beside a black one holding a plate; a colour spread with a column of

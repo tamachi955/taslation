@@ -347,6 +347,121 @@ def test_lettering_in_one_of_two_joined_bubbles_is_on_their_paper(neck):
     assert not on_art(page, region("text-on-page", box))  # (the ring round its box reaches the line and the hatching)
 
 
+def overlapping_pair():
+    """Two tall white bubbles on a hatching, the right one drawn over the left one's right side (the outline they
+    share, x 242 at y 300), a column of lettering in each by that outline; the left one as a model bubble with no
+    shape of its own whose box runs past the shared outline into the right one's paper."""
+    page = flat(255, (600, 500))
+    page[::5] = 60
+    for centre, axes in (((200, 300), (52, 150)), ((292, 300), (50, 140))):
+        cv2.ellipse(page, centre, axes, 0, 0, 360, (255, 255, 255), -1)
+        cv2.ellipse(page, centre, axes, 0, 0, 360, (0, 0, 0), 3)
+    left = [(cx - 12, y, cx + 12, y + 24) for cx in (186, 227) for y in range(205, 400, 30)]
+    for x0, y0, x1, y1 in left + [(255, y, 279, y + 24) for y in range(215, 390, 30)]:
+        cv2.rectangle(page, (x0 + 2, y0 + 2), (x1 - 3, y1 - 3), (0, 0, 0), 3)
+    r = region("bubble", (170, 200, 249, 404), tier=3, from_model=True, glyph=24.0)
+    r.char_boxes = left
+    return page, r
+
+
+def test_a_model_bubbles_room_stops_at_the_outline_it_shares_with_the_bubble_over_it():
+    """The paper closed round a model bubble's lettering, where its box runs past the outline it shares with a bubble
+    drawn over it: the neighbour's paper there is no room of its own (`artwork._own_paper`) - its translation was set
+    over that outline and into the neighbour."""
+    page, r = overlapping_pair()
+    room = artwork.closed_room(page, r)
+    assert room is not None
+    for y in range(250, 351, 10):  # (the stretch of the outline the two bubbles share)
+        edge = 292 - 50 * np.sqrt(1 - ((y - 300) / 140) ** 2)
+        assert r.x0 + np.nonzero(room[y - r.y0])[0].max() < edge - 1
+    assert room[300 - r.y0, 236 - r.x0]  # (the column by the outline is in it)
+
+
+def test_only_the_paper_that_holds_the_lettering_is_the_bubbles_own_paper():
+    """Of the light pieces the grown hole of a model bubble's characters reaches, one it reaches only past the
+    characters' own boxes that lies mostly outside the bubble's box is a neighbour's paper (`artwork._own_seeds`):
+    the outline between them and the neighbour's lettering were taken for the drawing seen through the bubble."""
+    labels = np.zeros((100, 100), np.int32)
+    labels[:, :48] = 1  # the bubble's own paper
+    labels[:, 52:] = 2  # the paper of a bubble joined to it, past the outline at x 48..51
+    r = region("bubble", (10, 10, 54, 90), tier=3, from_model=True, glyph=24.0)
+    r.char_boxes = [(20, 20, 44, 44), (24, 50, 48, 74)]
+    reached = np.zeros((100, 100), bool)
+    reached[16:80, 16:56] = True  # (the hole grown past the last column's boxes, over the outline)
+    assert artwork._own_seeds(r, labels, reached, (0, 0)).tolist() == [1]
+    r.x1 = 95  # (a box that holds the second piece for the most part: no neighbour's)
+    assert artwork._own_seeds(r, labels, reached, (0, 0)).tolist() == [1, 2]
+
+
+def column_by_outline():
+    """A tall white bubble on a hatching, two columns of lettering in it, the right one by the outline, two of its
+    glyphs joined to the outline by a stroke and the others a pixel or two from it."""
+    page = flat(255, (620, 400))
+    page[::5] = 60
+    cv2.ellipse(page, (200, 300), (50, 260), 0, 0, 360, (255, 255, 255), -1)
+    cv2.ellipse(page, (200, 300), (50, 260), 0, 0, 360, (0, 0, 0), 3)
+    column = [(222, y, 246, y + 24) for y in range(230, 360, 30)]
+    other = [(170, y, 194, y + 24) for y in range(230, 360, 30)]
+    for i, (x0, y0, x1, y1) in enumerate(column + other):
+        cv2.rectangle(page, (x0 + 2, y0 + 2), (x1 - 3, y1 - 3), (0, 0, 0), 3)
+        if i in (1, 3):
+            cv2.line(page, (x1 - 3, y0 + 12), (x1 + 6, y0 + 12), (0, 0, 0), 2)
+    ring = np.zeros((620, 400), np.uint8)
+    cv2.ellipse(ring, (200, 300), (50, 260), 0, 0, 360, 255, 3)
+    return page, column + other, ring[200:400] > 0
+
+
+def ink_left(page, boxes):
+    return [int((page[y0:y1, x0:x1 - 1, 0] < 128).sum()) for x0, y0, x1, y1 in boxes]
+
+
+def test_a_column_by_a_model_bubbles_outline_is_erased_and_the_outline_kept():
+    """A model bubble with no shape of its own (tier 3): the hole of a column set by the outline, its characters'
+    boxes grown, took the outline - the paper fill thinned or cut it there. The lines it takes past the characters'
+    own boxes stay (`Pipeline._off_lines`); the glyphs joined to the outline go."""
+    page, boxes, ring = column_by_outline()
+    r = region("bubble", (160, 222, 262, 382), tier=3, from_model=True, glyph=24.0)
+    r.char_boxes = boxes
+    Pipeline._paper_erase(page, r)
+    assert ink_left(page, boxes) == [0] * len(boxes)
+    assert (page[200:400, :, 0][ring] < 100).all()
+
+
+def test_a_big_glyph_of_a_model_bubble_with_no_shape_is_erased_whole_not_kept_as_a_line():
+    """A glyph three times the region's size (a shout among its lettering) in a model bubble with no shape of its own:
+    a piece as long as a line, but within its own character's box, so lettering the hole takes; the outline stays."""
+    page = flat(255, (620, 400))
+    cv2.ellipse(page, (200, 300), (120, 260), 0, 0, 360, (0, 0, 0), 3)
+    cv2.rectangle(page, (163, 253), (222, 312), (0, 0, 0), 6)  # (strokes straight on as long as an outline's)
+    cv2.line(page, (163, 282), (222, 282), (0, 0, 0), 6)
+    cv2.rectangle(page, (182, 342), (199, 359), (0, 0, 0), 3)  # (a glyph of the region's size)
+    ring = np.zeros((620, 400), np.uint8)
+    cv2.ellipse(ring, (200, 300), (120, 260), 0, 0, 360, 255, 3)
+    r = region("bubble", (120, 200, 280, 420), tier=3, from_model=True, glyph=22.0)
+    r.char_boxes = [(160, 250, 226, 316), (180, 340, 202, 362)]
+    Pipeline._paper_erase(page, r)
+    assert ink_left(page, r.char_boxes) == [0, 0]
+    assert (page[:, :, 0][ring > 0] < 100).all()
+
+
+def test_a_column_a_model_bubbles_shape_went_round_is_erased_and_its_room_reaches_the_outline():
+    """A model bubble with a classical shape that went round the column set by its outline (the glyphs joined to
+    the outline): the column is lettering its text box holds (`Pipeline._left_out`: the paper round each glyph, its
+    counters left out, the bubble's own), erased whole with its counters, the outline kept - and the room the
+    translation is set in reaches over the column's place (`_room_with`), not squeezed beside it."""
+    page, boxes, ring = column_by_outline()
+    r = region("bubble", (148, 36, 253, 565), tier=1, from_model=True, glyph=24.0)
+    r.text_box = (165, 226, 250, 360)
+    shape = np.zeros((r.height, r.width), np.uint8)
+    cv2.ellipse(shape, (200 - r.x0, 300 - r.y0), (46, 256), 0, 0, 360, 255, -1)
+    shape[:, 218 - r.x0:] = 0  # (round the column by the outline)
+    r.mask = shape
+    Pipeline._paper_erase(page, r)
+    assert ink_left(page, boxes) == [0] * len(boxes)
+    assert (page[200:400, :, 0][ring] < 100).all()
+    assert (r.mask[230 - r.y0:350 - r.y0, 224 - r.x0:244 - r.x0] > 0).all()
+
+
 def test_paper_open_to_the_page_past_the_wider_window_is_no_closed_paper():
     """Paper that runs on past the wider window too (out to the page's white ground) is no closed paper."""
     page, box = joined_bubbles()

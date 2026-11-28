@@ -90,7 +90,7 @@ from .headings import heading, labels_in, printed
 from .detect import layout as layout_model
 from .detect import prose as prose_lines
 from .detect.beyond import ocr_view
-from .detect.bubbles import sides_of
+from .detect.bubbles import fill_holes, sides_of
 from .detect.layout import LayoutModel, Shaper, cover_of, covered, model_regions, take_shape
 from .detect.textblocks import block_mask
 from .detect.tilt import Tilt, Upright, ink_frame, lettering_tilt, region_ink
@@ -188,6 +188,11 @@ LEFT_OUT_LEAST = 8  # px of a piece at 24 px glyphs, at the least (with the glyp
 CHAR_GROW = 0.15  # of a glyph: how far past the reading's character box the lettering of a plain box is painted out
 WHOLE_GLYPH = 0.5  # ... and the rest of a dark piece it holds part of that lies within this much of a glyph past it
 WHOLE_SIZE = 2.0  # ... and is no longer than this many glyphs (`Pipeline._whole_glyphs`; a strand of hair is longer)
+HOLE_LINES = 2.5  # glyphs: a dark piece longer than this in a plain box's bubble is its outline (`Pipeline._off_lines`)
+HOLE_RUN = 1.2  # ... and of it, within a character's box, what runs straight on this many glyphs (no glyph's stroke)
+RING_OWN = 0.75  # of the light pixels round ink joined to a line: the bubble's own paper makes it lettering
+#                  (`_left_out`)
+ROOM_JOIN = 0.35  # of a glyph: the closing that joins what `_left_out` took to a bubble's room (`_room_with`)
 LOOSE_KINDS = ("text", "text-dark")  # lettering with nothing round it (a closed block is "text-on-page", "text-on-dark")
 ON_ART_KINDS = ("text", "text-dark", "text-on-page", "text-on-dark")  # lettering set on the page's ground
 DISPLAY_KIND = "shout"  # (one of `UNCAPPED_KINDS`) the kind display lettering on the art is capped as
@@ -609,8 +614,11 @@ class PageFill:
       so that a window takes it as a page filling in), then finished.
 
     The indices count the announced regions. The patches come from a working copy of the page on which each region
-    is erased and lettered in turn, so where two regions overlap a patch can differ for a moment from the finished
-    page; ``page`` is exact. Nothing here is written anywhere: the events carry pixels from memory to memory.
+    is erased and lettered as its translation comes, in the finished page's order where it meets regions lettered
+    before it (`_letter`: those are lettered anew with it, every one erased before any is lettered, as
+    `Pipeline._render` letters a page), so that a region's erase never takes a neighbour's lettering away - a joined
+    bubble's patch would cover its neighbour's first letters until the finished page came; ``page`` is exact. Nothing
+    here is written anywhere: the events carry pixels from memory to memory.
 
     A translation handed over while the model writes on is lettered on the drafts' thread (`DRAFTS_BESIDE`,
     `_drafts_pool`), in the order they came, so that the model's next line is asked for at once; `wait` waits for
@@ -758,16 +766,40 @@ class PageFill:
                                 measured=self._measured if DRAFT_SIZES_KEPT else None)
 
     def _letter(self, i: int, text: str) -> None:
+        """Region *i* lettered with *text* on the working copy and sent. Where its box meets the part of the page a
+        region lettered before changed (`_meeting`, and those in turn), all of them are lettered anew with it
+        (`_redraw`: erased first, then lettered, as the finished page is) and each is sent: its erase never takes their
+        lettering away."""
         if self.work is None:
             self.work = self.rgb.copy()
         self.shown[i] = text
         self._cap_shown()
-        self.boxes[i] = self.pipeline.letter_region(self.work, self.regions[i], text, quick=True)
-        self._send(i, text, self.boxes[i])
+        group = sorted({i, *_meeting([self.regions[i].bbox], {j: b for j, b in self.boxes.items()
+                                                                if j != i and j in self.shown})})
+        if group == [i]:
+            self.boxes[i] = self.pipeline.letter_region(self.work, self.regions[i], text, quick=True)
+            self._send(i, text, self.boxes[i])
+            return
+        before = dict(self.boxes)
+        self.boxes.update(zip(group, self._redraw(self.work, [(self.regions[j], self.shown[j], before.get(j))
+                                                               for j in group])))
+        for j in group:
+            self._send(j, self.shown[j], _union(before[j], self.boxes[j]) if j in before else self.boxes[j])
+
+    def _redraw(self, page: np.ndarray, members: Sequence[tuple[TextRegion, str, Box | None]]) -> list[Box]:
+        """*members* ((region, text, the part of *page* it changed so far, or None)) lettered anew on *page*: the page
+        as captured put back where each one changed it, then every one erased and each one lettered
+        (`Pipeline.letter_regions`); the part of the page each one changed, in their order."""
+        for _r, _t, box in members:
+            if box is not None:
+                x0, y0, x1, y1 = box
+                page[y0:y1, x0:x1] = self.rgb[y0:y1, x0:x1]
+        return self.pipeline.letter_regions(page, [(r, t) for r, t, _b in members], quick=True)
 
     def _reletter(self, texts: dict[int, str]) -> None:
         """The working copy lettered again from the page as captured, with *texts* (index -> text, "" = none) in
-        place of what was shown; each of them is sent with the part of the page it changes now or changed before."""
+        place of what was shown (every region erased before any is lettered, `_redraw`); each of them is sent with the
+        part of the page it changes now or changed before."""
         before = dict(self.boxes)
         for i, t in texts.items():
             if t:
@@ -776,8 +808,8 @@ class PageFill:
                 self.shown.pop(i, None)
         self.work = self.rgb.copy()
         self._cap_shown()
-        self.boxes = {i: self.pipeline.letter_region(self.work, self.regions[i], self.shown[i], quick=True)
-                      for i in sorted(self.shown)}
+        order = sorted(self.shown)
+        self.boxes = dict(zip(order, self._redraw(self.work, [(self.regions[i], self.shown[i], None) for i in order])))
         for i in sorted(texts):
             box = before.get(i, self.regions[i].bbox)
             if i in self.boxes:
@@ -835,6 +867,25 @@ class PageFill:
         self.pipeline.share_rooms(shaped, (w, h), among)
         self.pipeline.cap_sizes(shaped, [self.early[i][1] for i in order])
 
+    def _early_parts(self, skip: int = -1) -> dict[tuple[str, int], Box]:
+        """The parts of the drafts layer's page (`early_work`) its regions changed (("early", index)) and those the
+        drafts proper changed that it shows as they are (("draft", index): lettered on the working copy, not on the
+        layer), but for the layer's region *skip*."""
+        parts: dict[tuple[str, int], Box] = {("early", k): b for k, b in self.early_boxes.items() if k != skip}
+        parts.update({("draft", j): b for j, b in self.boxes.items() if j in self.shown and j not in self.early})
+        return parts
+
+    def _early_members(self, keys: Sequence[tuple[str, int]]) -> list[tuple[TextRegion, str, Box | None]]:
+        """The (region, text, part changed so far) of the drafts layer's and the drafts proper's *keys*, in their
+        order."""
+        out: list[tuple[TextRegion, str, Box | None]] = []
+        for layer, k in keys:
+            if layer == "early":
+                out.append((self.early[k][0], self.early[k][1], self.early_boxes.get(k)))
+            else:
+                out.append((self.regions[k], self.shown[k], self.boxes.get(k)))
+        return out
+
     def _early_send(self, i: int, text: str, box: Box, **marks: Any) -> None:
         assert self.early_work is not None
         x0, y0, x1, y1 = box
@@ -859,8 +910,21 @@ class PageFill:
             if self.early_work is None:
                 self.early_work = self._early_base()
             self._early_cap()
-            self.early_boxes[i] = self.pipeline.letter_region(self.early_work, shaped, text, quick=True)
-            self._early_send(i, text, self.early_boxes[i])
+            met = _meeting([shaped.bbox], self._early_parts(skip=i))
+            if not met:
+                self.early_boxes[i] = self.pipeline.letter_region(self.early_work, shaped, text, quick=True)
+                self._early_send(i, text, self.early_boxes[i])
+                return
+            # (lettered anew with those it meets, the drafts proper among them, every one erased first: `_letter`)
+            before = dict(self.early_boxes)
+            members = sorted([*met, ("early", i)], key=lambda m: m[1])
+            for (layer, k), box in zip(members, self._redraw(self.early_work, self._early_members(members))):
+                if layer == "early":
+                    self.early_boxes[k] = box
+            for layer, k in members:
+                if layer == "early":
+                    box = _union(before[k], self.early_boxes[k]) if k in before else self.early_boxes[k]
+                    self._early_send(k, self.early[k][1], box)
         except Exception:  # noqa: BLE001 - the drafts layer is a look only; the page is lettered on its own
             pass
 
@@ -870,8 +934,13 @@ class PageFill:
         before = dict(self.early_boxes)
         self.early_work = self._early_base()
         self._early_cap()
-        self.early_boxes = {i: self.pipeline.letter_region(self.early_work, self.early[i][0], self.early[i][1],
-                                                           quick=True) for i in sorted(self.early)}
+        self.early_boxes = {}  # (the layer's page is the working copy's again: nothing of the layer on it yet)
+        drafts = {key: box for key, box in self._early_parts().items() if key[0] == "draft"}
+        met = _meeting([self.early[i][0].bbox for i in sorted(self.early)], drafts)  # (the drafts proper they meet)
+        members = sorted([*(("early", i) for i in self.early), *met], key=lambda m: m[1])
+        for (layer, k), box in zip(members, self._redraw(self.early_work, self._early_members(members))):
+            if layer == "early":
+                self.early_boxes[k] = box
         for i in changed:
             box = before.get(i, self.regions[i].bbox)
             if i in self.early_boxes:
@@ -5165,7 +5234,7 @@ class Pipeline:
         if not frames:
             return size
 
-        def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool]:
+        def sized(frame: str, sets: Sequence[str]) -> tuple[int, bool, bool]:
             m, a = mask, local
             if frame == "turn":
                 m, a = np.ascontiguousarray(mask.T), (local[1], local[0], local[3], local[2])
@@ -5174,7 +5243,7 @@ class Pipeline:
                 d = probe.x0 - grown.x0
                 m, a = grown.mask, (local[0] + d, local[1] + d, local[2] + d, local[3] + d)
             fit = fit_in(m, a, sets)
-            return fit.size, fit.hyphens > 0
+            return fit.size, fit.hyphens > 0, fit.split + fit.whole > 0
 
         frame = fitted_frame(tries, sized, s.readable_font_size, s.min_font_size, frames)
         return sized(frame, tries)[0] if frame else size
@@ -5403,6 +5472,7 @@ class Pipeline:
             if extra is not None:  # in the bubble's own paper colour (the outline guard would take a big glyph for a line)
                 image[region.y0:region.y1, region.x0:region.x1][extra] = bg
                 analysis.acted(region, "left_out")
+                region.mask = _room_with(region.mask, extra, region.glyph or 20.0 * pagescale.of(region))
             return bg
         q = copy.copy(region)
         q.kind = "text-dark" if dark else "text"  # lettering on the page: its strokes and the ground right round them
@@ -5424,6 +5494,8 @@ class Pipeline:
             if analysis.on() and cv2.countNonZero(mask) > before:
                 analysis.acted(region, "whole_glyphs")
                 analysis.count("whole_glyphs.px", cv2.countNonZero(mask) - before)
+            if region.kind in ("bubble", "dark-bubble"):
+                mask = Pipeline._off_lines(image, region, mask, dark_threshold, dark)
         q.mask = mask if region.char_boxes else region.mask
         if region.char_boxes and region.kind in ("bubble", "dark-bubble") and artwork.on_paper(image, region):
             # a bubble with paper under its lettering after all: the lettering its text box holds that the reading's
@@ -5476,46 +5548,92 @@ class Pipeline:
         return np.where(rest, np.uint8(255), mask)
 
     @staticmethod
+    def _off_lines(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark_threshold: int = 140,
+                   dark: bool = False) -> np.ndarray:
+        """*mask* (uint8, the region's box: the hole of a plain box's lettering, the reading's characters grown) less
+        the lines it took past the characters' own boxes: the dark pieces, joined `LINK_LEVELS` past the dark
+        threshold, longer than `HOLE_LINES` glyphs (the bubble's outline, the one it shares with a bubble joined to it,
+        a tail), and their anti-aliasing. A column set close by the outline had its hole grown over it, and the paper
+        fill thinned or cut the outline there (the more where a bubble joined to it lettered its own column by the same
+        outline); a glyph that touches the outline is part of such a piece, and goes within its own box."""
+        crop = image[region.y0:region.y1, region.x0:region.x1]
+        gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
+        if gray.shape != mask.shape or not mask.any():
+            return mask
+        if dark:
+            gray = 255 - gray
+        glyph = region.glyph or 20.0 * pagescale.of(region)
+        boxes = [(x0 - region.x0, y0 - region.y0, x1 - region.x0, y1 - region.y0)
+                 for x0, y0, x1, y1 in region.char_boxes]
+        piece, straight = _line_runs(gray < dark_threshold + LINK_LEVELS, glyph, boxes=boxes)
+        if not piece.any():
+            return mask
+        own = np.zeros(gray.shape, bool)
+        for x0, y0, x1, y1 in boxes:
+            own[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = True
+        lines = piece & (~own | straight)  # (within a character's box, only the line that runs straight on through it)
+        if not lines.any():
+            return mask
+        lines = cv2.dilate(lines.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        return np.where(lines, np.uint8(0), mask)
+
+    @staticmethod
     def _left_out(image: np.ndarray, region: TextRegion, dark_threshold: int = 140, dark: bool = False) -> np.ndarray | None:
         """The lettering of a model region its classical mask leaves out (bool, the region's box): glyph-sized ink (at
         most `GLYPH_REACH_ERASE` glyphs long, also when it is joined `LINK_LEVELS` past the dark threshold: a thin
         outline broken by its anti-aliasing) that the model's text box holds, off the box's edge (`EDGE_KEEP` px: an
-        outline); None when there is none."""
+        outline); None when there is none. Ink joined to a line there - the outline, one shared with a bubble joined
+        to it - is cut from what of the line runs straight on (`_line_runs`) and taken where the paper round it is the
+        bubble's own (`RING_OWN`, its own counters left out of that ring: a glyph of a column set by the outline,
+        whose classical shape went round it, not a stretch of the outline with the page or the neighbour's paper
+        beyond it); the line stays. A piece taken takes its counters with it (`_counters`)."""
         crop = image[region.y0:region.y1, region.x0:region.x1]
         gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
         ink = (gray > 255 - dark_threshold) if dark else (gray < dark_threshold)
         mask = region.mask if region.mask.shape == gray.shape else cv2.resize(region.mask, gray.shape[::-1], interpolation=cv2.INTER_NEAREST)
-        n, labels, stats, _ = cv2.connectedComponentsWithStats((ink & (mask == 0)).astype(np.uint8), connectivity=8)
+        linked = (gray > 255 - dark_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
+        scale = pagescale.of(region)  # (the measures in px at the page's scale)
+        glyph = region.glyph or 20.0 * scale
+        longest = GLYPH_REACH_ERASE * glyph
+        # (the lines: pieces longer than the longest lettering, not a big glyph alone)
+        lines, straight = _line_runs(linked, glyph, longer=longest)
+        cut = cv2.dilate(straight.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        n, labels, stats, _ = cv2.connectedComponentsWithStats((ink & (mask == 0) & ~cut).astype(np.uint8),
+                                                               connectivity=8)
         tb = region.text_box
         tx0, ty0, tx1, ty1 = tb[0] - region.x0, tb[1] - region.y0, tb[2] - region.x0, tb[3] - region.y0
         h, w = gray.shape
-        scale = pagescale.of(region)  # (the measures in px at the page's scale)
         edge = pagescale.px(EDGE_KEEP, scale)
-        glyph = region.glyph or 20.0 * scale
-        longest = GLYPH_REACH_ERASE * glyph
         # the least piece, 8 px at 24 px glyphs: the dots of an ellipsis set small are smaller (an ellipsis of 15 px
         # glyphs on a page shown 1000 px high stayed as three dots)
         least = max(2.0, LEFT_OUT_LEAST * (glyph / 24.0) ** 2)
         # a thin line's anti-aliasing breaks it at the dark threshold, not a little above it: a piece of a longer line
-        # there is a stretch of the outline (or of the drawing), however short
-        linked = (gray > 255 - dark_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
+        # there is a stretch of the outline (or of the drawing), however short - unless the paper round it is the
+        # bubble's own
         nl, joined, joined_stats, _ = cv2.connectedComponentsWithStats((linked & (mask == 0)).astype(np.uint8),
                                                                         connectivity=8)
         line = np.zeros(nl, bool)
         line[1:] = np.maximum(joined_stats[1:, 2], joined_stats[1:, 3]) > longest
         out = np.zeros(gray.shape, bool)
+        paper: np.ndarray | None = None
         for i in range(1, n):
             x, y, bw, bh, area = (int(v) for v in stats[i])
             if (area < least or max(bw, bh) > longest or x < edge or y < edge or x + bw > w - edge
                     or y + bh > h - edge or x + bw <= tx0 or x >= tx1 or y + bh <= ty0 or y >= ty1):
                 continue
             piece = labels == i
+            counters = _counters(piece, (x, y, bw, bh))  # (a glyph's own: painted with it, no paper of anyone's)
             if line[joined[piece]].any():
-                continue
-            out |= piece
+                if paper is None:
+                    paper = _own_ground(linked, mask)
+                ring = (cv2.dilate(piece.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~linked & ~counters
+                if not ring.any() or int((ring & paper).sum()) < RING_OWN * int(ring.sum()):
+                    continue
+            out |= piece | counters
         if not out.any():
             return None
-        return cv2.dilate(out.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        # (with its anti-aliasing, but not the line it touches: what of the line is no part of it stays)
+        return (cv2.dilate(out.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~(lines & ~out)
 
     def letter_region(self, out: np.ndarray, region: TextRegion, text: str, style: RegionStyle | None = None,
                       quick: bool = False) -> Box:
@@ -5530,12 +5648,17 @@ class Pipeline:
                        part: Any = OWN_PART) -> tuple[Box, Lettered]:
         """`letter_region`, and what the lettering did (its size, what it could not do as formatted); *part* as
         `_set_text` takes it."""
-        s = self.settings
-        h, w = out.shape[:2]
-        x0, y0 = max(0, region.x0 - region.width), max(0, region.y0 - region.height)
-        x1, y1 = min(w, region.x1 + region.width), min(h, region.y1 + region.height)
+        x0, y0, x1, y1 = window = _around(region, out.shape)
         before = out[y0:y1, x0:x1].copy()
         bg = self._erase(out, region, quick)
+        done = self._set_around(out, region, text, bg, region.style if style is None else style, window, part)
+        return _changed_box(region.bbox, window, before, out), done
+
+    def _set_around(self, out: np.ndarray, region: TextRegion, text: str, bg: tuple[int, int, int],
+                    style: RegionStyle | None, window: Box, part: Any = OWN_PART) -> Lettered:
+        """*text* lettered in *region* on the page *out* (erased already, *bg* its paper), in place: on the part of
+        the page *window* round it (`_around`), the region as seen from that part's corner."""
+        x0, y0, x1, y1 = window
         local = copy.copy(region)  # the region as seen from the corner of the part of the page around it
         local.x0, local.y0, local.x1, local.y1 = region.x0 - x0, region.y0 - y0, region.x1 - x0, region.y1 - y0
         local.text_box = _shift(region.text_box, -x0, -y0)
@@ -5543,13 +5666,31 @@ class Pipeline:
         local.panel = _shift(region.panel, -x0, -y0) if region.panel is not None else None
         local.ceded = shifted(region.ceded, -x0, -y0)
         around = Image.fromarray(out[y0:y1, x0:x1].copy())
-        done = self._set_text(around, local, text, bg, region.style if style is None else style, part=part)
+        done = self._set_text(around, local, text, bg, style, part=part)
         out[y0:y1, x0:x1] = np.asarray(around)
-        ys, xs = np.nonzero(np.any(out[y0:y1, x0:x1] != before, axis=2))
-        box = region.bbox
-        if xs.size:
-            box = _union(box, (x0 + int(xs.min()), y0 + int(ys.min()), x0 + int(xs.max()) + 1, y0 + int(ys.max()) + 1))
-        return box, done
+        return done
+
+    def letter_regions(self, out: np.ndarray, items: Sequence[tuple[TextRegion, str]],
+                       quick: bool = False) -> list[Box]:
+        """`letter_region` of several regions of one page at once (*items*: (region, text) pairs), in the order the
+        finished page letters them (`_render`): every one erased first, then each one's text lettered in its own
+        style, so that where two meet the erase of one never takes the other's lettering away (two joined bubbles,
+        a box reaching into a neighbour's lettering). The part of the page each one changed - its box, grown where its
+        erase or its lettering ran past it -, in their order. *quick* as for `letter_region`."""
+        windows = [_around(region, out.shape) for region, _text in items]
+        boxes = []
+        backgrounds = []
+        for (region, _text), window in zip(items, windows):
+            x0, y0, x1, y1 = window
+            before = out[y0:y1, x0:x1].copy()
+            backgrounds.append(self._erase(out, region, quick))
+            boxes.append(_changed_box(region.bbox, window, before, out))
+        for k, ((region, text), window, bg) in enumerate(zip(items, windows, backgrounds)):
+            x0, y0, x1, y1 = window
+            held = out[y0:y1, x0:x1].copy()
+            self._set_around(out, region, text, bg, region.style, window)
+            boxes[k] = _changed_box(boxes[k], window, held, out)
+        return boxes
 
     def region_lettering(self, text: str, kind: str = "", style: RegionStyle | None = None) -> tuple[Lettering, tuple[str, ...]]:
         """The lettering a region of *kind* is set in (`lettering_for`) as *style* formats it - its font family,
@@ -5622,7 +5763,7 @@ class Pipeline:
                                ("fit_box", done.won.startswith("box"))):
                 if took:
                     analysis.acted(own, name)
-        return Lettered(done.size, flags + done.flags, done.won, done.frame)
+        return Lettered(done.size, flags + done.flags, done.won, done.frame, done.broken)
 
     def _scaled_top(self, region: TextRegion, text: str, lettering: Any, top: int, background: tuple[int, int, int],
                     fmt: TextFormat | None, direction: str, part: tuple[int, int, float] | None = None) -> int:
@@ -6207,6 +6348,108 @@ def _meet(a: Box, b: Box) -> Box:
 
 def _area(box: Box) -> int:
     return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+
+
+def _line_runs(linked: np.ndarray, glyph: float, longer: float | None = None,
+               boxes: Sequence[Box] = ()) -> tuple[np.ndarray, np.ndarray]:
+    """The lines among the dark pieces *linked* (bool: ink joined `LINK_LEVELS` past the dark threshold): the pieces
+    longer than `HOLE_LINES` glyphs (or *longer* px), but for one within a character's box of *boxes* (in *linked*'s
+    px, a quarter glyph grown: a big glyph), and what of them runs straight on one way - horizontally, vertically or
+    slanted by half - longer than `HOLE_RUN` glyphs and as long as `HOLE_LINES` glyphs in all: the outline, a tail,
+    not a glyph that touches it, nor strokes of two glyphs in line across it (`Pipeline._off_lines`,
+    `Pipeline._left_out`)."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(linked.astype(np.uint8), connectivity=8)
+    long_ = np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT]) > (
+        HOLE_LINES * glyph if longer is None else longer)
+    long_[0] = False
+    pad = max(2.0, glyph / 4)
+    for i in np.nonzero(long_)[0] if boxes else ():
+        x, y, bw, bh = (int(v) for v in stats[i, :4])
+        if any(bx0 - pad <= x and by0 - pad <= y and x + bw <= bx1 + pad and y + bh <= by1 + pad
+               for bx0, by0, bx1, by1 in boxes):
+            long_[i] = False
+    piece = long_[labels]
+    straight = np.zeros(linked.shape, bool)
+    if not piece.any():
+        return piece, straight
+    run = max(5, int(round(HOLE_RUN * glyph)))
+    for kernel in (np.ones((run, 1)), np.ones((1, run)), np.eye(run), np.eye(run)[::-1]):
+        opened = cv2.morphologyEx(piece.astype(np.uint8), cv2.MORPH_OPEN, kernel.astype(np.uint8))
+        _k, parts, part_stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+        on = np.maximum(part_stats[:, cv2.CC_STAT_WIDTH], part_stats[:, cv2.CC_STAT_HEIGHT]) > HOLE_LINES * glyph
+        on[0] = False
+        straight |= on[parts]
+    return piece, straight
+
+
+def _room_with(mask: np.ndarray, extra: np.ndarray, glyph: float) -> np.ndarray:
+    """*mask* (uint8, a model bubble's classical shape) with the lettering its shape left out and its erase took
+    (*extra*, bool: a column set by the outline), closed over by `ROOM_JOIN` of a glyph and its holes filled: the room
+    its translation is set in reaches the outline there too, as the rest of the bubble's does (it was set beside the
+    column's place, squeezed)."""
+    if mask.shape != extra.shape:
+        return mask
+    grown = ((mask > 0) | extra).astype(np.uint8) * 255
+    size = 2 * max(1, int(ROOM_JOIN * glyph)) + 1
+    closed = cv2.morphologyEx(grown, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    return np.where((mask > 0) | (fill_holes(closed) > 0) | extra, np.uint8(255), np.uint8(0))
+
+
+def _counters(piece: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
+    """The pixels *piece* (bool, whose x, y, width and height are *box*) closes round by itself: a glyph's counters
+    (`Pipeline._left_out`: painted with the glyph - the erase of the classical shape's stray lettering, `erase_stray`,
+    filled a large one dark, which stayed as a dark square)."""
+    x, y, w, h = box
+    out = np.zeros(piece.shape, bool)
+    part = piece[y:y + h, x:x + w]
+    out[y:y + h, x:x + w] = (fill_holes(part.astype(np.uint8) * 255) > 0) & ~part
+    return out
+
+
+def _own_ground(linked: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """The light pixels (off *linked*) four-connected to those of *mask* (the region's own interior) without crossing
+    the ink: the bubble's own paper, whatever its classical shape went round (`Pipeline._left_out`)."""
+    light = ~linked
+    _n, labels = cv2.connectedComponents(light.astype(np.uint8), connectivity=4)
+    seeds = np.unique(labels[light & (mask > 0)])
+    return np.isin(labels, seeds[seeds > 0])
+
+
+def _around(region: TextRegion, shape: tuple[int, ...]) -> Box:
+    """The part of the page (of *shape*) a region's erase and lettering may change (`Pipeline.letter_region`): its box
+    grown by its own width and height."""
+    h, w = shape[:2]
+    return (max(0, region.x0 - region.width), max(0, region.y0 - region.height), min(w, region.x1 + region.width),
+            min(h, region.y1 + region.height))
+
+
+def _changed_box(box: Box, window: Box, before: np.ndarray, page: np.ndarray) -> Box:
+    """*box* grown over the pixels of *page* in *window* that differ from *before* (that part as it was)."""
+    x0, y0, x1, y1 = window
+    ys, xs = np.nonzero(np.any(page[y0:y1, x0:x1] != before, axis=2))
+    if not xs.size:
+        return box
+    return _union(box, (x0 + int(xs.min()), y0 + int(ys.min()), x0 + int(xs.max()) + 1, y0 + int(ys.max()) + 1))
+
+
+def _meets(a: Box, b: Box) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _meeting(start: Sequence[Box], parts: dict[Any, Box]) -> list[Any]:
+    """The keys of *parts* (key -> a part of the page) whose part meets one of *start*, or in turn the part of one
+    found so (`PageFill._letter`): those a change within *start* reaches, in their order in *parts*."""
+    reach = list(start)
+    found: list[Any] = []
+    grew = True
+    while grew:
+        grew = False
+        for key, box in parts.items():
+            if key not in found and any(_meets(box, b) for b in reach):
+                found.append(key)
+                reach.append(box)
+                grew = True
+    return found
 
 
 def _union(a: Box, b: Box) -> Box:

@@ -84,6 +84,35 @@ def test_another_room_is_taken_only_where_across_is_poor_and_it_gains_clearly():
     assert fitted_frame(later, sized, 11, 9, ("overrun", "turn")) == "overrun"
 
 
+def test_a_room_that_keeps_every_word_whole_is_taken_where_across_breaks_one_as_a_last_resort():
+    full = ("condense", "hyphenate")
+    tries = ("turn", *full)
+    # across at the smallest size has to split a word (in a narrow bubble, a long word in three pieces): turned whole
+    # at no smaller a size wins without the clear margin
+    for other in (9, 10):
+        sized, _asked = _sizes({("", full): (9, True, True), ("", ()): (9, False, True), ("turn", ()): (other, False)})
+        assert fitted_frame(tries, sized, 11, 9, ("turn",)) == "turn", other
+    # turned smaller, turned with a word broken too, or with more hyphens: across stays
+    for turned in ((8, False), (10, False, True), (10, True)):
+        sized, _asked = _sizes({("", full): (9, False, True), ("", ()): (9, False, True), ("turn", ()): turned})
+        assert fitted_frame(tries, sized, 11, 9, ("turn",)) == "", turned
+    # a word broken across where across is not poor: nothing else is looked at
+    sized, asked = _sizes({("", full): (14, False, True)})
+    assert fitted_frame(tries, sized, 11, 9, ("turn",)) == "" and asked == [("", full)]
+
+
+def test_a_narrow_bubble_whose_long_words_split_in_three_across_is_turned_with_every_word_whole():
+    # (a bubble of 35 x 155 px: across at the smallest size, "unbelievable" in three pieces, one hyphen too many)
+    font = _font()
+    region = _bubble(35, 155)
+    text = "Unbelievable, absolutely unbelievable!"
+    across = letter_text(None, region, text, font, 9, 64, floor=11)
+    fit = typeset.layout_text(region.mask, text, font, 9, 64, 1.12)
+    assert across.size == 9 and across.broken > 0 and fit.split > 0
+    done = letter_text(None, region, text, font, 9, 64, floor=11, tries=DEFAULT_FIT_TRIES)
+    assert done.frame == TURNED and done.broken == 0 and done.size >= across.size
+
+
 def test_the_set_tries_say_what_the_rescue_does_and_in_what_order():
     assert FIT_TRIES == ("turn", "condense", "hyphenate", "overrun")
     assert DEFAULT_FIT_TRIES == ("turn", "condense", "hyphenate") == Settings().fit_tries

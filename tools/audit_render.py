@@ -14,9 +14,18 @@ region is measured:
   the outline, a tail, hair), and in how many specks;
 * ``ghost``: pixels of a bubble's flat light paper that the erased page has darker than that paper, whatever made
   them (a glyph half taken, a grey ghost of it, a stroke LaMa drew), LaMa's regions included;
-* ``line_lost``: pixels of lines (the bubble's outline, a tail, the drawing) round the region that the erase made light;
+* ``line_lost``: pixels of lines (the bubble's outline, a tail, the drawing) round the region that the erase made light
+  (inside the text box only what of a line runs straight on: a glyph joined to the outline is lettering, `_pieces`),
+  and ``line_cut`` those of them that break a line (`_cut`: not a stroke joined to the outline that the line goes on
+  past, a neighbour's column by an outline the two share);
 * ``ink_on_line`` / ``ink_out`` / ``ink_other``: lettering pixels on such a line, outside the bubble's interior (a
   closed light area round the text), and on another region's interior or lettering;
+* ``over_px`` / ``draft_over_px``: pixels of a region's lettering that a neighbour's erase or lettering drawn after it
+  took away on the finished page, and that its own last patch showed as finished while a patch sent after it shows
+  them otherwise on the page filling in (`Drafts`: the patches pasted in turn, as a window pastes them);
+* ``resid_line_px`` / ``resid_shared_px``: pixels of the original lettering left that the erased page has joined to a
+  line it keeps (the outline, a tail: taken for one, so ``resid`` leaves them out), and those of all left beside an
+  outline the region shares with a neighbour (where the neighbour's box meets it);
 * the font size against the original glyph and the room, the hyphenated lines, the lettering's own flags, and the
   room a bubble's lettering took beyond its own across (``frame``: "turned", the line turned 90 degrees, whose lines,
   size and ink are measured as drawn and whose room is judged narrow in the turned frame; "overrun", over the
@@ -27,7 +36,10 @@ region is measured:
 * the sound words (``sound``, the kind ``sfx``: `taslation.soundwords`): found, their reading set right, left as
   drawn, and the codes on the sound effects lettered (`sound_lines`).
 
-A region whose measure crosses its threshold gets a reason code (`CODES`). The made-up pages (`synthetic_pages`:
+A region whose measure crosses its threshold gets a reason code (`CODES`), and each code has its level on the
+owner's scale (`CODE_LEVELS`: S1 reading fails, S2 content lost or damaged, S3 readable but hard, S4 cosmetic);
+``merge``'s table goes by level, the worst first, each level's own row counting the regions with any of its codes.
+The made-up pages (`synthetic_pages`:
 the layouts of tools/make_sample_page.py and risky ones drawn here - tall narrow bubbles, bubbles joined or cut by
 the page's edge, text on tone or white on black, tails crossing text, very small and very large characters, map
 symbols, clothing patterns, sound effects, lettering that touches its outline or runs over it, heavy glyphs that
@@ -65,7 +77,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 8  # (8: the regions' sound words, `sound_lines`)
+VERSION = 9  # (9: a neighbour over a region's lettering, lettering left by a line or a shared outline, an outline cut
+#              only where broken, joined pairs in layouts 18 and 19, the codes' levels and the summary by them; 8: sound
+#              words)
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -83,6 +97,9 @@ LIGHTER = 80
 LINE_DARK = 110  # a line pixel counts when it was darker than this
 LINE_GLYPHS = 2.5  # a dark piece longer than this many glyphs that is not inside the text box is a line
 INSIDE_TEXT = 0.6  # of a piece's pixels inside the text box (grown by a third of a glyph): lettering
+LINE_RUN = 1.2  # glyphs: of a line, what runs straight on this far is the line; inside the text box the rest of it ...
+GLYPH_PART = 1.5  # ... in parts no longer than this many glyphs is lettering joined to it (a glyph on the outline)
+LINE_STEP = 5  # degrees between the ways a straight run is looked for along
 HALF_WAY = 0.5  # an erased pixel that went less than this share of the way from the original to the ground is left
 LINE_FAINT = 200  # an erased pixel darker than this still joins a line the page keeps (a thin outline's grey edge)
 CONTRAST = 60  # levels between the lettering and its ground under which nothing is judged left
@@ -103,6 +120,8 @@ ART_LOST_PX = 60  # the same for a region on the drawing (LaMa fills a hole ther
 INK_ON_LINE_PX = 8  # lettering pixels on a line of the original
 INK_OUT_PX = 15  # lettering pixels outside the closed interior round the text
 INK_OTHER_PX = 6  # lettering pixels on another lettered region's interior or ink
+OVER_PX = 6  # pixels of a region's lettering a neighbour's erase, lettering or patch shows otherwise ...
+OVER_DROP = 100  # ... by this many grey levels or more (the glyph gone to the paper, not its anti-aliasing)
 SMALL_FONT = 11  # set smaller than this (the readable size)
 BOX_COVER = 0.75  # the text box holds less than this share of the original lettering's box
 BOX_EXCESS = 4.5  # the text box is this many times the lettering's box (and 8 glyphs' area larger)
@@ -115,11 +134,16 @@ CODES = {
     "GHOST": "marks on the bubble's flat paper after the erase, whatever made them (also where LaMa erased)",
     "LAMA_BUBBLE": "erased by LaMa although its lettering sits in a bubble's closed interior on flat light paper (not "
                    "a bubble drawn see-through over the drawing, which is lettering on the drawing)",
-    "LINE_CUT": "outline, tail or drawing lines erased round a region on paper",
+    "LINE_CUT": "outline, tail or drawing lines broken by the erase round a region on paper",
     "ART_CUT": "many lines erased round a region on the drawing (LaMa)",
     "INK_ON_LINE": "lettering drawn on an outline or a line of the drawing",
     "INK_OUT": "lettering outside the bubble's closed interior",
     "INK_OTHER": "lettering on another region's interior or lettering",
+    "OVER_OTHER": "the region's lettering taken away by a neighbour's erase or lettering drawn after it, or shown "
+                  "otherwise by a neighbour's patch sent after it while the page fills in",
+    "LEFT_BY_LINE": "specks of the original lettering left joined to a line the erased page keeps (an outline, a "
+                    "tail): taken for that line",
+    "LEFT_SHARED": "specks of the original lettering left beside an outline the region shares with a neighbour",
     "SMALL": "lettering under the readable size",
     "HYPHEN": "a word hyphenated",
     "SQUEEZED": "small lettering with a hyphen or in a narrow room",
@@ -138,6 +162,23 @@ CODES = {
 }
 PAGE_CODES = {"MISSED": "a gold or made-up text with no region", "OCR_DROPPED": "a text found but its reading dropped",
               "T_LEFT": "made-up page: a text's lettering left dark on the page after every erase (exact layer)"}
+# each code's level on the owner's scale (as `taslation.analysis.LEVELS` gives a defect its level): the summary's
+# table goes by it, the worst first
+LEVEL_WORDS = {"S1": "S1 reading fails", "S2": "S2 content lost or damaged", "S3": "S3 readable but hard",
+               "S4": "S4 cosmetic"}
+CODE_LEVELS = {
+    # a text left untranslated, or its original shown where a translation exists
+    "UNTRANSLATED": "S1", "MISSED": "S1", "OCR_DROPPED": "S1",
+    # a translation cut or covered, the drawing destroyed, a false region lettered over the art
+    "NOFIT": "S2", "OVER_OTHER": "S2", "INK_OTHER": "S2", "ART_CUT": "S2", "FALSE_LIKELY": "S2", "NO_GOLD": "S2",
+    "T_FALSE": "S2",
+    # specks or ghosts, an outline or a line cut, lettering over an outline, under the readable size, hyphenated
+    "RESIDUE": "S3", "GHOST": "S3", "LAMA_BUBBLE": "S3", "LEFT_BY_LINE": "S3", "LEFT_SHARED": "S3", "LINE_CUT": "S3",
+    "INK_ON_LINE": "S3", "INK_OUT": "S3", "SMALL": "S3", "HYPHEN": "S3", "SQUEEZED": "S3", "BOX_SMALL": "S3",
+    "T_RESIDUE": "S3", "T_LINE_CUT": "S3", "T_INK_ON_LINE": "S3", "T_INK_OUT": "S3", "T_LEFT": "S3",
+    # a size or a place a little off
+    "TIGHT": "S4", "BOX_BIG": "S4",
+}
 
 Box = tuple[int, int, int, int]
 
@@ -440,7 +481,7 @@ class Drawn:
 
 
 def layout(n: int, font_path: str) -> Drawn:
-    """Made-up layout *n* (1 to 17), each built round one risk."""
+    """Made-up layout *n* (1 to 19), each built round one risk."""
     p = Drawn(1000 + n, font_path)
     lines = list(LINES)
     p.rng.shuffle(lines)
@@ -640,6 +681,66 @@ def layout(n: int, font_path: str) -> Drawn:
         c("なにっ⁉", bt[0] + 330, bt[1] + 330, 44, 12, weight=900, bubble=b, case="heavy-marks")
         b = p.bubble(bt[0] + 700, bt[1] + 330, 150, 200)
         c(lines[2] + lines[3], bt[0] + 700, bt[1] + 330, 28, 6, weight=500, bubble=b, case="normal")
+    elif n == 18:  # bubbles joined in pairs, each drawn over the one before it (its outline the shared one)
+        tr, tl, bt = p.frame3()
+        # a tall narrow bubble of two columns, the left one by its outline and ending in an ellipsis; a narrower one
+        # over its upper right corner
+        a = p.bubble(tr[0] + 150, tr[1] + 400, 46, 160)
+        b = p.bubble(tr[0] + 200, tr[1] + 250, 30, 118)
+        c("まさかそんなことって︙︙", tr[0] + 150, tr[1] + 440, 25, 6, weight=700, bubble=a, case="pair-corner-big")
+        c("えっ︙", tr[0] + 206, tr[1] + 236, 24, 6, weight=700, bubble=b, case="pair-corner-small")
+        # a tall narrow bubble by the page's right edge, one column
+        e = p.bubble(tr[2] - 58, tr[1] + 360, 31, 140)
+        c("ちょっと待ってよ", tr[2] - 58, tr[1] + 360, 24, 12, weight=700, bubble=e, case="narrow-edge")
+        # a bubble of three columns, a tall narrow one over its left side
+        a = p.bubble(tl[0] + 380, tl[1] + 330, 88, 135)
+        b = p.bubble(tl[0] + 262, tl[1] + 370, 40, 165)
+        c("やっぱりそうかここで待っててね", tl[0] + 392, tl[1] + 330, 25, 5, weight=500, bubble=a,
+          case="pair-side-big")
+        c("気をつけて︙", tl[0] + 258, tl[1] + 370, 25, 12, weight=700, bubble=b, case="pair-side-narrow")
+        # a bubble of three columns, a smaller one over its foot
+        a = p.bubble(bt[0] + 260, bt[1] + 200, 95, 120)
+        b = p.bubble(bt[0] + 300, bt[1] + 372, 70, 95)
+        c("今日はいい天気だね明日また来るよ", bt[0] + 260, bt[1] + 190, 25, 6, weight=500, bubble=a,
+          case="pair-below-top")
+        c("急いで", bt[0] + 305, bt[1] + 385, 25, 6, weight=500, bubble=b, case="pair-below-foot")
+        # two tall narrow bubbles side by side, the right one over the left one's right side
+        a = p.bubble(bt[0] + 640, bt[1] + 330, 40, 170)
+        b = p.bubble(bt[0] + 708, bt[1] + 310, 36, 160)
+        c("信じられない︙", bt[0] + 634, bt[1] + 340, 26, 12, weight=800, bubble=a, case="pair-narrow-left")
+        c("うそでしょ", bt[0] + 712, bt[1] + 310, 26, 12, weight=800, bubble=b, case="pair-narrow-right")
+        b = p.bubble(bt[0] + 950, bt[1] + 330, 130, 180)
+        c(lines[0] + lines[1], bt[0] + 950, bt[1] + 330, 28, 6, weight=500, bubble=b, case="normal")
+        p.inter[p.np.asarray(p.outline) > 127] = 0  # (an outline drawn over a bubble is no part of its interior)
+    elif n == 19:  # joined pairs lettered from outline to outline: the columns by the shared outline touch it
+        tr, tl, bt = p.frame3()
+        # two tall narrow bubbles side by side, the right one over the left one's right side, three columns each
+        a = p.bubble(tr[0] + 140, tr[1] + 330, 42, 170)
+        b = p.bubble(tr[0] + 215, tr[1] + 310, 42, 160)
+        c("信じられないそんなことって︙", tr[0] + 140, tr[1] + 330, 22, 5, weight=800, bubble=a, case="tight-left",
+          col_gap=1.12)
+        c("うそでしょ本当にそうなの", tr[0] + 215, tr[1] + 310, 22, 4, weight=800, bubble=b, case="tight-right",
+          col_gap=1.12)
+        # a narrow bubble ending in an ellipsis column, a smaller one over its upper right corner
+        a = p.bubble(tr[0] + 420, tr[1] + 360, 46, 165)
+        b = p.bubble(tr[0] + 470, tr[1] + 220, 26, 100)
+        c("まさかそんなことって︙︙", tr[0] + 420, tr[1] + 380, 24, 6, weight=700, bubble=a, case="tight-corner-big",
+          col_gap=1.12)
+        c("えっ︙", tr[0] + 472, tr[1] + 210, 22, 6, weight=700, bubble=b, case="tight-corner-small")
+        # three columns in a bubble, a tall narrow one over its left side lettered by the shared outline
+        a = p.bubble(tl[0] + 380, tl[1] + 330, 70, 135)
+        b = p.bubble(tl[0] + 290, tl[1] + 360, 34, 165)
+        c("やっぱりそうかここで待っててね", tl[0] + 384, tl[1] + 330, 25, 5, weight=500, bubble=a,
+          case="tight-side-big", col_gap=1.12)
+        c("気をつけて行ってね", tl[0] + 292, tl[1] + 360, 24, 5, weight=700, bubble=b, case="tight-side-narrow",
+          col_gap=1.12)
+        # a bubble by itself whose four columns fill it from outline to outline
+        a = p.bubble(bt[0] + 400, bt[1] + 330, 58, 150)
+        c("今日はいい天気だね明日また来るよね", bt[0] + 400, bt[1] + 330, 24, 5, weight=700, bubble=a, case="tight-full",
+          col_gap=1.1)
+        b = p.bubble(bt[0] + 800, bt[1] + 330, 140, 190)
+        c(lines[0] + lines[1], bt[0] + 800, bt[1] + 330, 28, 6, weight=500, bubble=b, case="normal")
+        p.inter[p.np.asarray(p.outline) > 127] = 0
     else:  # 16: narrow bubbles with heavy short columns at the sample set's size of characters
         tr, tl, bt = p.frame3()
         cols = ((tr[0] + 100, 34, 22), (tr[0] + 250, 38, 24), (tr[0] + 400, 42, 26), (tl[0] + 120, 36, 24),
@@ -654,12 +755,12 @@ def layout(n: int, font_path: str) -> Drawn:
     return p
 
 
-LAYOUTS = 17
+LAYOUTS = 19
 SAMPLE_SEEDS = (0, 1, 2, 3)  # tools/make_sample_page.py's own page, at these seeds
 
 
 def synthetic_page(name: str, models_dir: Path) -> dict[str, Any]:
-    """A made-up page by name ("L01".."L17", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
+    """A made-up page by name ("L01".."L19", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
     (None for make_sample_page's) and its truth."""
     import numpy as np
 
@@ -787,8 +888,9 @@ class Canned:
 # ====================================================================== recording what the render does
 class Recorder:
     """`Pipeline._erase` and `letter_text` watched: per region its mask before the erase, its paper colour, the page
-    erased before any lettering, the room each region was lettered in, the pixels its lettering changed and the
-    lines its layout set."""
+    erased before any lettering, the room each region was lettered in, the pixels its lettering changed (and their
+    grey as drawn) and the lines its layout set - of the finished page alone: what the page filling in did on its
+    working copy (`pipeline.PageFill`) is forgotten as the page's render begins (`Pipeline._render`)."""
 
     def __init__(self, pipe: Any):
         import numpy as np
@@ -803,8 +905,13 @@ class Recorder:
         self._layout = ts.layout_text
         self._set = pipe._set_text
         self._tone = aw.fill_tone
+        self._render = pipe._render
         self.current: Any = None
         self._toning = False
+
+        def render(*a, **k):
+            self.reset()  # (the drafts' erases and letterings were on the working copy: no part of the finished page)
+            return self._render(*a, **k)
 
         def erase(out, region, quick=False):
             mask = region.mask.copy()
@@ -840,6 +947,7 @@ class Recorder:
             after = np.asarray(image.convert("RGB"))
             key = id(self.current)
             self.ink[key] = np.any(after != before, axis=2)
+            self.drawn[key] = _gray(after)[self.ink[key]]
             mask = region.mask
             if mask.shape != (region.height, region.width):
                 import cv2
@@ -859,6 +967,7 @@ class Recorder:
             return fit
 
         pipe._erase = erase
+        pipe._render = render
         pipe._set_text = set_text
         pl.letter_text = letter
         ts.layout_text = layout_text
@@ -870,6 +979,7 @@ class Recorder:
         self.paper: dict[int, tuple[int, ...]] = {}
         self.rooms: dict[int, Any] = {}
         self.ink: dict[int, Any] = {}
+        self.drawn: dict[int, Any] = {}
         self.lines: dict[int, list[str]] = {}
         self.won: dict[int, str] = {}
         self.frame: dict[int, str] = {}
@@ -879,6 +989,7 @@ class Recorder:
 
     def close(self) -> None:
         self.pipe._erase = self._erase
+        self.pipe._render = self._render
         self.pipe._set_text = self._set
         self.pl.letter_text = self._letter
         self.ts.layout_text = self._layout
@@ -891,6 +1002,57 @@ def _fit_lines(fit: Any) -> list[str]:
         return [str(p[0]) for p in placed]
     except Exception:  # noqa: BLE001 - another kind of fit: no lines told
         return []
+
+
+class Drafts:
+    """The page as a window shows it filling in while it is translated (`pipeline.PageFill`'s events): each region's
+    patch pasted over the page in turn as it comes, as the window's page filling in pastes it (`ui.jobs.Filling`), the
+    announced regions' boxes and which region each patch was of, in order. In memory only."""
+
+    def __init__(self, rgb: Any):
+        self.page = rgb.copy()
+        self.boxes: list[Box] = []
+        self.sent: list[tuple[int, Box]] = []  # (the announced region's index, the patch's box), in the order sent
+        self.own: dict[int, tuple[Box, Any]] = {}  # index -> its last own patch (box, grey pixels)
+
+    def event(self, kind: str, data: dict[str, Any]) -> None:
+        import numpy as np
+
+        if kind == "regions":
+            self.boxes = [tuple(int(v) for v in b) for b in data["boxes"]]
+        elif kind == "read" and data.get("box") is not None and 0 <= int(data["index"]) < len(self.boxes):
+            self.boxes[int(data["index"])] = tuple(int(v) for v in data["box"])
+        elif kind == "translated" and data.get("patch") is not None:
+            x0, y0, x1, y1 = (int(v) for v in data["box"])
+            patch = np.asarray(data["patch"].convert("RGB"))
+            self.page[y0:y1, x0:x1] = patch
+            self.sent.append((int(data["index"]), (x0, y0, x1, y1)))
+            self.own[int(data["index"])] = ((x0, y0, x1, y1), _gray(patch))
+
+    def index_of(self, region: Any) -> int:
+        """The announced index of *region* (its box the one it was announced or read with, or the nearest); -1."""
+        best, at = 0.0, -1
+        for k, b in enumerate(self.boxes):
+            v = _inter(region.bbox, b) / max(1.0, _area(region.bbox) + _area(b) - _inter(region.bbox, b))
+            if v > best:
+                best, at = v, k
+        return at if best >= 0.5 else -1
+
+    def covered(self, region: Any, final: Any, drop: float) -> Any:
+        """Where *region*'s last own patch showed the finished page (*final*, grey) and the page filling in no longer
+        does - by *drop* grey levels or more -, so a patch sent after it covered that part: a neighbour's, lettered
+        without it (no part of a region's own draft differing from the finished page, nor a region never drafted)."""
+        import numpy as np
+
+        out = _box_mask(final.shape, (0, 0, 0, 0))
+        got = self.own.get(self.index_of(region))
+        if got is None:
+            return out
+        (x0, y0, x1, y1), own = got
+        shown = _gray(self.page[y0:y1, x0:x1])
+        done = final[y0:y1, x0:x1].astype(np.float32)
+        out[y0:y1, x0:x1] = (np.abs(own - done) < drop) & (np.abs(shown - done) >= drop)
+        return out
 
 
 # ====================================================================== measuring
@@ -946,9 +1108,14 @@ def _glyph(r: Any, h: int) -> float:
     return float(min(max(8.0, min(tb[2] - tb[0], tb[3] - tb[1])), 0.035 * h))
 
 
-def _pieces(dark: Any, tbg: Box, g: float, win: Box) -> tuple[Any, Any]:
+def _pieces(dark: Any, tbg: Box, g: float, win: Box, others: Sequence[Box] = ()) -> tuple[Any, Any]:
     """The original's dark pieces in *win*, as two masks (page-sized): lettering (mostly inside the grown text box
-    *tbg*, no longer than it) and lines (longer than LINE_GLYPHS glyphs, mostly outside it)."""
+    *tbg*, no longer than it) and lines (longer than LINE_GLYPHS glyphs, mostly outside it). Of a line, the parts
+    inside the text box off what of it runs straight on (`LINE_RUN` glyphs one way: the outline's sides, a tail) that
+    are no longer than `GLYPH_PART` glyphs are lettering: a glyph of a column set by the outline, joined to it (taken
+    for the outline, its erase was counted as the outline cut and what of it was left as no lettering left); such
+    parts inside the grown text boxes of the other regions (*others*: a neighbour's column by the outline the two
+    share) are neither the region's lettering nor a line."""
     import numpy as np
     import cv2
 
@@ -958,6 +1125,10 @@ def _pieces(dark: Any, tbg: Box, g: float, win: Box) -> tuple[Any, Any]:
     inside = np.zeros(sub.shape, bool)
     tx0, ty0, tx1, ty1 = tbg[0] - x0, tbg[1] - y0, tbg[2] - x0, tbg[3] - y0
     inside[max(0, ty0):max(0, ty1), max(0, tx0):max(0, tx1)] = True
+    theirs = np.zeros(sub.shape, bool)
+    for ox0, oy0, ox1, oy1 in others:
+        theirs[max(0, oy0 - y0):max(0, oy1 - y0), max(0, ox0 - x0):max(0, ox1 - x0)] = True
+    theirs &= ~inside
     counts_in = np.bincount(labels[inside], minlength=n) if n else np.zeros(1, int)
     tw, th = tbg[2] - tbg[0], tbg[3] - tbg[1]
     letters = np.zeros(n, bool)
@@ -969,11 +1140,56 @@ def _pieces(dark: Any, tbg: Box, g: float, win: Box) -> tuple[Any, Any]:
             letters[i] = True
         elif max(bw, bh) > LINE_GLYPHS * g:
             lines[i] = True
+    lp_sub, ln_sub = letters[labels], lines[labels]
+    if (ln_sub & (inside | theirs)).any():
+        run = max(5, int(round(LINE_RUN * g))) | 1
+        core = np.zeros(sub.shape, bool)
+        for angle in range(0, 180, LINE_STEP):  # (a thin curved outline holds a straight run only near its own slope)
+            kernel = np.zeros((run, run), np.uint8)
+            c, d = run // 2, (run - 1) / 2.0
+            dx, dy = d * np.cos(np.radians(angle)), d * np.sin(np.radians(angle))
+            cv2.line(kernel, (int(round(c - dx)), int(round(c - dy))), (int(round(c + dx)), int(round(c + dy))), 1, 1)
+            core |= cv2.morphologyEx(ln_sub.astype(np.uint8), cv2.MORPH_OPEN, kernel) > 0
+        off = ln_sub & (inside | theirs) & ~(cv2.dilate(core.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+        k, parts, part_stats, _ = cv2.connectedComponentsWithStats(off.astype(np.uint8), connectivity=8)
+        small = np.maximum(part_stats[:, 2], part_stats[:, 3]) <= GLYPH_PART * g
+        small[0] = False
+        glyphs = small[parts]
+        lp_sub, ln_sub = lp_sub | (glyphs & inside), ln_sub & ~glyphs
     lp = np.zeros(dark.shape, bool)
     ln = np.zeros(dark.shape, bool)
-    lp[y0:y1, x0:x1] = letters[labels]
-    ln[y0:y1, x0:x1] = lines[labels]
+    lp[y0:y1, x0:x1] = lp_sub
+    ln[y0:y1, x0:x1] = ln_sub
     return lp, ln
+
+
+def _cut(lost: Any, still: Any, win: Box, longest: float) -> int:
+    """How many of the line pixels made light (*lost*, bool, page-sized) break a line: each piece of them that touches
+    two pieces of the lines still dark on the erased page (*still*) in *win*, or one longer than *longest* px (a stretch
+    of the line gone); not a stroke of a glyph joined to the line erased where the line goes on past it, nor a glyph of
+    a neighbour's column joined to an outline the two share."""
+    import numpy as np
+    import cv2
+
+    x0, y0, x1, y1 = win
+    sub = lost[y0:y1, x0:x1].astype(np.uint8)
+    if not sub.any():
+        return 0
+    _k, kept = cv2.connectedComponents(still[y0:y1, x0:x1].astype(np.uint8), connectivity=8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(sub, connectivity=8)
+    hh, ww = sub.shape
+    total = 0
+    for i in range(1, n):
+        x, y, bw, bh, area = (int(v) for v in stats[i])
+        if max(bw, bh) > longest:
+            total += area
+            continue
+        a0, b0, a1, b1 = max(0, x - 1), max(0, y - 1), min(ww, x + bw + 1), min(hh, y + bh + 1)
+        piece = (labels[b0:b1, a0:a1] == i).astype(np.uint8)
+        ring = (cv2.dilate(piece, np.ones((3, 3), np.uint8)) > 0) & (piece == 0)
+        if np.count_nonzero(np.unique(kept[b0:b1, a0:a1][ring])) >= 2:
+            total += area
+    return total
 
 
 def _interior(O: Any, letters: Any, tb: Box, win: Box) -> Any:
@@ -1138,13 +1354,27 @@ def _see_through(orig: Any, r: Any) -> bool:
     return closed is not None and bool(artwork.see_through(rgb, r, closed))
 
 
+def _shared_lines(lines_: Any, r: Any, others: Sequence[Any], g: float, w: int, h: int) -> Any:
+    """The pixels of *lines_* (the original's lines round *r*) inside *r*'s box and a neighbour's (of *others*), both
+    grown by half a glyph: the outline where two bubbles meet."""
+    own = _box_mask((h, w), _grow(r.bbox, g / 2, w, h))
+    near = _box_mask((h, w), (0, 0, 0, 0))
+    for q in others:
+        if q is not r and _inter(_grow(q.bbox, g / 2, w, h), _grow(r.bbox, g / 2, w, h)) > 0:
+            near |= _box_mask((h, w), _grow(q.bbox, g / 2, w, h))
+    return lines_ & own & near
+
+
 def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec: Recorder,
-                 truth: list[dict[str, Any]], layers: dict[str, Any] | None, gold_kind: str) -> tuple[list, list]:
-    """Per region the measures (`CODES`), and the page's own codes (`PAGE_CODES`)."""
+                 truth: list[dict[str, Any]], layers: dict[str, Any] | None, gold_kind: str,
+                 drafts: Drafts | None = None) -> tuple[list, list]:
+    """Per region the measures (`CODES`), and the page's own codes (`PAGE_CODES`); *drafts* the page as it filled in."""
     import numpy as np
     import cv2
 
     O, E = _gray(orig), _gray(erased)
+    F = _gray(final)
+    holders = [q for q in regions if id(q) in rec.ink or id(q) in rec.before]  # (lettered or erased: they hold text)
     h, w = O.shape
     dark = O < INK_DARK
     lettered = [r for r in regions if id(r) in rec.ink]
@@ -1176,7 +1406,8 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
         # light ones, its interior the dark area round it, and the ground itself (a fill) is no line
         dark_ground = sum(paper) / 3 < 100 if paper else r.kind in DARK_KINDS
         inkmask = (O > 255 - INK_DARK) if dark_ground else dark
-        letters, lines_ = _pieces(inkmask, tbg, g, win)
+        others = [_grow(tuple(int(v) for v in q.text_box), g / 3, w, h) for q in holders if q is not r]
+        letters, lines_ = _pieces(inkmask, tbg, g, win, others)
         # (lettering on a fill - a black ground, a gradient's dark end - is no lettering on a line)
         thin = _long_pieces(lines_ & ~_solid(inkmask, g, win), win, LINE_GLYPHS * g)
         inter = _interior(255 - O if dark_ground else O, letters, tb, win)
@@ -1192,23 +1423,37 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                 zone |= cv2.erode(inter.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
             dom = letters & zone
             ground = sum(paper) / 3 if paper else (0.0 if dark_ground else 255.0)
-            left = _left(E, O, dom, ground, 0.0)
+            raw = _left(E, O, dom, ground, 0.0)
             still = (E > 255 - LINE_FAINT) if dark_ground else (E < LINE_FAINT)
-            left &= ~_long_pieces(still, win, LINE_GLYPHS * g)
+            kept = _long_pieces(still, win, LINE_GLYPHS * g)
+            left = raw & ~kept
             m["letter_px"] = int(dom.sum())
             m["resid_px"] = int(left.sum())
             m["resid_specks"] = _specks(left)
+            # lettering left that the erased page joined to a line it keeps (the column by the outline, an ellipsis
+            # touching it: the line guard took it for the outline), and all left beside an outline shared with a
+            # neighbour
+            m["resid_line_px"] = int((raw & kept).sum())
+            reach = max(3, int(g / 2) | 1)
+            shared = cv2.dilate(_shared_lines(lines_, r, holders, g, w, h).astype(np.uint8), np.ones((reach, reach),
+                                                                                                   np.uint8)) > 0
+            m["resid_shared_px"] = int((raw & shared).sum())
             # (not where LaMa or the tone fill painted the hole: the drawing or the tone's dots there are no lettering)
-            if (m["resid_px"] >= max(RESID_PX, RESID_SHARE * m["letter_px"]) and not row["inpainted"]
-                    and not row["toned"]):
-                codes.append("RESIDUE")
+            least = max(RESID_PX, RESID_SHARE * m["letter_px"])
+            if not row["inpainted"] and not row["toned"]:
+                if m["resid_px"] >= least:
+                    codes.append("RESIDUE")
+                if m["resid_line_px"] >= least:
+                    codes.append("LEFT_BY_LINE")
+                if m["resid_shared_px"] >= least:
+                    codes.append("LEFT_SHARED")
             # marks on a bubble's flat light paper after the erase, whatever made them (lettering half taken, a
             # grey ghost of it, a stroke LaMa drew): darker than the paper by GHOST_DROP, a quarter glyph inside the
             # outline (where LaMa may reshape its edge), off the lines the bubble lets through (hair, a tail) and
             # every line the page keeps (a thin one: a bubble LaMa filled dark is no line); LaMa's regions too, judged
             # on the original (the paper a LaMa fill reports is what it painted, dark where it painted the bubble dark)
             lama = row["inpainted"]
-            o_letters, o_lines = _pieces(dark, tbg, g, win) if dark_ground and lama else (letters, lines_)
+            o_letters, o_lines = _pieces(dark, tbg, g, win, others) if dark_ground and lama else (letters, lines_)
             o_inter = _interior(O, o_letters, tb, win) if dark_ground and lama else inter
             if o_inter is not None and ((light and not dark_ground) or lama):
                 k = max(5, int(g / 2) | 1)
@@ -1240,10 +1485,11 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             lost = near & (O < LINE_DARK) & (E >= LIGHTENED) & (E - O >= LIGHTER)
             m["line_px"] = int((near & (O < LINE_DARK)).sum())
             m["line_lost"] = int(lost.sum())
+            m["line_cut"] = _cut(lost, lines_ & (E < LINE_DARK), win, GLYPH_PART * g)
             if row["inpainted"]:
                 if m["line_lost"] >= ART_LOST_PX:
                     codes.append("ART_CUT")
-            elif m["line_lost"] >= LINE_LOST_PX and light:
+            elif m["line_cut"] >= LINE_LOST_PX and light:
                 codes.append("LINE_CUT")
             if letters.any():
                 ys, xs = np.nonzero(letters & (mb | _box_mask((h, w), tbg)))
@@ -1272,6 +1518,15 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                 m["ink_out"] = int(out.sum())
                 if m["ink_out"] >= INK_OUT_PX:
                     codes.append("INK_OUT")
+            # the lettering as drawn, taken away after it on the finished page (a neighbour's erase or lettering), or
+            # shown otherwise on the page filling in under a neighbour's patch sent after its own
+            drawn = rec.drawn.get(id(r))
+            if drawn is not None and drawn.shape[0] == int(ink.sum()):
+                m["over_px"] = int((np.abs(F[ink] - drawn) >= OVER_DROP).sum())
+            if drafts is not None:
+                m["draft_over_px"] = int((ink & drafts.covered(r, F, OVER_DROP)).sum())
+            if m.get("over_px", 0) + m.get("draft_over_px", 0) >= OVER_PX:
+                codes.append("OVER_OTHER")
             lines = rec.lines.get(id(r), [])
             m["lines"] = len(lines)
             m["hyphens"] = _hyphens(lines)
@@ -1496,11 +1751,12 @@ def run_item(pipe: Any, translator: Canned, rec: Recorder, item: str, root: Path
     translator.length_of = length_of
     translator.gold_of = gold_of
     t0 = time.monotonic()
-    res = pipe.process(Image.fromarray(rgb), translate=True, use_cache=False)
+    drafts = Drafts(rgb)  # (as a window shows the page filling in: the patches pasted in turn)
+    res = pipe.process(Image.fromarray(rgb), translate=True, use_cache=False, events=drafts.event)
     seconds = time.monotonic() - t0
     final = np.asarray(res.image.convert("RGB"))
     erased = rec.erased if rec.erased is not None else final
-    rows, page_codes = measure_page(rgb, erased, final, res.regions, rec, texts, got["layers"], got["kind"])
+    rows, page_codes = measure_page(rgb, erased, final, res.regions, rec, texts, got["layers"], got["kind"], drafts)
     h, w = rgb.shape[:2]
     record = {"item": item, "set": got["kind"], "size": [w, h], "factor": round(got["factor"], 4),
               "seconds": round(seconds, 1), "regions": rows, "page_codes": page_codes,
@@ -1606,6 +1862,10 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
                 cell = table.setdefault((c, rec["set"], scale), {"regions": 0, "pages": set()})
                 cell["regions"] += 1
                 cell["pages"].add(rec["item"])
+            for level in {CODE_LEVELS.get(c, "S3") for c in r["codes"] if c in CODES}:  # (a region once a level)
+                cell = table.setdefault((level, rec["set"], scale), {"regions": 0, "pages": set()})
+                cell["regions"] += 1
+                cell["pages"].add(rec["item"])
         for pc in rec.get("page_codes", []):
             cell = table.setdefault((pc["code"], rec["set"], scale), {"regions": 0, "pages": set()})
             cell["regions"] += 1
@@ -1615,18 +1875,28 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
              "Pages: " + ", ".join(f"{s} {sc} {totals[(s, sc)]['pages']} ({totals[(s, sc)]['regions']} regions, "
                                    f"{totals[(s, sc)]['lettered']} lettered, {totals[(s, sc)]['texts']} texts, "
                                    f"{totals[(s, sc)]['seconds'] / 60:.0f} min)" for s, sc in keys), "",
-             "Each cell: regions flagged / regions lettered (texts for MISSED and OCR_DROPPED), and pages affected.", "",
+             "Each cell: regions flagged / regions lettered (texts for MISSED, OCR_DROPPED and T_LEFT), and pages "
+             "affected. The codes go by their level on the owner's scale, the worst first; a level's own row counts "
+             "the regions with any of its codes (each region once).", "",
              "| code | " + " | ".join(f"{s} {sc}" for s, sc in keys) + " | what |",
              "|---|" + "---|" * len(keys) + "---|"]
     allc = {**CODES, **PAGE_CODES}
-    for code in allc:
+
+    def cells_of(code: str) -> list[str]:
         cells = []
         for s, sc in keys:
             cell = table.get((code, s, sc))
             denom = totals[(s, sc)]["texts"] if code in PAGE_CODES else totals[(s, sc)]["lettered"]
             cells.append(f"{cell['regions']}/{denom}, {len(cell['pages'])} p" if cell else "-")
-        if any(c != "-" for c in cells):
-            lines.append(f"| {code} | " + " | ".join(cells) + f" | {allc[code]} |")
+        return cells
+
+    for level, words in LEVEL_WORDS.items():
+        lines.append(f"| **{level}** | " + " | ".join(cells_of(level)) + f" | **{words}**: regions with any of its "
+                     "codes |")
+        for code in (c for c in allc if CODE_LEVELS.get(c, "S3") == level):
+            cells = cells_of(code)
+            if any(c != "-" for c in cells):
+                lines.append(f"| {code} | " + " | ".join(cells) + f" | {allc[code]} |")
     for frame, what in (("turned", "lettered with the line turned 90 degrees (a count, not a fault)"),
                         ("overrun", "lettered over the bubble's outline (a count, not a fault)")):
         if any(totals[k].get(frame) for k in keys):
@@ -1642,7 +1912,7 @@ def merge(paths: Sequence[Path], out: Path | None, summary: Path | None) -> int:
     print(text)
     if out:
         flat = {f"{c}|{s}|{sc}": {"regions": v["regions"], "pages": sorted(v["pages"])} for (c, s, sc), v in table.items()}
-        out.write_text(json.dumps({"tool": "audit_render", "version": VERSION, "shards": meta,
+        out.write_text(json.dumps({"tool": "audit_render", "version": VERSION, "levels": CODE_LEVELS, "shards": meta,
                                    "totals": {f"{s}|{sc}": v for (s, sc), v in totals.items()}, "table": flat,
                                    "pages": records}, indent=1), encoding="utf-8")
     return 0

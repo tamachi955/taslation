@@ -1,6 +1,7 @@
 """How a page fills in while it is translated: the pipeline's page events (regions, read, translated, page)."""
 from __future__ import annotations
 
+import copy
 import time
 
 import numpy as np
@@ -149,6 +150,83 @@ def test_a_draft_that_does_not_last_gives_the_region_back(settings):
     fill.draft(TextRegion(0, 0, 4, 4, np.full((4, 4), 255, np.uint8), (0, 0, 4, 4)), "Hi")  # not announced: nothing
     fill.wait()
     assert len(events.of("translated")) == 2
+
+
+def _joined_pair():
+    """A page with two joined bubbles (a narrow one over the upper corner of a bigger one: their boxes overlap), each
+    with its original lettering."""
+    page = np.full((320, 320, 3), 255, np.uint8)
+    page[110:270:12, 70:150] = 0
+    page[40:180:10, 172:190] = 0
+    big = _region(40, 80, 200, 300, (60, 100, 180, 280))
+    narrow = _region(150, 20, 210, 200, (160, 30, 200, 190))
+    return page, big, narrow
+
+
+def _composite(page, events, early=False):
+    out = page.copy()
+    for d in events.of("translated"):
+        if bool(d.get("early")) == early:
+            x0, y0, x1, y1 = d["box"]
+            out[y0:y1, x0:x1] = np.asarray(d["patch"])
+    return out
+
+
+BIG = "Why would you come all the way out here tonight?"
+
+
+def test_joined_bubbles_lettered_one_by_one_fill_in_as_the_finished_page_letters_them(settings):
+    # (the narrow one's line comes first, then the big one's, whose box takes in the narrow one's lettering: lettered
+    # alone, the big one's erase would take the narrow one's first letters away on its patch)
+    p = Pipeline(settings, ocr=None, translator=None)
+    page, big, narrow = _joined_pair()
+    events = Events()
+    fill = PageFill(p, page, events)
+    fill.announce([big, narrow])
+    fill.draft(narrow, "Wait!")
+    fill.draft(big, BIG)
+    fill.wait()
+    assert [d["index"] for d in events.of("translated")] == [1, 0, 1]  # (the narrow one sent again with the big one)
+    both = page.copy()
+    p.letter_regions(both, [(big, BIG), (narrow, "Wait!")], quick=True)  # (every one erased before any is lettered)
+    assert np.array_equal(_composite(page, events), both)
+    alone = page.copy()
+    p.letter_region(alone, narrow, "Wait!", quick=True)
+    p.letter_region(alone, big, BIG, quick=True)
+    lost = (np.asarray(alone).min(axis=2) > 128) & (both.min(axis=2) < 128)
+    assert lost[narrow.y0:narrow.y1, narrow.x0:narrow.x1].sum() > 20  # (the case: lettered alone, ink lost)
+    fill.draft(narrow, "Wait, what?")  # (the model wrote the narrow one again: the page lettered again)
+    fill.wait()
+    again = page.copy()
+    p.letter_regions(again, [(big, BIG), (narrow, "Wait, what?")], quick=True)
+    assert np.array_equal(_composite(page, events), again)
+
+
+def test_the_drafts_layer_letters_joined_bubbles_as_the_finished_page_does(settings):
+    p = Pipeline(settings, ocr=None, translator=None)
+    page, big, narrow = _joined_pair()
+    events = Events()
+    fill = PageFill(p, page, events)
+    fill.announce([big, narrow])
+    fill.early_begin()
+    shaped_narrow, shaped_big = copy.deepcopy(narrow), copy.deepcopy(big)
+    fill.early_draft(narrow, shaped_narrow, "Wait!")
+    fill.early_draft(big, shaped_big, BIG)
+    fill.wait()
+    early = [d for d in events.of("translated") if d.get("early")]
+    assert [d["index"] for d in early] == [1, 0, 1]
+    both = page.copy()
+    p.letter_regions(both, [(shaped_big, BIG), (shaped_narrow, "Wait!")], quick=True)
+    assert np.array_equal(_composite(page, events, early=True), both)
+    fill.draft(narrow, "Wait!")  # (a draft proper, lettered on the working copy: the layer's big one meets it)
+    fill.wait()
+    fill.early_withdraw([narrow])
+    fill.wait()
+    proper = page.copy()
+    p.letter_regions(proper, [(shaped_big, BIG), (narrow, "Wait!")], quick=True)
+    assert np.array_equal(fill.early_work, proper)  # (the layer's page: its big one and the draft proper, as finished)
+    withdrawn = [d for d in events.of("translated") if d.get("withdrawn")]
+    assert [(d["index"], d["text"]) for d in withdrawn] == [(1, "")]
 
 
 def test_a_page_from_the_cache_gets_only_the_finished_page(sample_page, settings):
