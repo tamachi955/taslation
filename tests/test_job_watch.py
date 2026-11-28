@@ -4,9 +4,9 @@ goes at once - while the job goes on; the job is cancelled only once the new pag
 `live.LEFT_PAGE_MS`, and the new page is then started early - a gate of its own - as soon as the worker is free; a
 frame back on the job's page before that letters it again, the job never cancelled. A black flash and frames of the
 same page drawn again (a spinner) change nothing. A page job done before its frame was confirmed is shown only once it
-is (`JobsMixin._show_held`). The window, the viewer, the clock and the worker are tests/test_early_start.py's; this
-worker also fills the page in as the pipeline does (its regions found once it is read, one lettered while the model
-answers)."""
+is (`JobsMixin._show_held`), and never when its frame was dropped before the window took it from the queue. The
+window, the viewer, the clock and the worker are tests/test_early_start.py's; this worker also fills the page in as
+the pipeline does (its regions found once it is read, one lettered while the model answers)."""
 from __future__ import annotations
 
 import pytest
@@ -289,4 +289,47 @@ def test_a_page_done_on_a_frame_then_dropped_is_never_shown(follow):
     first, second = worker.one("4 soft"), worker.one("4")
     assert first.shown is not None and first.discarded  # done on the soft frame, dropped with it ...
     assert all(r is not first.result for r in shown)  # ... and never on the page
+    assert w.last_result is second.result and w._held_result is None
+
+
+QUEUE_S = 0.1  # a worker's event waiting for the Tk thread (`JobsMixin._poll_events`): longer than a look at the viewer
+
+
+class _Queued:
+    """The window as its worker reaches it (`Worker`'s *w*): each event QUEUE_S after it was posted, in the order
+    posted - the worker's queue, which the Tk thread empties at its next look, a look at the viewer coming first on a
+    busy processor; *came*: (when, kind, data) of each as it reached the window."""
+
+    def __init__(self, w, clock):
+        self.w, self.clock, self.came = w, clock, []
+
+    def __getattr__(self, name):
+        return getattr(self.w, name)
+
+    def _handle_event(self, kind, data):
+        def handle():
+            self.came.append((self.clock.now, kind, data))
+            self.w._handle_event(kind, data)
+
+        self.clock.after(QUEUE_S * 1000, handle)
+
+
+def test_a_page_done_on_a_frame_dropped_before_the_window_took_it_is_never_shown(follow):
+    # the soft frame's job found nothing for the model and posted its page while the frame was pending; the sharp
+    # frame dropped it before the window took that page from the queue (as on a slow processor)
+    w, worker = follow.make(asks=False)
+    queued = _Queued(w, follow.clock)
+    w._jobs = worker = Worker(queued, follow.clock, worker.name, False)
+    shown, said = [], []
+    redisplay, page_status = w._redisplay, w._page_status
+    w._redisplay = lambda: shown.append(w.last_result) or redisplay()
+    w._page_status = lambda text, page: said.append(page) or page_status(text, page)
+    soft, sharp = _page(4, soft=3), _page(4)
+    follow.show((0.0, "4 soft", soft), (READ_S + 0.05, "4", sharp))
+    first, second = worker.one("4 soft"), worker.one("4")
+    came = next(t for t, kind, data in queued.came if kind == "result" and data["result"] is first.result)
+    assert first.shown <= first.gate.dropped_at < came and first.discarded  # posted, dropped, then taken ...
+    assert all(r is not first.result for r in shown)  # ... never on the page, not for a moment ...
+    assert all(page is not first.result.original for page in said)  # ... nor its line said
+    assert second.gate.confirmed_at is not None and worker.kept == ["4"]  # the sharp frame read and kept
     assert w.last_result is second.result and w._held_result is None

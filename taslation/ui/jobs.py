@@ -1236,12 +1236,18 @@ class JobsMixin:
             updates.on_ready(self)  # the look for a new version, for who turned it on: later, while nothing is read
         elif kind == "result":
             gate = data.get("gate")
-            if gate is not None and getattr(gate, "state", "confirmed") == "pending":
+            state = getattr(gate, "state", "confirmed") if gate is not None else "confirmed"
+            if state == "pending":
                 # a page started on its first frame, done before that frame was confirmed (a page with nothing for
                 # the model, or nothing found on a soft frame): shown once its frame is confirmed (`_show_held`), never
                 # once it is dropped - the viewer shows another picture by then, and a page "translated" for a moment
                 # with none of its lines was that picture's
                 self._held_result = data
+                return
+            if state == "dropped":
+                # its frame dropped, or its confirmation taken back, before this came off the queue (posted while the
+                # frame was pending, or by a job with nothing to ask that never looked): neither shown nor held -
+                # nothing of the job is kept, the frame there is is the page (its "page_cancelled", discarded, ends it)
                 return
             self._hide_busy()
             if data.get("edited") and data["result"] is not self.last_result:
