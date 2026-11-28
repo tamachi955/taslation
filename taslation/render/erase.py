@@ -720,15 +720,23 @@ def line_pixels(image: np.ndarray, region: TextRegion, dark_threshold: int = 140
         if hit.size < 0.8 * runs.size or float(np.percentile(hit, 80)) > 2 * thin + 2:  # (+2: the pixels at its sides)
             continue  # not one thin line all along: a drawing, a dark ground
         half = float(np.percentile(hit, 90)) / 2.0 + 1.0
-        dist = np.abs((xs_all - end[0]) * d[1] - (ys_all - end[1]) * d[0])
-        along = (xs_all - far[0]) * d[0] + (ys_all - far[1]) * d[1]
-        band = dark & inside & (dist <= half)
-        run = near & (dist <= half) & (along >= -2) & (along <= length + 2)
+        # (worked out on the box and the run's own surroundings alone, where all of the band and the run lie: the
+        # same pixels as over the whole window, at a cost that no longer grows with the reach round a large box)
+        pad = int(np.ceil(half)) + 4
+        sx0 = max(0, min(bx0, int(min(far[0], end[0])) - pad))
+        sy0 = max(0, min(by0, int(min(far[1], end[1])) - pad))
+        sx1 = min(dark.shape[1], max(bx1, int(max(far[0], end[0])) + 1 + pad))
+        sy1 = min(dark.shape[0], max(by1, int(max(far[1], end[1])) + 1 + pad))
+        xs, ys = xs_all[sy0:sy1, sx0:sx1], ys_all[sy0:sy1, sx0:sx1]
+        dist = np.abs((xs - end[0]) * d[1] - (ys - end[1]) * d[0])
+        along = (xs - far[0]) * d[0] + (ys - far[1]) * d[1]
+        band = dark[sy0:sy1, sx0:sx1] & inside[sy0:sy1, sx0:sx1] & (dist <= half)
+        run = near[sy0:sy1, sx0:sx1] & (dist <= half) & (along >= -2) & (along <= length + 2)
         m, parts = cv2.connectedComponents((band | run).astype(np.uint8), connectivity=8)
         ids = np.unique(parts[run])
         joined = np.isin(parts, ids[ids > 0]) & band
         if joined.any():
-            keep |= joined | run
+            keep[sy0:sy1, sx0:sx1] |= joined | run
     if not keep.any():
         return None
     return (wx0, wy0, wx1, wy1), cv2.dilate(keep.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0

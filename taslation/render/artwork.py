@@ -69,6 +69,8 @@ ART_ERASES = ("auto", "lama", "off")
 ART_KINDS = ("text", "text-on-page", "text-dark", "text-on-dark")
 FLAT_GROUND = 6.0  # grey levels: nine in ten pixels of a ring this close to its median are one flat colour
 RING_OUT, RING_IN = 14, 2  # px: the ring round a region's box its ground is judged on
+COLOUR_SPREAD = 24  # a pixel with a channel this far from another is colour (as the analysis log's facts) ...
+COLOUR_SHARE = 0.35  # ... and a ring with this share of such pixels lies on a picture in colour (`on_colour_picture`)
 PIECE = 80  # px: a dark piece longer than this, or than 1.15 times the box's short side, is not a glyph ...
 WIDE_GLYPH = 1.15  # ... (big lettering: a glyph as wide as its column)
 DARK, RINGED = 150, 200  # grey levels of a stroke, and of the white ring round it
@@ -119,7 +121,16 @@ TONE_SHIFTS = 600  # repeats the hole is painted from, nearest first
 TONE_PEAKS = 200  # repeats looked at, nearest first, for one past a dip
 TONE_NEAR = 12  # the nearest repeats, painted with again and again from the hole's edge inwards
 TONE_GROW = 2  # px the hole is taken wider by (anti-aliasing)
+TONE_MOST_PX = 900_000  # px of the window its repeats are measured on at the most (four FFTs of four times it)
+TONE_ROUNDS = 400  # rounds of painting from the hole's edge inwards at the most (a hole left unpainted: LaMa's)
 WINDOW = 512  # px: the part of the page the model sees (at least)
+# The pixels the model is run on at the most, on the GPU and on the processor: a larger part is scaled down to them
+# for the run and its fill scaled back up into the hole alone (`ArtEraser._fill`). Measured 2026-11-28 (GTX 1660
+# Ti, a hole of a quarter of the part): 768 x 768 0.29 s and 576 MiB at the peak on the GPU (LAMA_MIB holds it),
+# 1400 x 1400 0.96 s and 1456 MiB; on the processor 512 x 512 1.1 s, 768 x 768 3.2 s, 1400 x 1400 10.5 s.
+LAMA_PART_PX = 768 * 768
+LAMA_PART_CPU_PX = 512 * 640
+TELEA_RADIUS = 5  # px: OpenCV's inpainting of a hole LaMa is refused for (`budget.lama_refused`)
 SMALLEST = 256  # px: a page narrower than this is left to the paper fill (the network pads by reflection)
 
 Erase = Callable[..., tuple[int, int, int]]
@@ -230,6 +241,28 @@ def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> 
     elif region.kind not in ART_KINDS:
         return False
     return _ring_not_flat(image, region, flat)
+
+
+def on_colour_picture(image: np.ndarray, region: TextRegion) -> bool:
+    """Whether the ring round *region*'s lettering box (`RING_OUT` px past it at the page's scale, `RING_IN` into it)
+    is a picture in colour: `COLOUR_SHARE` of its pixels or more have a channel `COLOUR_SPREAD` from another, and the
+    ring is not one flat colour (`FLAT_GROUND`: a coloured bubble's paper is). `Pipeline._big_unsure` asks it."""
+    x0, y0, x1, y1 = box_of(image, region)
+    h, w = image.shape[:2]
+    out = pagescale.px(RING_OUT, pagescale.of(region))
+    ox0, oy0, ox1, oy1 = max(0, x0 - out), max(0, y0 - out), min(w, x1 + out), min(h, y1 + out)
+    if ox1 - ox0 < 4 or oy1 - oy0 < 4 or image.ndim < 3:
+        return False
+    ring = np.ones((oy1 - oy0, ox1 - ox0), bool)
+    iy0, iy1 = max(0, y0 + RING_IN - oy0), max(0, y1 - RING_IN - oy0)
+    ring[iy0:iy1, max(0, x0 + RING_IN - ox0):max(0, x1 - RING_IN - ox0)] = False
+    px = image[oy0:oy1, ox0:ox1, :3][ring].astype(np.int16)
+    if px.shape[0] < 16:
+        return False
+    if float(((px.max(axis=1) - px.min(axis=1)) >= COLOUR_SPREAD).mean()) < COLOUR_SHARE:
+        return False
+    grey = px.mean(axis=1)
+    return float((np.abs(grey - np.median(grey)) <= FLAT_GROUND).mean()) < 0.9
 
 
 def as_judged(region: TextRegion) -> TextRegion:
@@ -554,6 +587,9 @@ def tone_shifts(image: np.ndarray, hole: np.ndarray, scale: float = 1.0
     band = pagescale.px(TONE_BAND, scale)
     x0, y0 = max(0, int(xs.min()) - band), max(0, int(ys.min()) - band)
     x1, y1 = min(w, int(xs.max()) + 1 + band), min(h, int(ys.max()) + 1 + band)
+    if (x1 - x0) * (y1 - y0) > TONE_MOST_PX:
+        analysis.count("tone_look.too_large")
+        return None  # (LaMa, or the fill past it, takes so large a hole)
     part = _closed(hole[y0:y1, x0:x1])
     near = cv2.dilate(part.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     ground = ~near & (cv2.dilate(part.astype(np.uint8), pagescale.disc(2 * band + 1, 1.0)) > 0)
@@ -639,8 +675,9 @@ def fill_tone(image: np.ndarray, hole: np.ndarray, scale: float = 1.0) -> bool:
         ys, xs = ys[~ok], xs[~ok]
         return True
 
-    while ys.size and any([paint(sy, sx) for sy, sx in shifts[:TONE_NEAR]]):
-        pass
+    rounds = 0
+    while ys.size and rounds < TONE_ROUNDS and any([paint(sy, sx) for sy, sx in shifts[:TONE_NEAR]]):
+        rounds += 1
     for sy, sx in shifts[TONE_NEAR:]:
         if not ys.size:
             break
@@ -735,6 +772,38 @@ def paste(part: np.ndarray, filled: np.ndarray, hole: np.ndarray) -> tuple[np.nd
     """What of the model's *filled* goes onto *part* (the window it saw) for *hole*: the pixels changed (bool) and
     their values."""
     return hole, filled[hole]
+
+
+def scaled_part(part: np.ndarray, hole: np.ndarray, most: int) -> tuple[np.ndarray, np.ndarray]:
+    """*part* and *hole* as LaMa is run on them: as they are within *most* pixels, else scaled down to them (the
+    hole taken at every pixel it touches, and two pixels wider: the cubic that scales the fill back up reaches two
+    pixels, so every pixel of the hole comes from the fill alone, none of the lettering's edge with it)."""
+    h, w = part.shape[:2]
+    if h * w <= most:
+        return part, hole
+    f = (most / float(h * w)) ** 0.5
+    size = (max(1, int(w * f)), max(1, int(h * f)))
+    small = cv2.resize(np.ascontiguousarray(part), size, interpolation=cv2.INTER_AREA)
+    taken = cv2.resize(hole.astype(np.uint8) * 255, size, interpolation=cv2.INTER_AREA) > 0
+    taken = cv2.dilate(taken.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    return small, taken
+
+
+def telea(part: np.ndarray, hole: np.ndarray) -> np.ndarray:
+    """*part* with *hole* filled from round it by OpenCV's inpainting (Telea's), within the hole's box and
+    `TELEA_RADIUS` round it: what the lettering on the drawing gets once the page's budget for LaMa is spent
+    (milliseconds; smoother than LaMa's fill)."""
+    out = part.copy()
+    ys, xs = np.nonzero(hole)
+    if not xs.size:
+        return out
+    m = 4 * TELEA_RADIUS
+    y0, y1 = max(0, int(ys.min()) - m), min(part.shape[0], int(ys.max()) + 1 + m)
+    x0, x1 = max(0, int(xs.min()) - m), min(part.shape[1], int(xs.max()) + 1 + m)
+    crop = np.ascontiguousarray(part[y0:y1, x0:x1, :3])
+    mask = hole[y0:y1, x0:x1].astype(np.uint8) * 255
+    out[y0:y1, x0:x1, :3] = cv2.inpaint(crop, mask, TELEA_RADIUS, cv2.INPAINT_TELEA)
+    return out
 
 
 def window(mask_shape: tuple[int, ...], x: int, y: int, h: int, w: int) -> tuple[int, int, int, int]:
@@ -886,7 +955,7 @@ class ArtEraser:
         self.setting = setting
         self.fallback = fallback
         self.failed = False  # LaMa could not run: `erase_region` does it all from then on
-        self.counts = {"art": 0, "plain": 0, "weak": 0, "ground": 0, "tone": 0}  # what the regions went to
+        self.counts = {"art": 0, "plain": 0, "weak": 0, "ground": 0, "tone": 0, "telea": 0}  # what the regions went to
         self._model: Any = None
         self._checked = False
         self._release_asked = False  # a release that came while the model was at work: done once it is free
@@ -924,7 +993,8 @@ class ArtEraser:
     def _load(self, device: str) -> None:
         from .lama import LamaInpainter
 
-        self._model = LamaInpainter(self.models_dir / LAMA_MODEL.dirname / LAMA_MODEL.installed[0], device)
+        with analysis.timing("lama.load"):
+            self._model = LamaInpainter(self.models_dir / LAMA_MODEL.dirname / LAMA_MODEL.installed[0], device)
 
     def _try(self, device: str, part: np.ndarray, hole: np.ndarray) -> tuple[np.ndarray | None, str]:
         """LaMa on *device* (loaded there first when it is not): the filled part, or None and why not. The exception is
@@ -945,12 +1015,18 @@ class ArtEraser:
             if self.failed:
                 return None
             device = self._model.device if self._model is not None else self._device()
+            full_part = part
+            part, hole = scaled_part(part, hole, LAMA_PART_PX if device != "cpu" else LAMA_PART_CPU_PX)
+            if part is not full_part:
+                analysis.count("lama.scaled")
             if analysis.on():  # (the analysis log: LaMa's windows, their pixels and hole, those on the GPU)
                 analysis.count("lama.windows")
                 analysis.count("lama.window_px", int(part.shape[0] * part.shape[1]))
                 analysis.count("lama.hole_px", int(np.count_nonzero(hole)))
                 if device != "cpu":
                     analysis.count("lama.gpu_windows")
+                elif has_cuda():
+                    analysis.count("lama.cpu_windows_with_gpu")  # (moved there for the room, or a failure)
             filled, why = self._try(device, part, hole)
             if filled is not None and device != "cpu":
                 give_back_idle()
@@ -967,6 +1043,8 @@ class ArtEraser:
             if self._release_asked:
                 self._release_asked = False
                 self._drop(device)
+            if filled is not None and part is not full_part:  # (back to the part's size: its hole alone is taken)
+                filled = cv2.resize(filled, (full_part.shape[1], full_part.shape[0]), interpolation=cv2.INTER_CUBIC)
             return filled
 
     def warm(self) -> bool:
@@ -1027,6 +1105,14 @@ class ArtEraser:
         if kept is not None and kept[0] == key:
             pixels, where = kept[1], kept[2]
         else:
+            refused = self._refused(part, hole) if min(part.shape[:2]) >= SMALLEST else ""
+            if refused:  # (the page's budget for LaMa spent: OpenCV's fill, not kept on the region)
+                self.counts["telea"] += 1
+                analysis.count(f"lama.refused.{refused}")
+                analysis.acted(region, "telea")
+                where, pixels = paste(part, telea(part, hole), hole)
+                part[where] = pixels
+                return paper_colour(*self._crop_mask(image, region), dark)
             filled = self._fill(part, hole) if min(part.shape[:2]) >= SMALLEST else None
             if filled is None:
                 self.counts["plain"] += 1
@@ -1037,6 +1123,18 @@ class ArtEraser:
         analysis.acted(region, "lama")
         part[where] = pixels
         return paper_colour(*self._crop_mask(image, region), dark)
+
+    def _refused(self, part: np.ndarray, hole: np.ndarray) -> str:
+        """Why the page's budget refuses LaMa this *part* (`budget.lama_refused`: "" where it may run), counted
+        at the pixels it would be run on."""
+        from .. import budget
+
+        if budget.current() is None:  # (no page's budget: a tool, a region erased alone)
+            return ""
+        model = self._model
+        on_gpu = (model.device if model is not None else self._device()) != "cpu"
+        cap = LAMA_PART_PX if on_gpu else LAMA_PART_CPU_PX
+        return budget.lama_refused(min(cap, int(part.shape[0] * part.shape[1])), int(np.count_nonzero(hole)), on_gpu)
 
     @staticmethod
     def _crop_mask(image: np.ndarray, region: TextRegion) -> tuple[np.ndarray, np.ndarray]:

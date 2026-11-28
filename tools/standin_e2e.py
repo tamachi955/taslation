@@ -824,10 +824,14 @@ def walk_facts(result: Any, shown: sv.Shown) -> dict[str, Any]:
     """Scenario bw: what a page job's result held - the screen it was read from (*shown*), its regions by status and
     how many were translated, its page units' fingerprints, the regions read with low confidence (below
     `Settings.ocr_min_confidence`) and how many of them were left as drawn (the translated page the same as the
-    original over the region's text box, its lettering). Numbers only."""
+    original over the region's text box, its lettering), its stages' seconds and their sum with the page's time
+    budget as it began (`taslation.budget`: the GPU's with torch's CUDA up, else the processor's). Numbers only."""
     import numpy as np
 
+    from taslation import budget
+
     regions = list(getattr(result, "regions", None) or [])
+    stages = {str(k).replace(" ", "_"): round(float(v), 3) for k, v in (getattr(result, "timings", None) or {}).items()}
     low = [r for r in regions if getattr(r, "status", "") == "low-confidence"]
     drawn = 0
     try:
@@ -841,18 +845,19 @@ def walk_facts(result: Any, shown: sv.Shown) -> dict[str, Any]:
     return {"screen": list(shown.screen) if shown.screen else None, "regions": len(regions),
             "statuses": dict(Counter(str(getattr(r, "status", "")) for r in regions)),
             "translated": len(getattr(result, "translated", None) or []),
-            "fingerprints": len(getattr(result, "fingerprints", None) or []), "low": len(low), "low_drawn": drawn}
+            "fingerprints": len(getattr(result, "fingerprints", None) or []), "low": len(low), "low_drawn": drawn,
+            "stages_s": stages, "total_s": round(sum(stages.values()), 3), "budget_s": budget.seconds_now()}
 
 
 def book_walk(notes: Notes, see: dict[str, Any]) -> dict[str, Any]:
     """Scenario bw's report, from the page jobs' results (`walk_facts`, by the screen each was read from) and the
     see-through watch's report *see*: for each of the five screens (WALK_SCREENS, by the first page the result's
-    frame showed) the results, the most regions and
-    the most translated in one, the fewest page units' fingerprints, the regions read with low confidence and how
-    many of them were left as drawn; the results of no fingerprint (no page found in the frame); the looks at which
-    the window had a pick on trial or said that no page is found in the tab; the side panes' most px over the page;
-    the pages where a lettered region's patch did not show for no meant reason (`SeeWatch.unshown_report`), all of
-    them and those where it was so while the stand-in showed that page's screen sharp, and those looks."""
+    frame showed) the results, the most regions and the most translated in one, the fewest page units'
+    fingerprints, the regions read with low confidence and how many of them were left as drawn, the most seconds of
+    each stage and of a page with its budget; the results of no fingerprint (no page found in the frame); the looks
+    at which the window had a pick on trial or said that no page is found in the tab; the side panes' most px over the
+    page; the pages where a lettered region's patch did not show for no meant reason (`SeeWatch.unshown_report`), all
+    of them and those where it was so while the stand-in showed that page's screen sharp, and those looks."""
     by_screen: dict[Any, list[dict[str, Any]]] = {}
     for job in notes.jobs:
         facts = job.get("walk")
@@ -862,14 +867,19 @@ def book_walk(notes: Notes, see: dict[str, Any]) -> dict[str, Any]:
     for screen in WALK_SCREENS:
         got = by_screen.get(screen, [])
         statuses: Counter[str] = Counter()
+        stages: dict[str, float] = {}
         for facts in got:
             statuses.update(facts["statuses"])
+            for k, v in (facts.get("stages_s") or {}).items():
+                stages[k] = max(stages.get(k, 0.0), float(v))
         screens.append({"screen": screen, "results": len(got),
                         "regions": max((f["regions"] for f in got), default=0),
                         "translated": max((f["translated"] for f in got), default=0),
                         "fingerprints": min((f["fingerprints"] for f in got), default=0),
                         "low": sum(f["low"] for f in got), "low_drawn": sum(f["low_drawn"] for f in got),
-                        "statuses": dict(statuses)})
+                        "statuses": dict(statuses), "stages_s": stages,
+                        "total_s": max((f.get("total_s") or 0.0 for f in got), default=0.0),
+                        "budget_s": min((f["budget_s"] for f in got if f.get("budget_s")), default=None)})
     unshown = see.get("unshown") or {}
     return {"screens": screens,
             "other_screens": sorted(str(k) for k in by_screen if k not in WALK_SCREENS),  # (None: no screen read)

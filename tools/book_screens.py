@@ -12,12 +12,14 @@ them in a maximised window (1920 x 1032 at 100 %, the browser's own bar in the c
 Shared by tests/test_see_book_walk.py (the side panes, the page box, the fifth screen read and shown),
 tests/test_bookpage.py and tools/bookpage_eval.py (whether each screen is judged a page of a book), and
 tools/standin_e2e.py's scenario bw (`pages`: the screens' pages, shown by the stand-in viewer one screen after the
-other). Flat colour areas and made-up lettering: *lettering* "strokes" draws glyphs of strokes (no font needed, the
-same on every computer: the tests'), "font" made-up Japanese lines in a Japanese font (`make_sample_page.LINES_A`:
-lettering a reader reads, for the stand-in). No real page, no book's line; nothing is written but by `write_pages`,
-into the folder it is given.
+other). A harder cover beside them, not one of the five (`hard_cover`: a saturated picture, six pieces of large
+outlined lettering in several colours, a bubble), is the page budget's (tests/test_page_budget.py). Flat colour areas
+and made-up lettering: *lettering* "strokes" draws glyphs of strokes (no font needed, the same on every computer: the
+tests'), "font" made-up Japanese lines in a Japanese font (`make_sample_page.LINES_A`: lettering a reader reads, for
+the stand-in). No real page, no book's line; nothing is written but by `write_pages` and `main`, into the folder
+given.
 
-    python tools/book_screens.py --out DIR [--lettering font]   # the five screens and the pages, as PNG, into DIR
+    python tools/book_screens.py --out DIR [--lettering font]   # the five screens, the pages and the hard cover
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 W, H = 1920, 1032  # a maximised window's client area at 100 %
 BAR_ROWS = 88  # rows 0-87: the browser's tab strip and address bar, in the client area
@@ -231,6 +233,83 @@ def grey_spread(lettering: str = "strokes") -> np.ndarray:
     return out
 
 
+def picture(w: int, h: int, seed: int = 3) -> np.ndarray:
+    """A saturated made-up picture *w* x *h*: waves of colour with discs, strokes and polygons in strong colours over
+    them, outlined in black, softened a little and with a little noise (a colour cover's drawing, no real one)."""
+    rng = np.random.default_rng(seed)
+    ys, xs = np.mgrid[:h, :w].astype(np.float32)
+    waves = np.stack([128 + 120 * np.sin(xs / 97 + ys / 211), 128 + 120 * np.sin(ys / 73 - xs / 150 + 1),
+                      128 + 120 * np.cos((xs + ys) / 120)], axis=-1)
+    img = Image.fromarray(np.clip(waves, 0, 255).astype(np.uint8))
+    draw = ImageDraw.Draw(img)
+    for _ in range(60):
+        colour = tuple(int(v) for v in rng.integers(0, 256, 3))
+        x, y, r = int(rng.integers(0, w)), int(rng.integers(0, h)), int(rng.integers(10, 90))
+        kind = int(rng.integers(0, 3))
+        if kind == 0:
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=colour, outline=(20, 20, 20), width=3)
+        elif kind == 1:
+            draw.line((x, y, x + int(rng.integers(-300, 300)), y + int(rng.integers(-300, 300))), fill=colour,
+                      width=r // 6 + 2)
+        else:
+            draw.polygon([(x + int(rng.integers(-r, r)), y + int(rng.integers(-r, r))) for _ in range(5)],
+                         fill=colour, outline=(10, 10, 10))
+    soft = np.asarray(img.filter(ImageFilter.GaussianBlur(0.8))).astype(np.float32)
+    return np.clip(soft + rng.normal(0, 9, (h, w, 3)), 0, 255).astype(np.uint8)
+
+
+def outlined(out, x, y, n, seed, lettering, size, fill, stroke, width, down=False):
+    """*n* characters of large lettering from (*x*, *y*), *size* px each, in *fill* with an outline *width* px wide in
+    *stroke*, across or *down* (for "strokes" `glyphs` drawn at *size*, for "font" a made-up line)."""
+    h, w = out.shape[:2]
+    ink = np.zeros((h, w), bool)
+    step = size + size // 10
+    text = (FONT_LINES[seed % len(FONT_LINES)] * 2)[:n]
+    for k in range(n):
+        cx, cy = (x, y + k * step) if down else (x + k * step, y)
+        if lettering == "strokes":
+            small = np.full((GLYPH + 6, GLYPH + 6, 3), 255, np.uint8)
+            glyphs(small, 0, 0, 1, seed + k)
+            mark = _nearest(small[..., 0] < 128, size)
+        else:
+            canvas = Image.new("L", (size + 8, size + 8), 0)
+            ImageDraw.Draw(canvas).text((4, 4), text[k], font=_font(size), fill=255)
+            mark = np.asarray(canvas)[:size, :size] > 128  # (the measures of 2026-11-28 were taken on this drawing)
+        mh, mw = min(mark.shape[0], h - cy), min(mark.shape[1], w - cx)
+        if mh > 0 and mw > 0:
+            ink[cy:cy + mh, cx:cx + mw] |= mark[:mh, :mw]
+    ring = np.asarray(Image.fromarray(ink.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(2 * width + 1))) > 0
+    out[ring & ~ink] = stroke
+    out[ink] = fill
+
+
+def _nearest(mask: np.ndarray, size: int) -> np.ndarray:
+    """*mask* (bool) scaled to *size* x *size*, nearest neighbour."""
+    ys = (np.arange(size) * mask.shape[0] / size).astype(int)
+    xs = (np.arange(size) * mask.shape[1] / size).astype(int)
+    return mask[ys][:, xs]
+
+
+def hard_cover(lettering: str = "strokes") -> np.ndarray:
+    """A colour cover harder than `cover`, in the same place (`COVER`): a saturated picture to the page's edges
+    (`picture`), large outlined lettering in several colours, across and in columns - six pieces of 150 to 400 px -,
+    and a small bubble of body lettering. Not one of the walk's screens (`SCREENS`): the page budget's tests and
+    measures (tests/test_page_budget.py) take it."""
+    out = blank()
+    x0, y0, x1, y1 = COVER
+    out[y0:y1, x0:x1] = picture(x1 - x0, y1 - y0)
+    for (dx, dy, n, size, fill, stroke, width, down), seed in zip((
+            (40, 40, 4, 84, (230, 30, 40), (255, 255, 255), 8, False),  # ~ 370 x 84
+            (60, 170, 5, 64, (255, 230, 40), (20, 20, 120), 6, False),  # ~ 350 x 64
+            (560, 280, 4, 90, (255, 255, 255), (200, 20, 160), 9, True),  # 90 x ~ 390
+            (440, 330, 4, 70, (40, 220, 255), (0, 0, 0), 7, True),  # 70 x ~ 300
+            (60, 760, 5, 58, (255, 140, 0), (255, 255, 255), 6, False),  # ~ 315 x 58
+            (80, 870, 4, 40, (250, 250, 250), (30, 30, 30), 4, False)), range(6, 12)):  # ~ 175 x 40
+        outlined(out, x0 + dx, y0 + dy, n, seed, lettering, size, fill, stroke, width, down)
+    bubble(out, 1120, 640, 70, 100, 2, 3, 0, lettering)
+    return out
+
+
 # the screens, and the page box the look finds in each with no area set by hand or one that trims only the bar
 # (to LOOK_STEP: on every fourth pixel); the plate and the small picture on the black pages are the page's edge there
 SCREENS: list[tuple[str, Callable[..., np.ndarray], tuple[int, int]]] = [
@@ -272,7 +351,8 @@ def main() -> int:
     for k, (_name, make, _columns) in enumerate(SCREENS):
         Image.fromarray(make(args.lettering)).save(args.out / f"screen-{k + 1}.png")
     write_pages(args.out, args.lettering)
-    print(f"the five screens and their pages in {args.out}")
+    Image.fromarray(hard_cover(args.lettering)).save(args.out / "hard-cover.png")
+    print(f"the five screens, their pages and the hard cover in {args.out}")
     return 0
 
 

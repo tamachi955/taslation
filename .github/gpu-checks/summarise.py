@@ -638,7 +638,8 @@ def _walk_correctness(run: dict[str, Any], names: list[str], check: Any) -> None
     stand-in's dark profile, its band 3 px into the capture area; with --chooser): each screen read and its lettering
     translated, no frame read as one of no page, the window never with the viewer on trial nor saying that no page is
     found in the tab, the side panes never over the page, every lettered region's patch on show while its page was,
-    and what was read with low confidence left as drawn (`standin_e2e.book_walk`)."""
+    what was read with low confidence left as drawn, and each screen's page read inside its time budget (the
+    stages' seconds summed: `taslation.budget`, 45 s on the runners' processors) (`standin_e2e.book_walk`)."""
     walk = run.get("book_walk")
     if "bw" not in names:
         return
@@ -666,6 +667,10 @@ def _walk_correctness(run: dict[str, Any], names: list[str], check: Any) -> None
     low = [[s.get("screen"), s.get("low"), s.get("low_drawn")] for s in screens
            if (s.get("low") or 0) != (s.get("low_drawn") or 0)]
     check("bw", "what was read with low confidence was left as drawn", not low, low)
+    slow = [[s.get("screen"), s.get("total_s"), s.get("budget_s")] for s in screens
+            if s.get("total_s") is None or s.get("budget_s") is None or s["total_s"] > s["budget_s"]]
+    check("bw", "each screen's page was read inside its time budget (its stages' seconds summed)",
+          bool(screens) and not slow, slow)
 
 
 # editing's times (`edit_figures`: part.key of the tool's report) and their words in a summary
@@ -1046,8 +1051,22 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
         if isinstance(run.get("server_priority"), dict) else None,
         "ocr_devices": sorted({",".join(str(e) for e in p.get("engines") or []) for p in placements
                                if isinstance(p, dict)}),
+        "walk_stages": walk_stages(run),
     })
     return out
+
+
+WALK_STAGES = ("fingerprint", "detect", "ocr", "translate", "render")
+
+
+def walk_stages(run: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Scenario bw's screens' seconds (`standin_e2e.book_walk`): per screen the most a page spent in each stage, the
+    most a page spent in all and its budget; None without the walk."""
+    walk = run.get("book_walk")
+    if not isinstance(walk, dict):
+        return None
+    return [{"screen": s.get("screen"), "total_s": s.get("total_s"), "budget_s": s.get("budget_s"),
+             "stages_s": dict(s.get("stages_s") or {})} for s in walk.get("screens") or [] if isinstance(s, dict)]
 
 
 def _pair(values: Any) -> str:
@@ -1114,6 +1133,16 @@ def standin_md(s: dict[str, Any]) -> str:
                          f"({k.get('read_back_caught')}, {k.get('read_back_caught_no_new_read')}) | "
                          f"{_pair([first.get('median'), first.get('max')])} | {drained} | "
                          f"{k.get('background_requests')} | {k.get('peak_mb')} |")
+        lines.append("")
+    if s.get("walk_stages"):
+        lines += ["The walk's screens, s (the most of a page; the budget a criterion):", "",
+                  "| screen | page (budget) | " + " | ".join(WALK_STAGES) + " | other |",
+                  "|---|---|" + "---|" * (len(WALK_STAGES) + 1)]
+        for row in s["walk_stages"]:
+            st = row.get("stages_s") or {}
+            other = sum(float(v) for k, v in st.items() if k not in WALK_STAGES)
+            lines.append(f"| {row.get('screen')} | {row.get('total_s')} ({row.get('budget_s')}) | "
+                         + " | ".join(str(st.get(k, '-')) for k in WALK_STAGES) + f" | {other:.3f} |")
         lines.append("")
     if s.get("edit"):
         lines.append("* editing on the page, ms (reported): " + _edit_line(s["edit"]))

@@ -23,6 +23,7 @@ import gc
 import importlib.util
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -127,8 +128,9 @@ class LayoutModel:
         hf_logging.disable_progress_bar()  # (a window has no console for it)
         device = device or self._planned()
         self._device = device  # (what a failed load has to free)
-        self._net = model_class.from_pretrained(str(self.folder), local_files_only=True, use_safetensors=True,
-                                                trust_remote_code=False).eval().to(device)
+        with analysis.timing("layout_model.load"):
+            self._net = model_class.from_pretrained(str(self.folder), local_files_only=True, use_safetensors=True,
+                                                    trust_remote_code=False).eval().to(device)
         self._device = device
 
     def _forward(self, rgb: np.ndarray) -> list[Detection]:
@@ -155,7 +157,11 @@ class LayoutModel:
         from ..ocr import place
         from ..ocr.place import out_of_memory
 
+        asked = time.perf_counter()
         with self._lock:
+            waited = time.perf_counter() - asked
+            if waited > 0.001:  # (the start's warm-up loading it meanwhile, or the next unit read beside)
+                analysis.count("layout_model.wait_ms", round(1000 * waited, 1))
             device = self._device or self._planned()
             full = False
             try:

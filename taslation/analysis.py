@@ -81,8 +81,7 @@ INK_LEVEL = 80  # grey under it: ink
 DARK_LEVEL = 32  # grey under it: dark ground
 PAPER_LEVEL = 230  # grey under it: drawn (not paper)
 
-PAGE_BUDGET_S = 15.0  # s: a page slower than this where torch has CUDA up is too slow to use (S1) ...
-PAGE_BUDGET_CPU_S = 45.0  # ... and without a GPU
+from .budget import PAGE_BUDGET_CPU_S, PAGE_BUDGET_S  # noqa: E402 - s: a page slower is too slow to use (S1)
 S1, S2, S3, S4 = "s1", "s2", "s3", "s4"
 LEVEL_WORDS = {S1: "S1 reading fails", S2: "S2 content lost or damaged", S3: "S3 readable but hard",
                S4: "S4 cosmetic"}
@@ -118,8 +117,57 @@ LEVELS = {
     "edit_kind": S4, "edit_rotate": S4, "edit_direction": S4, "edit_paste": S4, "edit_skip": S4,
 }
 BUBBLE_KINDS = frozenset({"bubble", "dark-bubble", "text-on-page", "text-on-dark", "manual", "manual-dark"})
-ART_HELPERS = frozenset({"lama", "tone_fill", "ground_fill", "see_through"})  # an erase on the drawing
+ART_HELPERS = frozenset({"lama", "telea", "tone_fill", "ground_fill", "see_through"})  # an erase on the drawing
 LEFT_AS_DRAWN = frozenset({"ocr-noise", "not-japanese", "detected"})  # read, and left as it is drawn
+# Each helper's risk (`risk_lines`): the level of the defect it prevents, the level of the one it can cause, what
+# they are, and the names its changes are counted under (``effect``, its own name when none are given; ``regions.``
+# names count the page's regions: found by the layout model, by the classical detectors, translated, sound words;
+# None: what it changed is not counted, and it is never a candidate).
+# How often it prevents its defect is how many regions it changed; a helper that prevents an S1 or S2 defect is never
+# a candidate for removal, however rarely it acts - it is made cheap and bounded instead (`taslation.budget`).
+RISKS: dict[str, tuple[str, str, str, str, tuple[str, ...] | None]] = {
+    "layout_model": (S1, S2, "a bubble or lettering the classical detectors miss", "a false region on the art",
+                     ("regions.model",)),
+    "bubbles": (S1, S2, "a bubble found by its outline", "a false bubble lettered over the art",
+                ("regions.classical",)),
+    "text_blocks": (S1, S2, "lettering off the bubbles", "a false region lettered over the art",
+                    ("regions.classical",)),
+    "paper_fill": (S1, S2, "the original shown under its translation", "the drawing by a bubble painted", ()),
+    "fill_paper": (S1, S2, "the original shown under its translation", "the drawing by a bubble painted",
+                   ("paper_fill",)),
+    "erase_strokes": (S1, S2, "the original under an area set by hand", "strokes of the drawing taken", None),
+    "letter": (S1, S3, "a translation not drawn", "set under the readable size", ("regions.translated",)),
+    "telea": (S1, S3, "a page over its time budget (LaMa refused)", "a smoother fill than LaMa's", ()),
+    "lama": (S2, S3, "the drawing under lettering flattened by a plain fill", "a smear; seconds", ()),
+    "art_mask": (S2, S3, "lettering on the art found for LaMa", "ink of the drawing taken in the hole",
+                 ("lama", "telea")),
+    "on_art": (S2, S2, "lettering on the art sent to the paper fill", "paper taken for the art",
+               ("lama", "telea", "tone_fill", "ground_fill")),
+    "keep_lines": (S2, S3, "the drawing's lines through the lettering erased", "a stroke kept as a line", ()),
+    "line_pixels": (S2, S3, "a line of the drawing cut by the erase", "a stroke kept as a line",
+                    ("keep_lines",)),
+    "see_through": (S2, S3, "the drawing seen through a bubble erased", "ink of the lettering left", ()),
+    "closed_room": (S2, S3, "a translation cut or tiny in a bubble with no shape", "a room past an outline", ()),
+    "big_unsure": (S2, S3, "the picture read as lettering, erased on the drawing", "large lettering left as drawn",
+                   ()),
+    "sound_word": (S2, S1, "a sound word lettered over the art", "dialogue left as drawn", ("regions.sound",)),
+    "fit_frames": (S2, S3, "a translation cut at its room's edge", "hyphenated, turned or condensed",
+                   ("fit_turned", "fit_overrun", "fit_condensed", "fit_hyphenated", "fit_box")),
+    "fit_rescue": (S2, S3, "a translation cut at its room's edge", "a size a little off", None),
+    "ground_fill": (S3, S2, "an outline's ring left on a flat ground", "a drawing taken for flat painted", ()),
+    "tone_fill": (S3, S3, "a flat patch in a screentone", "a tone repeated a little off", ()),
+    "tone_look": (S3, S3, "(the look the tone fill decides on)", "-", ("tone_fill",)),
+    "closed_interior": (S3, S3, "ghosts of glyphs on a bubble's paper", "a ring judged on another ground", None),
+    "left_out": (S3, S2, "a large glyph or ruby left by the translation", "the drawing by a bubble painted", ()),
+    "whole_glyphs": (S3, S2, "the rest of a glyph left as a speck", "the drawing by the lettering painted", ()),
+    "stray_erase": (S3, S2, "lettering run past its bubble left as specks", "pieces of the drawing taken", ()),
+    "ring_erase": (S3, S2, "white rings of outlined lettering left", "light pieces of the drawing taken", ()),
+    "page_caps": (S4, S3, "sizes uneven across a page", "a size held small", None),
+    "slant": (S4, S4, "a translation not following its lettering's slant", "a slant a little off", None),
+    "slant_doubtful": (S4, S4, "a slant measured on too little", "a slant left out", None),
+}
+CANDIDATE_EFFECT = 1.0  # regions changed per 100: a helper that prevents only S3 or S4 under this ...
+CANDIDATE_MS = 100.0  # ... or spends this many ms a page read on average is listed as a candidate for removal
 MEANT_UNSHOWN = frozenset({"covered", "bars", "hover", "original", "left_out", "no_match", "no_patch"})
 
 _TL = threading.local()  # .page: the page timed on this thread (`begin`, `adopt`)
@@ -624,7 +672,10 @@ def page_line(page: Page, result: Any, outcome: str, timings: dict[str, float] |
         line["regions"] = region_facts(regions)
         cases, minor = page_defects(regions)
         if outcome == "done" and not page.facts.get("ahead"):
-            budget = PAGE_BUDGET_S if (page.facts.get("gpu_free_mb") or [None])[0] is not None else PAGE_BUDGET_CPU_S
+            from . import budget as spend  # (as the page was given it, read when the page ends)
+
+            gpu = (page.facts.get("gpu_free_mb") or [None])[0] is not None
+            budget = spend.PAGE_BUDGET_S if gpu else spend.PAGE_BUDGET_CPU_S
             if line["ms"] > 1000 * budget:
                 stage = max(line["stages"].items(), key=lambda kv: kv[1])[0] if line["stages"] else "none"
                 helper = max(line["helpers"].items(), key=lambda kv: kv[1][0])[0] if line["helpers"] else "none"
@@ -705,6 +756,8 @@ def page_defects(regions: Sequence[Any]) -> tuple[list[dict[str, Any]], dict[str
                 found("bubble_left_as_drawn", i, r)
             elif not sure:
                 found("unsure_left_as_drawn", i, r)
+        elif status == "low-confidence" and "big_unsure" in acted_on:  # (large, unsure, on a colour picture)
+            found("unsure_left_as_drawn", i, r)
         elif status == "translated" and not sure and acted_on & ART_HELPERS:
             found("unsure_lettered_on_art", i, r)
         letter_flags = tuple(getattr(r, "letter_flags", None) or ())
@@ -915,7 +968,45 @@ def summary_lines(lines: Sequence[dict[str, Any]], slowest: int = 10) -> list[st
                f"{total_ms / 1000:.1f} s in pages")
     if pages:
         out += _time_lines(pages, slowest, total_ms)
+        out += [""] + risk_lines(lines)
     out += _count_lines(lines, pages, total_ms)
+    return out
+
+
+def risk_lines(lines: Sequence[dict[str, Any]]) -> list[str]:
+    """Per helper (`RISKS`) the level it prevents and how often (the regions it changed per 100 regions), the
+    level it can cause, and its ms a page read on average (and the 95th percentile of the pages it ran on; "n/c" where
+    what it changes is not counted); a helper that prevents only S3 or S4 and changes under `CANDIDATE_EFFECT` per
+    100 regions, or costs `CANDIDATE_MS` a page or more, is marked as a candidate for removal - never removed here.
+    Helpers timed and not rated close the list."""
+    pages = [ln for ln in lines if ln.get("type") == "page" and not ln.get("cached")]
+    regions = sum(int((p.get("regions") or {}).get("n") or 0) for p in pages)
+    effect: Counter[str] = Counter()
+    per: dict[str, list[float]] = {}
+    for p in pages:
+        effect.update({k: int(v) for k, v in (p.get("effect") or {}).items() if isinstance(v, (int, float))})
+        facts = p.get("regions") or {}
+        model = int(facts.get("model") or 0)
+        effect.update({"regions.model": model, "regions.classical": int(facts.get("n") or 0) - model,
+                       "regions.translated": int((facts.get("status") or {}).get("translated") or 0),
+                       "regions.sound": sum(int(v) for v in (facts.get("sound") or {}).values())})
+        for k, v in (p.get("helpers") or {}).items():
+            if isinstance(v, list) and len(v) == 2:
+                per.setdefault(k, []).append(float(v[0]))
+    out = [f"helpers' risks ({len(pages)} pages read, {regions} regions): prevents, how often (regions changed per "
+           f"100), can cause, ms a page read (p95 where it ran)"]
+    for name, (prevents, causes, what, harm, names) in RISKS.items():
+        rate = 100 * sum(effect.get(n, 0) for n in (names or (name,))) / max(1, regions)
+        ms = sum(per.get(name, [])) / max(1, len(pages))
+        candidate = names is not None and prevents in (S3, S4) and (rate < CANDIDATE_EFFECT or ms >= CANDIDATE_MS)
+        often = f"{rate:5.1f}" if names is not None else "  n/c"
+        out.append(f"  {name[:16]:16} prevents {prevents.upper()} ({what}) {often}; can cause "
+                   f"{causes.upper()} ({harm}); {ms:7.1f} ms (p95 {_quantile(per.get(name, []), 0.95):.0f})"
+                   + ("  - candidate for removal" if candidate else ""))
+    rest = sorted(k for k in per if k not in RISKS)
+    if rest:
+        out.append("  timed, not rated: " + ", ".join(
+            f"{k} {sum(per[k]) / max(1, len(pages)):.1f} ms" for k in rest))
     return out
 
 

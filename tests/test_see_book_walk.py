@@ -228,7 +228,8 @@ def test_the_stand_in_s_walk_is_reported_by_screen_and_judged_on_the_runners():
     """Scenario bw's report (`standin_e2e.walk_facts` of each result, `book_walk` of them all) and its judgement
     (.github/gpu-checks/summarise.py, `_walk_correctness`): each of the five screens read and translated, no frame
     read as one with no page, no pick on trial nor "no page" said, the panes never over the page, every patch on
-    show, what was read with low confidence left as drawn."""
+    show, what was read with low confidence left as drawn, each screen's page inside its time budget (and its stages'
+    seconds in the summary's table)."""
     import importlib.util
 
     import standin_e2e
@@ -245,10 +246,13 @@ def test_the_stand_in_s_walk_is_reported_by_screen_and_judged_on_the_runners():
     result = PageResult(image=image, original=original, fingerprints=["a", "b"],
                         regions=[region("translated", (0, 0, 10, 10)), region("low-confidence", (20, 0, 30, 10)),
                                  region("low-confidence", (5, 5, 15, 15))])
+    result.timings = {"detect": 0.5, "ocr": 0.25, "render": 0.125}
     facts = standin_e2e.walk_facts(result, SimpleNamespace(screen=(1, True)))
     assert facts["screen"] == [1, True] and facts["fingerprints"] == 2 and facts["translated"] == 1
     assert facts["low"] == 2 and facts["low_drawn"] == 1  # (the second overlaps the lettered one)
     assert facts["statuses"] == {"translated": 1, "low-confidence": 2}
+    assert facts["stages_s"] == {"detect": 0.5, "ocr": 0.25, "render": 0.125} and facts["total_s"] == 0.875
+    assert facts["budget_s"] in (15.0, 45.0)  # (`taslation.budget`'s, as the page began)
     walked = {**facts, "low_drawn": 2}
     jobs = [{"walk": {**walked, "screen": [page, True]}} for page in standin_e2e.WALK_SCREENS]
     see = {"pick": {"looks": {}}, "panes": {"overlap_px_max": {"left:spread": 0, "right:cover": 0}},
@@ -285,6 +289,15 @@ def test_the_stand_in_s_walk_is_reported_by_screen_and_judged_on_the_runners():
     assert failed(turned) == [] and failed({**turned, "pages_with_unmeant_on_show": 1}) != []
     drawn = {**good, "screens": [{**good["screens"][0], "low_drawn": 1}, *good["screens"][1:]]}
     assert failed(drawn) == ["what was read with low confidence was left as drawn"]
+    assert good["screens"][0]["stages_s"]["detect"] == 0.5 and good["screens"][0]["total_s"] == 0.875
+    slow = {**good, "screens": [*good["screens"][:2], {**good["screens"][2], "total_s": 46.0, "budget_s": 45.0},
+                                *good["screens"][3:]]}
+    assert failed(slow) == ["each screen's page was read inside its time budget (its stages' seconds summed)"]
+    rows = summarise.walk_stages({"book_walk": good})
+    assert len(rows) == 5 and rows[0]["stages_s"]["ocr"] == 0.25 and summarise.walk_stages({}) is None
+    table = summarise.standin_md({"group": "bw-walk", "verdict": "pass", "walk_stages": rows})
+    assert "| screen | page (budget) | fingerprint | detect | ocr | translate | render | other |" in table
+    assert "| 0 | 0.875 (" in table
 
 
 def test_a_look_that_found_a_patch_not_shown_is_told_by_what_the_stand_in_drew_then():

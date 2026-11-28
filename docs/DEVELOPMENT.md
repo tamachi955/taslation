@@ -219,6 +219,98 @@ then the stages and helpers (total, share, median and 95th percentile per page),
 the regions each helper changed, the counts, the window's lines and the edits. Copy a report gets the same tables as an
 `[analysis]` section while the log is on.
 
+### A page's time budget and the helpers' risks
+
+Every page read has a time budget (`taslation/budget.py`): `PAGE_BUDGET_S`, 15 s, where torch has CUDA up, and
+`PAGE_BUDGET_CPU_S`, 45 s, without a GPU - past it the page is an S1 defect. The page's thread holds it, and the threads
+that work for the page (the drafts' lettering, the next unit read beside) adopt it. What grows with what a page holds
+is bounded by it:
+
+* **LaMa** takes no new window once the page has spent `LAMA_UNTIL` (60 %) of its budget, past `LAMA_PAGE_WINDOWS` (12)
+  windows on the page, past `LAMA_PAGE_PX` of their pixels (4 million on the GPU, 1.5 million on the processor: some
+  0.5 s and 5.4 s a million pixels there), or past holes of `LAMA_PAGE_HOLE` (12 %) of the page's area; the page's first
+  window is never refused for its pixels or its hole. A refused window is filled by OpenCV's inpainting
+  (`artwork.telea`, milliseconds, a smoother fill). Each window is scaled down to `LAMA_PART_PX` (768 x 768 on the GPU)
+  or `LAMA_PART_CPU_PX` (512 x 640 on the processor) before LaMa and its fill scaled back, only the hole pasted (the
+  hole widened 5 x 5 before the scaling, so the cubic scaling back takes nothing of the lettering into it).
+* **The tone fill** looks at no window of more than `TONE_MOST_PX` (900,000 px) and tries `TONE_ROUNDS` (400) rounds of
+  shifts at the most.
+* **Large unsure lettering on a colour picture** is left as drawn (`Pipeline._big_unsure`): a region not in a bubble,
+  read with a confidence under 0.8, its characters 2.5 times the body lettering or more (the smallest of the page's
+  usual size, the book's median and a thirtieth of the page's height), on a colour picture (a ring round it with 35 %
+  of its pixels in colour or more, and not flat). It is a cover's title or the picture itself read as lettering more
+  often than dialogue, and erasing it on the drawing is the dearest erase there is; it is counted as S3,
+  `unsure_left_as_drawn`, acted `big_unsure`.
+* `erase.line_pixels` works on a window round the box and each line, not on the whole region's padding: the same
+  pixels in 300 made-up cases, 45 ms a call instead of 77.
+
+The layout model's and LaMa's first loads are timed (`layout_model.load`, `lama.load`), and so is the wait for the layout
+model while another thread holds it (`layout_model.wait_ms`); what LaMa was refused is counted (`lama.refused.time`,
+`.windows`, `.pixels`, `.hole`; `lama.scaled`; `lama.cpu_windows_with_gpu` where it ran on the processor with a GPU
+there). A page read for the window over its budget writes one warning in `log.txt`: its seconds against the budget,
+its slowest stage, its slowest helper (with the analysis log on) and what LaMa was refused; the analysis log has the
+page as an S1 case, `page_slow`. `tests/test_page_budget.py` reads the made-up screens of `tools/book_screens.py` (the
+cover, the colour spread, the grey spread and `hard_cover`: a saturated picture with six pieces of large outlined
+lettering in several colours, 40 to 90 px, and a bubble) on the processor, each stage against its own budget scaled
+by how fast the computer runs a fixed piece of work, and the harder cover with a slow stand-in for LaMa against the
+page's budget; the runners' bw-walk group says each screen's seconds by stage and judges each screen read inside its
+budget.
+
+Measured on the GTX 1660 Ti computer (2026-11-28; the error is the mean difference, 0 to 255, from the drawing as it was
+before the lettering was put on it, over the pixels the erase changed):
+
+| Page or function | Before | After |
+|---|---|---|
+| the made-up screens on a warm GPU: cover, colour spread, a big title, the harder cover | 0.14, 0.20, 0.14, 0.95 s | the same |
+| the harder cover as a session's first page, the layout model and LaMa on the processor | 8.40 s (the layout model's load 4.1 s, the wait for it 3.3 s, LaMa 2.7 s for 2 windows) | 8.37 s |
+| the harder cover drawn 2.2 times as large, LaMa on the processor | 1.25 s | 1.08 s |
+| 16 regions of outlined lettering on a drawing, processor | 20.0 s, 16 LaMa windows, error 10.7 | 7.9 s, 5 LaMa and 11 OpenCV, error 13.4 |
+| the same, GPU | 3.24 s, error 10.7 | 2.73 s, 12 LaMa and 4 OpenCV, error 11.3 |
+| one large region (a box of some 760 x 690), processor | 3.63 s, error 7.8 | 2.51 s, error 8.9 |
+| the same, GPU | 1.22 s, error 7.8 | 1.11 s, error 7.8 |
+| `line_pixels`, 300 made-up cases | 77 ms a call | 45 ms a call, the same pixels |
+
+A cover that took 80 s with a GPU (its detection 23 s, its erase and lettering 53 s) was not reproduced with made-up
+pages: the slowest here was the harder cover as a session's first page with both models on the processor, 8.4 s. What the numbers point to is LaMa on the
+processor with nothing bounding it per page or per window (some 5.4 s a million pixels; a cover's large lettering on a
+colour picture gives windows of a million pixels and more) and the layout model's first load; both are now bounded or
+timed, and the next such page says its stage and helper.
+
+`tools/analysis_summary.py` ends the time tables with each helper's risk line: the level of the defect it prevents,
+how often it changes a region's outcome (per 100 regions; "n/c" where that is not counted), the level of the defect it
+can cause, and its ms a page read (the 95th percentile of the pages it ran on). A helper that prevents only S3 or S4
+and changes under `CANDIDATE_EFFECT` (1 per 100 regions), or costs `CANDIDATE_MS` (100 ms) a page or more, is marked
+"candidate for removal" - only marked: nothing is removed before the owner's read-through numbers on real books. On
+the sample set's 214 pages (GPU, a canned translator; 2,272 regions; 187.2 s in all, the slowest page 1.88 s; 38 LaMa
+windows, none refused or scaled, so the same as with no budget; nothing left as drawn by the large-unsure rule;
+defects S1 17, S2 12, S3 211, S4 129):
+
+| Helper | Prevents | Per 100 | Can cause | ms a page (p95) |
+|---|---|---|---|---|
+| layout_model | S1 | 70.9 | S2 | 84.5 (100) |
+| bubbles, text_blocks | S1 | 29.1 | S2 | 2.7 (9), 0.2 (5) |
+| paper_fill, fill_paper | S1 | 68.3 | S2 | 60.6 (120), 9.6 (19) |
+| letter | S1 | 70.0 | S3 | 90.9 (170) |
+| telea | S1 | 0.0 | S3 | 0.0 |
+| lama, art_mask | S2 | 1.7 | S3 | 25.4 (286), 4.3 (10) |
+| on_art | S2 | 26.5 | S2 | 10.0 (23) |
+| keep_lines, line_pixels | S2 | 0.0 | S3 | 11.8 (29), 24.5 (58) |
+| see_through, closed_room | S2 | 0.1, 0.3 | S3 | 0.4 (38), 0.3 (11) |
+| big_unsure | S2 | 0.0 | S3 | 0.0 |
+| sound_word | S2 | 1.0 | S1 | 0.0 |
+| fit_frames, fit_rescue | S2 | 9.4, n/c | S3 | 44.2 (114), 19.1 (67) |
+| ground_fill | S3 | 24.7 | S2 | 8.1 (19) |
+| tone_fill (with tone_look) | S3 | 0.0 | S3 | 10.6 (282) - candidate |
+| closed_interior | S3 | n/c | S3 | 9.0 (21) |
+| left_out | S3 | 1.6 | S2 | 0.0 |
+| whole_glyphs | S3 | 0.1 | S2 | 0.0 (2) - candidate |
+| stray_erase | S3 | 0.5 | S2 | 1.6 (4) - candidate |
+| ring_erase | S3 | 0.0 | S2 | 7.8 (24) - candidate |
+| page_caps, slant, slant_doubtful | S4 | n/c | S3, S4, S4 | 38.9 (73), 48.2 (87), 0.1 |
+
+The sample set has no colour pages and few tones; a helper that changes nothing there may still prevent its defect
+on a real book, which is why the candidates wait for the read-through.
+
 ## Developer measuring
 
 A switch on top of the analysis log, for the owner's own measurements on their own computer, and the one exception to
@@ -286,7 +378,8 @@ rows' languages.
   squares; a grey page beside a black one holding a picture; a grey spread running off the window's foot, a bubble cut
   by the content's top), with glyphs of strokes or a font's made-up lines for lettering: shared by
   `tests/test_see_book_walk.py`, `tests/test_bookpage.py`, `tools/bookpage_eval.py` and the stand-in's scenario bw
-  (`--out DIR` writes them as PNG).
+  (`--out DIR` writes them as PNG); beside them a harder cover (`hard_cover`: a saturated picture, six pieces of
+  large outlined lettering in several colours, a bubble) for `tests/test_page_budget.py`.
 * `tools/page_area.py` prints what the page-area detector finds in a window, for tuning.
 * `tools/room_eval.py` letters the regions of OpenMantra's pages (or of a book's dev snapshots, `--frames`) with
   canned English and counts, numbers only, the regions whose rooms or lettering run into each other's, fragments of
@@ -860,8 +953,9 @@ the start's dialog for the book's name answered as a person would, then a turn),
 bw-walk, scenario bw in editing with `--chooser` at 1900 x 1000 (a book's first five screens, `tools/book_screens.py`,
 in a font's made-up lines, on the dark profile with no bars nor arrows, the stand-in's band 3 px into the capture area
 set by hand), judged on each screen read and translated, no frame read as one with no page, no trial nor "no page"
-said (the stand-in is known by its area), the panes never over the page, every patch on show and what was read with
-low confidence left as drawn (`run.book_walk`); each with `--wait-done`, which
+said (the stand-in is known by its area), the panes never over the page, every patch on show, what was read with
+low confidence left as drawn and each screen's page inside its time budget, its stages' seconds summed
+(`run.book_walk`; the summary's table gives each screen's most seconds by stage); each with `--wait-done`, which
 holds no rest of k; seven at a time).
 Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
 TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900

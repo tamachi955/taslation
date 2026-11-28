@@ -73,6 +73,7 @@ import numpy as np
 from PIL import Image
 
 from . import analysis
+from . import budget
 from . import fingerprint as fp
 from . import linememo
 from . import locate_large
@@ -177,6 +178,8 @@ class _Timer:
 TITLE_SCALE = 3.0  # characters this many times the book's usual size, loose and without a mark of speech, are a title ...
 TITLE_LINES = 3  # a title page: the title, the author's name, a badge or a line of credit
 TITLE_SHARE = 0.03  # ... and so are characters this share of their page's height (dialogue a hundredth or so)
+BIG_UNSURE = 2.5  # loose lettering this many times the body lettering's size (`Pipeline._big_unsure`) ...
+BODY_SHARE = 1 / 30  # ... the body's taken as this share of its unit's height at the most (a cover has none)
 PRINT_LINES = 4  # lines set across in one block of the layout model's: print (a blurb), not lettering
 SAME_BLOCK = 0.8  # ... a line this much inside the block's text box is one of its lines
 GLYPH_REACH_ERASE = 4.0  # glyphs: ink a bubble's text box holds outside its mask is lettering up to this long ...
@@ -314,6 +317,20 @@ def looks_like_print(text: str, text_box: Box) -> bool:
     if not (len(_LATIN_RE.findall(text)) >= 2 or len(_DIGIT_RE.findall(text)) >= 3):
         return False
     return not subtitled(text)
+
+
+def over_budget(spending: budget.PageBudget, result: Any, line: dict[str, Any] | None) -> None:
+    """A page over its time budget (`budget`: S1, reading fails) said in the log: its seconds and budget, its slowest
+    stage and, with the analysis log on, its slowest helper (else "not timed"), and what LaMa was refused."""
+    stages = dict(getattr(result, "timings", None) or {})
+    stage = max(stages.items(), key=lambda kv: kv[1]) if stages else ("none", 0.0)
+    helpers = {k: v for k, v in ((line or {}).get("helpers") or {}).items() if isinstance(v, list) and v}
+    helper = max(helpers.items(), key=lambda kv: kv[1][0]) if helpers else None
+    logging.getLogger(__name__).warning(
+        "a page over its time budget (S1): %.1f s of %.0f s; slowest stage %s %.1f s; slowest helper %s; LaMa "
+        "refused %s", spending.spent(), spending.seconds, stage[0], float(stage[1]),
+        f"{helper[0]} {helper[1][0]:.0f} ms" if helper else "not timed (the analysis log is off)",
+        ", ".join(f"{k} {v}" for k, v in sorted(spending.refused.items())) or "nothing")
 
 
 def loose(r: TextRegion) -> bool:
@@ -606,6 +623,7 @@ class PageFill:
         self.rgb = rgb
         self.emit = emit
         self.analysed = analysis.current()  # (the page's record in the analysis log: its drafts timed on it)
+        self.spending = budget.current()  # (the page's time budget: its drafts spend of it)
         self.regions: list[TextRegion] = []  # the announced regions (held, so their ids stay theirs)
         self.index: dict[int, int] = {}  # id(region) -> its index
         self.shown: dict[int, str] = {}  # index -> the text lettered on the working copy
@@ -693,7 +711,7 @@ class PageFill:
 
     def _draft(self, region: "TextRegion | ScannedRegion", text: str) -> None:
         """`draft`, done."""
-        with analysis.adopt(self.analysed):
+        with analysis.adopt(self.analysed), budget.adopt(self.spending):
             self._drafted(region, text)
 
     def _drafted(self, region: "TextRegion | ScannedRegion", text: str) -> None:
@@ -1416,6 +1434,7 @@ class ReadBeside:
         self.cancel, self.stop = cancel, threading.Event()
         self.error: BaseException | None = None
         self.analysed = analysis.current()  # (the page's record in the analysis log: this reading timed on it)
+        self.spending = budget.current()  # (the page's time budget: this reading spends of it)
         self.thread = threading.Thread(target=self._run, name="taslation-read-beside", daemon=True)
 
     def start(self) -> "ReadBeside":
@@ -1431,7 +1450,7 @@ class ReadBeside:
             pass
         _SIZES.held = self.sizes
         try:
-            with analysis.adopt(self.analysed):
+            with analysis.adopt(self.analysed), budget.adopt(self.spending):
                 self.pipeline._ocr_regions(self.rgb, self.regions, lambda m: self.held.append(("report", m)),
                                            self.fill, _Either(self.cancel, self.stop),  # type: ignore[arg-type]
                                            unit_box=self.unit.box)
@@ -2130,14 +2149,14 @@ class Pipeline:
                 events: EventFn | None = None, cancel: threading.Event | None = None,
                 on_slow: SlowFn | None = None, reuse: bool = True, timed: bool = True) -> PageResult:
         """`_process`, its line in the session's analysis log written round it (`taslation.analysis`: numbers only,
-        while the log is on). With developer measuring on (`measuring`) the cache is neither read nor written."""
+        while the log is on) and its time budget kept round it (`taslation.budget`: what LaMa may still spend of it; a
+        page read for the window over it is said in the log, `over_budget`). With developer measuring on
+        (`measuring`) the cache is neither read nor written."""
         if self.measuring:
             use_cache = False
         page = analysis.begin(None, self.settings.margins, ahead=not timed)
-        if page is None:
-            return self._process(image, use_cache=use_cache, translate=translate, progress=progress,
-                                 complete=complete, events=events, cancel=cancel, on_slow=on_slow, reuse=reuse,
-                                 timed=timed)
+        size = getattr(image, "size", None)
+        spending = budget.begin(int(size[0]) * int(size[1]) if isinstance(size, tuple) and len(size) == 2 else 0)
         try:
             result = self._process(image, use_cache=use_cache, translate=translate, progress=progress,
                                    complete=complete, events=events, cancel=cancel, on_slow=on_slow, reuse=reuse,
@@ -2145,8 +2164,14 @@ class Pipeline:
         except BaseException as e:
             analysis.end(page, None, outcome=type(e).__name__.lower())
             raise
-        result.analysis_n = page.n
-        analysis.end(page, result)
+        finally:
+            budget.end(spending)
+        line = None
+        if page is not None:
+            result.analysis_n = page.n
+            line = analysis.end(page, result)
+        if timed and spending.over():
+            over_budget(spending, result, line)
         return result
 
     def _process(self, image: Image.Image, *, use_cache: bool = True, translate: bool = True,
@@ -3830,6 +3855,7 @@ class Pipeline:
             usual = _taken(usual)
             left = self._prose(rgb, regions, usual, report, fill, cancel, among, read)
             self._titles(regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
+            self._big_unsure(rgb, regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
             self._erase_only(regions, fill)
             return left
         total = len(regions)
@@ -3906,6 +3932,7 @@ class Pipeline:
             if fill is not None:
                 fill.read(r)
         self._titles(regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
+        self._big_unsure(rgb, regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
         self._erase_only(regions, fill)
         return repeated
 
@@ -3991,6 +4018,32 @@ class Pipeline:
                 if heading(r.source_text):
                     continue
                 r.status = "print"
+                if fill is not None:
+                    fill.read(r)
+
+    def _big_unsure(self, rgb: np.ndarray, regions: list[TextRegion], usual: float, fill: PageFill | None,
+                    unit_box: Box) -> None:
+        """Loose lettering (`loose`) read with a confidence under `review.OCR_UNSURE` whose largest character is
+        `BIG_UNSURE` times the body lettering's size or more (the least of the page's usual size, the book's so far
+        and `BODY_SHARE` of the unit's height), on a picture in colour (`artwork.on_colour_picture`), is left as
+        drawn ("low-confidence"): a cover's or a colour page's large lettering read so unsure is mostly the picture
+        read as lettering, and erasing it on the drawing took the most time a page spent (LaMa's windows the size
+        of the lettering) and could destroy the drawing (S2); left as drawn it is S3 at the most. Read with
+        confidence, or on paper, it stays to translate."""
+        read = [r for r in regions if r.status == "untranslated" and r.source_text and not r.kind.startswith("manual")
+                and float(r.ocr_confidence) < OCR_UNSURE and r.char_size > 0 and loose(r)]
+        if not read:
+            return
+        sizes = self._sizes_seen()
+        body = [v for v in (float(usual), float(np.median(sizes)) if sizes else 0.0,
+                            BODY_SHARE * (unit_box[3] - unit_box[1])) if v > 0]
+        if not body:
+            return
+        least = BIG_UNSURE * min(body)
+        for r in read:
+            if r.char_size >= least and artwork.on_colour_picture(rgb, r):
+                r.status = "low-confidence"
+                analysis.acted(r, "big_unsure")
                 if fill is not None:
                     fill.read(r)
 

@@ -70,6 +70,7 @@
  "test_ollama_client.py": 9.6,
  "test_ollama_messages.py": 9.3,
  "test_ollama_start.py": 1.7,
+ "test_page_budget.py": 20.8,
  "test_page_images.py": 36.9,
  "test_page_models_review.py": 3.2,
  "test_page_names.py": 6.5,
