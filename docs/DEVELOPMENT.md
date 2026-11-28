@@ -596,7 +596,10 @@ rows' languages.
   next scenario (the stand-in's size: the report's
   `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
   window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). The
-  tool never changes the foreground (but between its own windows with `--start-behind` and `--chooser`: below). The
+  tool does not start while another TASlation runs on the computer - a person's own window (`pythonw.exe -m taslation
+  gui`), or another run of it, of `intro_video.py` or `promo_video.py` recording, or of `screens_read.py`: one line
+  and exit code 3, nothing started (`standin_viewer.refuse_beside_running`; those tools do the same) -, unless told to
+  with `--beside-a-running-one`. The tool never changes the foreground (but between its own windows with `--start-behind` and `--chooser`: below). The
   stand-in's browser opens without taking it either: started minimised and not activated (STARTUPINFO, which Chrome
   does not take for its first window), with Windows' lock on foreground changes set while its window comes
   (`standin_viewer.lock_foreground`: a change is possible only once the person has given no input for a while, and

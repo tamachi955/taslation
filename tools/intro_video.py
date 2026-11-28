@@ -1651,6 +1651,8 @@ def e2e_argv(args: argparse.Namespace, work: Path) -> list[str]:
             "--first", str(args.first), "--start-ollama", str(args.start_ollama)]
     if args.models:
         argv += ["--models", args.models]
+    if getattr(args, "beside_a_running_one", False):  # (looked at as the recording started: `main`)
+        argv.append("--beside-a-running-one")
     return [*argv, "--editing", "--chooser"]
 
 
@@ -1682,11 +1684,15 @@ def record(args: argparse.Namespace) -> int:
     if work.exists():
         raise SystemExit(f"{work} is there from a run before: delete it, or give another --out")
     place = clean_place(args)
+    import standin_viewer as sv
+
+    refused = sv.refuse_beside_running("intro_video record", args.beside_a_running_one)  # (before any window)
+    if refused is not None:
+        return refused
     out.parent.mkdir(parents=True, exist_ok=True)
     import demo_video
     import standin_e2e as e2e
     import standin_seethrough as ss
-    import standin_viewer as sv
 
     e2e.SCENARIOS[SCENARIO] = ("the README's introduction (tools/intro_video.py)", list(SCRIPT))
     if SCENARIO not in e2e.NAMED_ONLY:
@@ -2564,6 +2570,9 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
     rec.add_argument("--keep-run", action="store_true",
                      help="keep the run's report.json (numbers only) in its scratch folder")
+    rec.add_argument("--beside-a-running-one", action="store_true",
+                     help="record while another TASlation runs on this computer (a person's own window, another run "
+                          "of a tool): without it the recording does not start then (exit code 3)")
     ren = sub.add_parser("render", help="make the GIF of a recording (and delete the recording)")
     ren.add_argument("recording", type=Path, nargs="?", default=None,
                      help="a recording (a ZIP in a scratch folder, made by record); deleted once the GIF is written")

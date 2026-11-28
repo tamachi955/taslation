@@ -1,7 +1,7 @@
 """The browser-type stand-in viewer (tools/standin_viewer) and its driver's plan (tools/standin_e2e.py), with no
 browser, no GPU and no Ollama: the script's format, the page with nothing to fetch from anywhere, its files written
 in the scratch folder alone, the window found only in the tree the tool started with its token, the guard on the
-window TASlation chose, and the band's code read back from a frame."""
+window TASlation chose, the band's code read back from a frame, and no run beside another TASlation."""
 
 from __future__ import annotations
 
@@ -1273,6 +1273,68 @@ def test_how_long_a_status_line_of_the_page_before_stays_after_a_turn():
     assert standin_e2e.status_of_another_page(lines, (4, True), 1000, 3000) == (300, "page_summary", 400)
     assert standin_e2e.status_of_another_page(lines, (2, True), 100, 1000) == (0, None, 0)
     assert standin_e2e.status_of_another_page([], (2, True), 100, 1000) == (0, None, 0)
+
+
+# ---------------------------------------------------------------------------------------------------- another run
+WINDOW = r'"D:\apps\taslation\.venv\Scripts\pythonw.exe" -m taslation gui'  # (a person's own window)
+
+
+@pytest.mark.parametrize("command, runs", [
+    (WINDOW, True),
+    (r"C:\app\.venv\Scripts\python.exe -m taslation doctor", True),
+    (r"C:\app\.venv\Scripts\python.exe -u -m taslation.cli batch", True),
+    (r"C:\app\.venv\Scripts\taslation.exe gui", True),
+    (r'"C:\Program Files\Python313\python.exe" -u tools/standin_e2e.py --out x', True),
+    (r"python C:\work\tools\screens_read.py shots --canned 50", True),
+    (r"py -3 tools\intro_video.py record --out x.zip", True),
+    (r"python -m pytest tests/test_standin_e2e.py tools/standin_e2e.py", False),
+    (r"python tools/version_check.py tools/standin_e2e.py", False),
+    (r"python tools/standin_selfcheck.py --out x", False),  # (a headless browser: no window, no TASlation)
+    (r"git diff tools/standin_e2e.py", False),
+    (r"python -m taslationx", False),
+    (r'python -c "import taslation"', False),
+    ("", False),
+])
+def test_what_runs_taslation(command, runs):
+    assert sv.runs_taslation(command) is runs
+
+
+def test_a_tool_does_not_start_beside_another_taslation(monkeypatch, capsys):
+    # the tool (30, run by the venv's launcher 20 under a shell 10) and a person's window (40, its launcher 39)
+    table = [(10, 1), (20, 10), (30, 20), (39, 5), (40, 39)]
+    tool = "python tools/standin_e2e.py --out x"
+    lines = [(10, "cmd.exe"), (20, tool), (30, tool), (39, WINDOW), (40, WINDOW)]
+    assert sv.refuse_beside_running("standin_e2e", lines=lines, table=table, me=30) == sv.REFUSED == 3
+    said = capsys.readouterr().err
+    assert said.count("\n") == 1 and "39, 40" in said and sv.BESIDE in said
+    assert sv.refuse_beside_running("standin_e2e", True, lines=lines, table=table, me=30) is None  # (told to)
+    assert sv.refuse_beside_running("standin_e2e", lines=lines[:3], table=table, me=30) is None  # (its own alone)
+    other = [(50, 10), (60, 50)]  # (another run of a tool, under the same shell)
+    assert sv.others_running([*lines[:3], (50, tool), (60, tool)], table + other, me=30) == [50, 60]
+    monkeypatch.setattr(sv, "command_lines", lambda: None)  # (the processes could not be looked at)
+    assert sv.refuse_beside_running("standin_e2e", table=table, me=30) == sv.REFUSED
+    assert "could not be looked at" in capsys.readouterr().err
+
+
+def test_the_stand_in_run_does_not_start_beside_another_taslation(tmp_path, monkeypatch):
+    runs = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sv, "command_lines", lambda: [(4242, WINDOW)])
+    monkeypatch.setattr(sv, "processes", lambda: [])
+    monkeypatch.setattr(standin_e2e, "run", lambda args: runs.append(args) or 0)
+    assert standin_e2e.main(["--out", str(tmp_path / "run")]) == sv.REFUSED and not runs  # (nothing started)
+    assert standin_e2e.main(["--out", str(tmp_path / "run"), sv.BESIDE]) == 0 and len(runs) == 1
+
+
+def test_the_recording_tools_have_the_switch_and_hand_it_to_the_stand_in_run():
+    import intro_video
+    import promo_video
+
+    assert intro_video.parse(["record", "--out", "x.zip", sv.BESIDE]).beside_a_running_one
+    assert not intro_video.parse(["record", "--out", "x.zip"]).beside_a_running_one
+    assert sv.BESIDE in intro_video.e2e_argv(intro_video.parse(["record", "--out", "x.zip", sv.BESIDE]), Path("w"))
+    assert sv.BESIDE not in intro_video.e2e_argv(intro_video.parse(["record", "--out", "x.zip"]), Path("w"))
+    assert promo_video.parse(["record", "--out", "x.zip", sv.BESIDE]).beside_a_running_one
 
 
 # ---------------------------------------------------------------------------------------------------- the files

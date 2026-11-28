@@ -2149,6 +2149,9 @@ def record(args: argparse.Namespace) -> int:
     import standin_e2e as e2e
     import standin_viewer as sv
 
+    refused = sv.refuse_beside_running("promo_video record", args.beside_a_running_one)  # (before any window)
+    if refused is not None:
+        return refused
     count = pages_needed(args.turns, args.layout)
     start_page = args.first - (2 if args.layout == "spread" else 1)
     pictures = e2e.dataset_pages(args.series, start_page, count)
@@ -2513,6 +2516,9 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
     rec.add_argument("--start-timeout", type=float, default=600.0, help="seconds for the start-up's page")
     rec.add_argument("--page-timeout", type=float, default=120.0, help="seconds a page may take")
+    rec.add_argument("--beside-a-running-one", action="store_true",
+                     help="record while another TASlation runs on this computer (a person's own window, another run "
+                          "of a tool): without it the recording does not start then (exit code 3)")
     start = rec.add_mutually_exclusive_group()
     start.add_argument("--from-start", action="store_true",
                        help="record the start too: from the window's first picture, the page on show at the launch "

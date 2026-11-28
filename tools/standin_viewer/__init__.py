@@ -19,7 +19,10 @@ docstring says how); this module starts it in a throwaway browser window and tal
   never asked its title), closed with that process tree alone, and its profile deleted;
 * what the page says (`parse_line`: its console lines, from the browser's log on standard error) and the cells it
   draws in its band (`decode`: which screen a captured frame shows, soft or sharp, with the spinner or black);
-* the guard on what TASlation chose (`SelectionGuard`): anything but the stand-in's window stops the run.
+* the guard on what TASlation chose (`SelectionGuard`): anything but the stand-in's window stops the run;
+* another TASlation running on this computer (`refuse_beside_running`: a person's own window, `pythonw.exe -m
+  taslation gui`, or another run of a tool of `WINDOW_TOOLS`): the tools that open a window, take a key, start a
+  translator or read on the GPU do not start beside it (exit code `REFUSED`, one line), unless told to (`BESIDE`).
 
 Standard library, numpy and Pillow only."""
 
@@ -29,6 +32,7 @@ import ctypes
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -429,6 +433,102 @@ def process_tree(root: int, table: Iterable[tuple[int, int]] | None = None) -> s
                 tree.add(pid)
                 grown = True
     return tree
+
+
+# ---------------------------------------------------------------------------------------------------- another run
+BESIDE = "--beside-a-running-one"  # the tools' switch: started beside another TASlation all the same
+REFUSED = 3  # a tool's exit code when it is not started beside another TASlation
+# the tools of tools/ that run TASlation's window, take its keys, start a translator or read on the GPU
+WINDOW_TOOLS = ("standin_e2e.py", "intro_video.py", "promo_video.py", "screens_read.py")
+_NO_WINDOW = 0x08000000  # (CREATE_NO_WINDOW: the look at the processes shows no console)
+
+
+def command_lines() -> list[tuple[int, str]] | None:
+    """(process, command line) of every process now whose command line Windows lets this one read (PowerShell's
+    Win32_Process, with no window); None when they could not be read."""
+    script = "Get-CimInstance Win32_Process | ForEach-Object { '' + $_.ProcessId + [char]9 + $_.CommandLine }"
+    try:
+        done = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                              capture_output=True, timeout=60, creationflags=_NO_WINDOW)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    out = []
+    for line in done.stdout.decode("utf-8", "replace").splitlines():
+        pid, _tab, command = line.partition("\t")
+        if pid.strip().isdigit():
+            out.append((int(pid.strip()), command.strip()))
+    return out or None
+
+
+def _file_name(token: str) -> str:
+    return token.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def runs_taslation(command: str) -> bool:
+    """Whether the command line *command* runs TASlation: the program (``python -m taslation ...``; the window is
+    ``pythonw.exe -m taslation gui``), its ``taslation.exe`` launcher, or a tool of tools/ that runs its window or
+    its readers (`WINDOW_TOOLS`)."""
+    try:
+        tokens = [t.strip("\"'") for t in shlex.split(command, posix=False)]
+    except ValueError:
+        tokens = command.split()
+    if not tokens:
+        return False
+    first = _file_name(tokens[0])
+    if first in ("taslation", "taslation.exe"):
+        return True
+    if not (first.startswith("python") or first in ("py", "py.exe", "pyw", "pyw.exe")):
+        return False
+    for i, token in enumerate(tokens[1:], 1):
+        if token == "-m":
+            module = tokens[i + 1].lower() if i + 1 < len(tokens) else ""
+            return module == "taslation" or module.startswith("taslation.")
+        if not token.startswith("-"):  # the script; what follows is its own
+            return _file_name(token) in WINDOW_TOOLS
+    return False
+
+
+def ancestors(pid: int, table: Iterable[tuple[int, int]] | None = None) -> set[int]:
+    """*pid* and the processes it was started under, from *table* ((process, parent) pairs; now by default)."""
+    parent_of = dict(processes() if table is None else table)
+    chain, at = {int(pid)}, parent_of.get(int(pid))
+    while at and at not in chain:
+        chain.add(at)
+        at = parent_of.get(at)
+    return chain
+
+
+def others_running(lines: Sequence[tuple[int, str]] | None = None, table: Iterable[tuple[int, int]] | None = None,
+                   me: int | None = None) -> list[int] | None:
+    """The processes that run TASlation now (`runs_taslation`; *lines*: `command_lines` by default), but this one
+    (*me*) and those it was started under; None when the command lines could not be read."""
+    lines = command_lines() if lines is None else lines
+    if lines is None:
+        return None
+    mine = ancestors(os.getpid() if me is None else me, table)
+    return sorted(pid for pid, command in lines if pid not in mine and runs_taslation(command))
+
+
+def refuse_beside_running(tool: str, beside: bool = False, lines: Sequence[tuple[int, str]] | None = None,
+                          table: Iterable[tuple[int, int]] | None = None, me: int | None = None) -> int | None:
+    """(a tool's start, before it opens a window, takes a key, starts a translator or reads on the GPU) None when it
+    may start: no other TASlation runs on this computer (a person's own window above all - the viewer in front and
+    the hotkey are theirs), or *beside* (`BESIDE`). Else one line on standard error and REFUSED, the exit code;
+    so too when the processes could not be looked at."""
+    if beside:
+        return None
+    others = others_running(lines, table, me)
+    if others is None:
+        print(f"{tool}: not started: the processes running could not be looked at ({BESIDE} starts it all the same)",
+              file=sys.stderr)
+        return REFUSED
+    if others:
+        print(f"{tool}: not started: another TASlation runs (process {', '.join(map(str, others))}); {BESIDE} "
+              "starts it beside it", file=sys.stderr)
+        return REFUSED
+    return None
 
 
 def top_windows() -> list[tuple[int, int]]:

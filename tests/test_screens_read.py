@@ -1,5 +1,6 @@
 """tools/screens_read.py, the developer's reading of kept screens: which pictures it takes and in what order, the
-margins it takes from a measuring session's page file (those alone), what it refuses, and its watch. No model."""
+margins it takes from a measuring session's page file (those alone), what it refuses (beside another TASlation too),
+and its watch. No model."""
 
 from __future__ import annotations
 
@@ -66,6 +67,16 @@ def test_it_never_uses_ollama_s_usual_port_nor_the_program_s_state_folder(tmp_pa
     with pytest.raises(SystemExit, match="never the program's own"):
         screens_read.main([picture, "--canned", "10", "--state", str(tmp_path / ".taslation" / "x")])
     assert not (tmp_path / ".taslation").exists()
+
+
+def test_it_does_not_start_beside_another_taslation(tmp_path, monkeypatch, capsys):
+    import standin_viewer as sv
+
+    picture = str(_picture(tmp_path / "s.png"))
+    monkeypatch.setattr(sv, "command_lines", lambda: [(4242, "pythonw.exe -m taslation gui")])  # (a person's window)
+    monkeypatch.setattr(sv, "processes", lambda: [])
+    assert screens_read.main([picture, "--canned", "10", "--state", str(tmp_path / "state")]) == sv.REFUSED
+    assert not (tmp_path / "state").exists() and "4242" in capsys.readouterr().err  # (nothing made, nothing started)
 
 
 @pytest.mark.parametrize("mode", ["compare", "same"])

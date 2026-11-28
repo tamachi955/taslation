@@ -277,6 +277,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--state", type=Path, default=None, help="the tool's state folder (default: a temporary one)")
     ap.add_argument("--keep-state", action="store_true", help="keep the state folder (it holds the program's log)")
     ap.add_argument("--out", type=Path, default=None, help="the analysis lines (numbers only) copied there")
+    ap.add_argument("--beside-a-running-one", action="store_true",
+                    help="read while another TASlation runs on this computer (a person's own window, another run of "
+                         "a tool): without it the tool does not start then (exit code 3)")
     args = ap.parse_args(argv)
     if bool(args.port) == bool(args.canned):
         raise SystemExit("one translator: --port PORT (an Ollama server of the tool's own) or --canned MS")
@@ -291,6 +294,13 @@ def main(argv: list[str] | None = None) -> int:
     home = Path.home().resolve()
     if any(state.resolve() == home / n or home / n in state.resolve().parents for n in REAL_STATES):
         raise SystemExit("the tool's state folder is never the program's own")
+    import standin_viewer as sv  # (tools/: the look at what else runs)
+
+    refused = sv.refuse_beside_running("screens_read", args.beside_a_running_one)  # (before a translator or a reader)
+    if refused is not None:
+        if args.state is None:
+            shutil.rmtree(state, ignore_errors=True)
+        return refused
     state.mkdir(parents=True, exist_ok=True)
     os.environ["TASLATION_STATE_DIR"] = str(state)
     os.environ.pop("SELFTRANS_STATE_DIR", None)

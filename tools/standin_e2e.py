@@ -53,6 +53,10 @@ What runs, all on this computer:
   This tool never changes the foreground (but between its own windows with --start-behind and --chooser: below): the
   window follows a viewer in front, which is the reader's case, and with
   *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was);
+* while another TASlation runs on this computer - a person's own window (``pythonw.exe -m taslation gui``), another
+  run of a tool that runs the window (`standin_viewer.refuse_beside_running`) - the run does not start (exit code
+  3, one line), its window would take the viewer's foreground and the hotkey from that one; *--beside-a-running-one*
+  starts it all the same;
 * *--scale* other than 1: the stand-in's browser draws as on a display of that scale (``--force-device-scale-factor``,
   its own window and the page's devicePixelRatio), TASlation's text size (`Settings.ui_scale`) is set to it and the
   reader's capture area scaled with it; no setting of the system's is changed.
@@ -6499,6 +6503,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--behind-before-s", type=float, default=0.0, metavar="S",
                     help="--start-behind: the stand-in out of sight so long before the window is made (a viewer that "
                          "has lain behind the other windows a while: its browser's occlusion tracking has stopped it)")
+    ap.add_argument(sv.BESIDE, action="store_true",
+                    help="start while another TASlation runs on this computer (a person's own window, another run "
+                         "of a tool): without it the run does not start then (exit code 3)")
     args = ap.parse_args(argv)
     if args.soft_first is None:
         args.soft_first = "off" if args.standin_profile else "on"
@@ -6530,6 +6537,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--scale is 1 to 3")
     if args.wait_done is not None and args.wait_done <= 0:
         raise SystemExit("--wait-done is a number of seconds above 0")
+    refused = sv.refuse_beside_running("standin_e2e", args.beside_a_running_one)  # (before any window or server)
+    if refused is not None:
+        return refused
     return run(args)
 
 
