@@ -633,6 +633,41 @@ def _keys_correctness(run: dict[str, Any], names: list[str], check: Any) -> None
           keys.get("page_said_keys"))
 
 
+def _walk_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """Scenario bw (by its name only, alone: a book's first five screens made up, `tools/book_screens.py`, on the
+    stand-in's dark profile, its band 3 px into the capture area; with --chooser): each screen read and its lettering
+    translated, no frame read as one of no page, the window never with the viewer on trial nor saying that no page is
+    found in the tab, the side panes never over the page, every lettered region's patch on show while its page was,
+    and what was read with low confidence left as drawn (`standin_e2e.book_walk`)."""
+    walk = run.get("book_walk")
+    if "bw" not in names:
+        return
+    if not isinstance(walk, dict):
+        check("bw", "the walk was reported", False, walk)
+        return
+    screens = [s for s in walk.get("screens") or [] if isinstance(s, dict)]
+    unread = [[s.get("screen"), s.get("results"), s.get("translated"), s.get("statuses")] for s in screens
+              if not s.get("results") or not s.get("translated")]
+    check("bw", "each of the five screens was read and its lettering translated", len(screens) == 5 and not unread,
+          unread or len(screens))
+    check("bw", "no frame read as one with no page in it (no page unit's fingerprint)",
+          walk.get("no_fingerprints") == 0, walk.get("no_fingerprints"))
+    looks = {k: v for k, v in (walk.get("pick_looks") or {}).items() if v}
+    check("bw", "the viewer, known by its capture area set by hand, was never on trial, nor was it said that no page "
+          "is found in the tab", not looks, looks)
+    over = {k: v for k, v in (walk.get("overlap_px_max") or {}).items() if v}
+    check("bw", "the side panes never lay over the page", not over, over)
+    # (a look at a frame of another screen, or of that screen soft - the window's look as the stand-in turned -, is no
+    # look at the page on show: those while the stand-in drew the page's own screen sharp, where the tool tells them)
+    on_show = walk.get("pages_with_unmeant_on_show")
+    check("bw", "every lettered region's patch showed while its page was on show",
+          (on_show if on_show is not None else walk.get("pages_with_unmeant")) == 0,
+          walk.get("unmeant_looks") or walk.get("unmeant") or walk.get("pages_with_unmeant"))
+    low = [[s.get("screen"), s.get("low"), s.get("low_drawn")] for s in screens
+           if (s.get("low") or 0) != (s.get("low_drawn") or 0)]
+    check("bw", "what was read with low confidence was left as drawn", not low, low)
+
+
 # editing's times (`edit_figures`: part.key of the tool's report) and their words in a summary
 EDIT_WORDS = {"region.region_wait_ms": "region found", "select.chosen_ms": "a click chose it",
               "click.editor_ms": "a double click's editor", "click.took_the_keys_ms": "the editor had the keys",
@@ -832,7 +867,8 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             check(name, "the narrow window's page read at its new size",
                   any(r.get("first_capture_ms") is not None for r in sizes), len(sizes))
     _k_correctness(run, names, check)
-    for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness, _keys_correctness):
+    for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness, _keys_correctness,
+                  _walk_correctness):
         judge(run, names, check)
     _edit_correctness(run, check)
     return found

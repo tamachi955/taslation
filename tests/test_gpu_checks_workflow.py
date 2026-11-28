@@ -234,11 +234,11 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
     import standin_e2e
 
     groups = _groups()
-    covered, editing, measured, picked, keyed = [], [], [], [], []
+    covered, editing, measured, picked, keyed, walked = [], [], [], [], [], []
     for group, spec in groups.items():
         assert sorted(spec) == ["measure", "role", "scenarios", "size"], group
         assert spec["role"] in ("reader", "editing") and spec["measure"] in ("", "edit", "pick", "pick-plain",
-                                                                            "keys"), group
+                                                                            "keys", "walk"), group
         names = standin_e2e.wanted(spec["scenarios"])
         # (the group says what the tool runs, a pair comes along, and an editing group says so - the one that
         # measures editing on the page too; a pick says which other tab was in front)
@@ -247,7 +247,8 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         assert group == "-".join(names) + suffix, group
         assert spec["measure"] != "edit" or spec["role"] == "editing", group
         into = (measured if spec["measure"] == "edit" else keyed if spec["measure"] == "keys"
-                else picked if spec["measure"] else editing if spec["role"] == "editing" else covered)
+                else walked if spec["measure"] == "walk" else picked if spec["measure"]
+                else editing if spec["role"] == "editing" else covered)
         into.extend(names)
     # every scenario of "all" once, and scenario k's three paces (never in "all") once; of those by their names only,
     # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized, the
@@ -280,12 +281,18 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
     assert "if ($env:MEASURE -eq 'keys') { $arguments += @('--chooser', '--book-asked') }" in run
     keys = standin_e2e.parse(["--chooser", "--book-asked", "--editing", "--scenario", "fg"])
     assert keys.chooser and keys.book_asked and keys.editing
+    # and a book's first five screens (bw, by its name only, alone), the stand-in picked in the viewer chooser, in
+    # editing (the program's default), with room for the side panes beside a spread
+    assert walked == ["bw"] and "bw" in standin_e2e.NAMED_ONLY and "bw" in standin_e2e.HOLD_SCENARIOS
+    assert [s["role"] for s in groups.values() if s["measure"] == "walk"] == ["editing"]
+    assert "if ($env:MEASURE -eq 'walk') { $arguments += @('--chooser') }" in run
+    assert standin_e2e.parse(["--chooser", "--editing", "--scenario", "bw"]).chooser
     behind = "if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }"
     assert behind in _step("standin", "Run: tools/standin_e2e.py")["run"]
     # the groups whose criteria look at the side panes: a stand-in with room for them beside a spread (the tool's own
     # size leaves none), within the runner's screen less its taskbar; the others at the tool's size
     display = [int(v) for v in _workflow()["env"]["DISPLAY_SIZE"].split("||")[-1].strip(" '}").split("x")]
-    panes = {*standin_e2e.TAB_STEPS_ASKED, "tab0", *standin_e2e.R_STEPS, "s", "h"}
+    panes = {*standin_e2e.TAB_STEPS_ASKED, "tab0", *standin_e2e.R_STEPS, "s", "h", "bw"}
     for group, spec in groups.items():
         names = set(standin_e2e.wanted(spec["scenarios"]))
         if names & panes:

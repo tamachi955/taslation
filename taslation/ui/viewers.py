@@ -221,8 +221,9 @@ class ViewerMixin:
         """A viewer chosen in the Viewer list (*picked*: by the person, in the viewer chooser or the toolbar's list;
         *named*: by the --window the person gave; else the list shown again, the viewer kept; *same_book*: a window
         that shows the book of the one before, its tab dragged out of it, `_tab_moved_out`: the book's name stays):
-        remembered for the next start (`_learn_viewer`, viewers.json; a browser window picked only once a frame under
-        its tab was judged a page of a book: `_pick_trial`, `_pick_lets`), its book (the name its title gives:
+        remembered for the next start (`_learn_viewer`, viewers.json; a browser window picked that is no viewer known
+        here only once a frame under its tab was judged a page of a book: `_pick_trial`, `_pick_lets`,
+        `_known_viewer`), its book (the name its title gives:
         `_title_book`) and area, its line on the status line (the right pane's foot names it all the time:
         `seethrough.right_rows`), its window shown
         again when it is minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window
@@ -247,9 +248,11 @@ class ViewerMixin:
         # a browser window the person picked is on trial until a frame under its tab is judged a page of a book
         # (`_pick_lets`): nothing of it is read or learned before; the trial goes on, nothing learned, as the window
         # shows another tab taken for the viewer's (`_tab_of`, followed: chosen again) or the book's tab is moved out
-        # (*same_book*), and ends with another window chosen
-        trial = picked and is_browser_class(chosen.class_name)
-        going_on = not picked and (same or same_book) and getattr(self, "_pick_trial", None) is not None
+        # (*same_book*), and ends with another window chosen. A viewer known here (`_known_viewer`) is never on trial
+        self._viewer_known = self._known_viewer(chosen) if is_browser_class(chosen.class_name) else ""
+        trial = picked and is_browser_class(chosen.class_name) and not self._viewer_known
+        going_on = (not picked and (same or same_book) and getattr(self, "_pick_trial", None) is not None
+                    and not self._viewer_known)
         if trial or going_on:
             self._pick_trial = {"since": time.monotonic()}  # (the wait for a page under its tab begins again)
         else:
@@ -439,24 +442,45 @@ class ViewerMixin:
         return True
 
     # ------------------------------------------------------------------ a browser window picked, on trial
+    def _known_viewer(self, win: WindowInfo) -> str:
+        """Whether the browser window *win* is a viewer known on this computer - then a pick of it is never on trial
+        (`_on_window_selected`): "area" where an area was set by hand for it (Set area..., or the command line: its
+        capture profile in profiles.json, under the viewer's name its title gives, holds margins:
+        `pagekeys.Profiles.margins_for`); "read" where a book was read in it before by what viewers.json remembers
+        (`viewerparts.remembered`: its tab title is one chosen before - a browser window picked is remembered only
+        once lettering was read under its tab, `_pick_read` - or a segment at its start or end is a viewer's part
+        learned there; `viewerparts.viewer_tab`: it ends as a title chosen before did, another book before it -
+        another book of the same viewer); "" for none. Another tab later is never read for it (`_tab_of`)."""
+        try:
+            profiles = getattr(self, "profiles", None)
+            if profiles is not None and profiles.margins_for(win) is not None:
+                return "area"
+            return "read" if viewerparts.remembered(win) or viewerparts.viewer_tab(win.title) else ""
+        except Exception:  # noqa: BLE001 - nothing known of it: a pick of it is on trial
+            return ""
+
     def _pick_lets(self, image: Any, asked: bool = False) -> bool:
         """Whether the viewer's frame *image* may be read (a page about to be taken: `live.LiveViewMixin._on_new_page`,
         `_early_allowed`; *asked*: Translate pressed, `jobs.JobsMixin.translate_now`). Always, but while the browser
         window the person picked is on trial (`_pick_trial`): then the layout of the frame's capture area is judged
         first (`bookpage.judge`, each frame once). "book" - a drawing in panels with lettering in bubbles - is read,
         and lettering read there ends the trial (`_pick_read`: the window as it is then learned as a pick is, under
-        the tab it was chosen with). "not" - a page of text, a blank one - reads nothing, and the right pane says at
-        once that no page is found in this tab and how to choose the window again (`_pick_nothing`, PICK_NO_PAGE;
-        where the tab shows no page for the panes to stand beside, they stand in the viewer's window:
+        the tab it was chosen with). "not" - a blank tab, a page of text with no picture - reads nothing, and the right
+        pane says at once that no page is found in this tab and how to choose the window again (`_pick_nothing`,
+        PICK_NO_PAGE; where the tab shows no page for the panes to stand beside, they stand in the viewer's window:
         `seethrough.panes_tick`). "unsure" reads nothing and waits for the next page - a page turned, the same page
-        drawn sharper -, judged in its turn (`_pick_wait`: PICK_NO_PAGE after PICK_NOTHING_S); Translate pressed reads
-        it all the same, and lettering read so ends the trial."""
+        drawn sharper -, judged in its turn (`_pick_wait`: PICK_NO_PAGE after PICK_NOTHING_S). Translate pressed
+        reads the frame on show whatever it was judged (not judged then), and lettering read so ends the trial; a
+        frame captured as another tab came is never read."""
         trial = getattr(self, "_pick_trial", None)
         if trial is None:
             return True
         win = getattr(self, "selected", None)
         if win is not None and not self._pick_tab_kept(win):
             return False  # (another tab came since the frame was asked for: `_tab_now` tells of it at its next look)
+        if asked:
+            trial["asked"], self._pick_nothing = True, False  # (the person asked: read; lettering ends the trial)
+            return True
         try:
             rgb = np.asarray(image.convert("RGB"))
             left, top, right, bottom = self._area_box(image)
@@ -473,9 +497,6 @@ class ViewerMixin:
             trial["asked"], self._pick_nothing = True, False
             return True
         self._pick_wait("book")  # (a frame is captured only with that tab in front: the right pane's line as it is now)
-        if verdict == "unsure" and asked:
-            trial["asked"] = True
-            return True
         return False
 
     def _pick_wait(self, kind: str) -> None:
@@ -484,7 +505,8 @@ class ViewerMixin:
         and how to choose the window again (`seethrough.right_rows`: `_pick_nothing`, PICK_NO_PAGE) while that tab is
         in front with its last frame judged no page of a book (`_pick_lets`: "not"), or once it has been in front
         PICK_NOTHING_S with no page job under way (a frame "unsure", or none to judge). Another tab in front or a page
-        job begins the wait again."""
+        job begins the wait again. Once it says so, the page box found in that tab's frames meanwhile is no book's: it
+        is forgotten (`live.LiveViewMixin._forget_page_area`), and none is looked for while it says so (`_find_page`)."""
         trial = getattr(self, "_pick_trial", None)
         if trial is None:
             self._pick_nothing = False
@@ -493,7 +515,11 @@ class ViewerMixin:
         if kind != "book" or getattr(self, "busy", False):
             trial["since"] = now
         judged_not = trial.get("verdict") == "not"
+        was = bool(getattr(self, "_pick_nothing", False))
         self._pick_nothing = kind == "book" and (judged_not or now - trial["since"] >= PICK_NOTHING_S)
+        forget = getattr(self, "_forget_page_area", None)
+        if self._pick_nothing and not was and forget is not None:
+            forget()
 
     def _pick_read(self, result: Any) -> None:
         """A page job's page shown (*result*, `jobs`' "result") while the browser window the person picked is on trial
@@ -652,6 +678,9 @@ class ViewerMixin:
         self._hand_area = margins
         self.settings.margins = margins
         self.profiles.set_margins(self.selected, margins)
+        if getattr(self, "_pick_trial", None) is not None:  # (an area set in the window picked: the person's own word)
+            self._pick_trial, self._pick_nothing, self._viewer_known = None, False, "area"
+            self._learn_viewer(self.selected, True)
         self._auto_last = None
         self.say("Area set. Only this part of the viewer is read.")
         self._look_soon()  # Auto reads the page again, with this area

@@ -1,5 +1,7 @@
 """Whether a frame shows a page of a book, from its layout alone (`bookpage`): the repository's test pages as a viewer
-shows them are a book's, made-up pages of text, of a shop, of covers, of pictures and a blank tab are not
+shows them are a book's, made-up pages of text, of a shop, of covers, of pictures and a blank tab are not; "not" only
+for a blank tab or a page of text with no picture - a black page, colour, a picture, a column of squares are "unsure"
+at the most, and so is each of a book's first five screens made up (tools/book_screens.py) however it is captured
 (tools/bookpage_eval.py measures it on the sample set's pages and many more made-up ones)."""
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from taslation import bookpage
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import book_screens  # noqa: E402
 import bookpage_eval as ev  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -72,6 +75,48 @@ def test_a_row_of_frames_of_one_size_or_colour_off_a_ground_is_a_web_page_s():
     assert bookpage.verdict(bookpage.Layout(**{**vars(found), "drawn": 0.1})) == "not"
     sparse = {**vars(found), "panels": 0, "across": 0, "down": 0, "bubbles": 0, "area_ink": 0.01}
     assert bookpage.verdict(bookpage.Layout(**sparse)) == "not"
+    # what a page of text or a blank tab has not: colour, a picture, black - then "unsure" at the most
+    text, blank = {**vars(found), "drawn": 0.1}, {**sparse, "ink": 0.0}
+    for kind in (text, sparse, blank):
+        for sign in ({"colour": 0.3}, {"black": bookpage.BLACK_PAGE}, {"tones": bookpage.PICTURE_TONES}):
+            if "tones" in sign and kind is not text:
+                continue  # (a picture tells a page of text with a picture from one without)
+            assert bookpage.verdict(bookpage.Layout(**{**kind, **sign})) == "unsure", (kind, sign)
+
+
+@pytest.mark.parametrize("lettering", book_screens.LETTERINGS)
+def test_a_book_s_first_five_screens_are_never_judged_no_book_s_however_captured(lettering):
+    for name, make, _columns in book_screens.SCREENS:
+        try:
+            screen = make(lettering)
+        except SystemExit:
+            pytest.skip("no Japanese font")
+        for left, top, right, bottom in ((0, 0, 0, 0), book_screens.BARS_ONLY, book_screens.HAND):
+            part = screen[top:screen.shape[0] - bottom, left:screen.shape[1] - right]
+            assert bookpage.judge(part) != "not", (name, (left, top, right, bottom))
+
+
+def test_a_black_page_alone_or_beside_another_is_never_judged_no_book_s(pages):
+    black = Image.new("RGB", pages[0].size, ev.BLACK)
+    assert bookpage.judge(ev.present([black], "single", ev.BLACK)) == "unsure"
+    assert bookpage.judge(np.zeros((915, 1900, 3), np.uint8)) == "unsure"  # (a black frame: a black page, or none)
+    for spread in ([black, pages[0]], [pages[0], black]):
+        assert bookpage.judge(ev.present(spread, "spread", ev.BLACK)) != "not"
+
+
+@pytest.mark.parametrize("size", [(1900, 915), (900, 915)])
+def test_a_page_of_text_with_a_picture_in_colour_or_in_grey_is_unsure(size):
+    for grey in (False, True):
+        assert bookpage.judge(ev.text_page(3, size, photo=True, grey=grey)) == "unsure", grey
+
+
+def test_squares_of_one_size_one_above_the_other_are_a_web_page_s():
+    page = np.full((900, 640, 3), 255, np.uint8)
+    for k in range(4):  # (a column of four squares of one size, outlined)
+        y = 40 + k * 210
+        page[y:y + 180, 60:240] = 0
+        page[y + 4:y + 176, 64:236] = 255
+    assert bookpage.layout(page).grid >= bookpage.GRID_ROW
 
 
 def test_a_frame_is_known_again_by_its_digest():
@@ -80,4 +125,4 @@ def test_a_frame_is_known_again_by_its_digest():
     assert bookpage.digest(a) == bookpage.digest(b)
     b[::8, ::8] = 255
     assert bookpage.digest(a) != bookpage.digest(b)
-    assert bookpage.judge(a) == "not"  # (black: no ink on a dark paper)
+    assert bookpage.judge(a) == "unsure"  # (black: a black page of a book, or a viewer's black ground)

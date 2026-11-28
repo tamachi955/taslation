@@ -1,7 +1,7 @@
 """The stand-in viewer's behaviour profiles (``profile=dark|light`` in tools/standin_viewer/standin.html), with no
 browser: the page's pure logic (the block between PROFILE LOGIC BEGIN and END, run in node when node is here), the
 URL the Python side builds for a profile and its parts, the script's new steps, and the e2e tool's plan for a
-stand-in with a profile (scenario q, the cover alone)."""
+stand-in with a profile (scenario q, the cover alone; scenario bw, a book's first five screens)."""
 
 from __future__ import annotations
 
@@ -210,6 +210,19 @@ def test_the_screens_foreseen_follow_the_cover_alone():
     plain, _steps = standin_e2e.build_plan(["a"], 26)  # without a profile: as ever
     assert [s for s, _spread in plain[0].screens] == [2, 4, 6, 8, 10, 12, 14, 16, 18]
     assert standin_e2e.pages_needed(["a"]) == 26
+
+
+def test_scenario_bw_walks_the_five_screens_by_its_name_only_after_the_cover_alone(tmp_path):
+    import book_screens
+
+    assert "bw" not in standin_e2e.wanted("all") and standin_e2e.wanted("bw") == ["bw"]
+    assert "bw" in standin_e2e.NAMED_ONLY and "bw" in standin_e2e.HOLD_SCENARIOS  # (its rests held until done)
+    paths = book_screens.write_pages(tmp_path / "screens", "strokes")  # (the runners' are drawn in a font)
+    assert len(paths) == 9 and all(p.is_file() for p in paths)  # (the cover, then four spreads' two pages)
+    segments, _steps = standin_e2e.build_plan(["bw"], len(paths), cover=True)
+    # (the cover, then each spread, by its first page)
+    assert [0, *(page for page, _spread in segments[0].screens)] == list(standin_e2e.WALK_SCREENS)
+    assert sv.parse_options(standin_e2e.WALK_OPTIONS) == {"bars": "none", "arrows": "none"}
 
 
 def test_a_profile_draws_sharp_at_once_unless_asked():

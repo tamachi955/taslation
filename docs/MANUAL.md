@@ -530,8 +530,9 @@ In the dialog that chooses the viewer, a browser window is listed by the title o
 Bring the book's tab to the front first, then press "List again" (the line under the list says so). A window chosen while another tab is in front is taken with that tab as the book's,
 but only on trial: nothing of that tab is read until the picture it shows looks like a page of a book -
 drawings in panels, with text in speech bubbles - and nothing of the window is remembered for the next start until text on such a page has been read in the tab chosen.
-This is judged from the picture alone, before anything is read: a page of text, a shop's grid of items or a blank tab is not taken for a page of a book.
-Where one page cannot tell (no panels, no bubbles, a page in colour), TASlation waits for the next page you turn to; "Translate" reads such a page all the same, and when text is read and lettered there, the trial ends.
+A viewer known on this computer is never on trial: one you set a capture area for ("Menu" > "Set area..."), or one a book was read in before (its tab's title was chosen before, or starts or ends with a viewer's name learned, or ends as a window chosen before did).
+This is judged from the picture alone, before anything is read: only a blank tab or a page of text with no picture is taken for no page of a book at once.
+Where one page cannot tell (no panels, no bubbles, a page in colour, a black page, a picture, a shop's grid of items), TASlation waits for the next page you turn to; "Translate" reads the page on show whatever it looks like, and when text is read and lettered there, the trial ends.
 Until then, a tab you bring to the front that looks like a reader (it starts or ends with a viewer's name learned before, it was chosen before, or its title has a word such as "book") is taken as the book's tab in its place.
 If the tab chosen shows no page of a book, the right pane says "No page with text found in this tab." and how to choose the window again in "Menu" > "Viewer..." - at once,
 or after about 5 seconds where the page cannot tell or looks like a page still loading (a pale or blank page). The side panes stand in the viewer's window then, even with no page to stand beside.

@@ -94,25 +94,40 @@ starts without the caches of the titles before it.
 
 A browser window picked in the viewer chooser is read only once a frame under its tab is judged a page of a book
 (`taslation/bookpage.py`, from the frame's layout alone: drawing in panels, lettering in bubbles, no grid of cards and
-no colour off a page laid on a ground). `python tools/bookpage_eval.py` measures the judgement, all drawn in memory and
-nothing written: OpenMantra's 214 pages as a viewer shows them (on a dark, white and black ground, as spreads, as the
-capture area itself, in a window narrower than the page, and as a soft first picture), the made-up book pages of
-`tools/make_sample_page.py`, and made-up pages of no book (pages of text in Latin letters and in Japanese, light and
-dark, with a picture, a table or two columns; a document; a shop's grid of cards, bordered, dark, with outlined buttons
-and one item's page; shelves of covers in colour and grey; grids of pictures; a forum; blank tabs; the stand-in's other
-tab), each in several window sizes and seeds; `--set made` only the made-up pages (no dataset needed), `--holdout`
-other window sizes and seeds than the rules were set on. It prints per kind how many came out "book", "not" and
+no colour off a page laid on a ground) - unless it is a viewer known on this computer, which is never on trial
+(`ui.viewers.ViewerMixin._known_viewer`: a capture area set by hand for it, in profiles.json under the viewer's name
+its title gives; or a book read in it before by what viewers.json remembers - its tab title chosen before, a viewer's
+part learned at its start or end, or a title ending as one chosen before did). Translate pressed reads the frame on
+show whatever it was judged. "not" is only for a blank tab or a page of text with no picture: a black page (a quarter
+of the area at level 16 or darker), colour, a picture in grey tones, a column of squares of one size give "unsure" at
+the most. `python tools/bookpage_eval.py` measures the judgement, all drawn in memory and nothing written:
+OpenMantra's 214 pages as a viewer shows them (on a dark, white and black ground, as spreads, as the capture area
+itself, in a window narrower than the page, and as a soft first picture), the made-up book pages of
+`tools/make_sample_page.py` (alone, beside a black page, and a black page alone), a book's first five screens made up
+(`tools/book_screens.py`: the cover alone, a dark page beside a black one holding a plate, a colour spread with a
+column of squares, a grey page beside a black one holding a picture, a grey spread running off the window's foot;
+each in both letterings, whole, with the browser's bar trimmed and in an area set about the spread), and made-up pages
+of no book (pages of text in Latin letters and in Japanese, light and dark, with a picture in colour or in grey, a
+table or two columns; a document; a shop's grid of cards, bordered, dark, with outlined buttons and one item's page;
+shelves of covers in colour and grey; grids of pictures; a forum; blank tabs; the stand-in's other tab), each in
+several window sizes and seeds; `--set made` only the made-up pages (no dataset needed), `--holdout` other window
+sizes and seeds than the rules were set on. It prints per kind how many came out "book", "not" and
 "unsure", the false accepts (a page of no book judged "book"), the false rejects (a page of a book judged "not") and
 the time a judgement took. The measurements so far:
 
 | Set | Pages of books | False rejects | Unsure | Pages of no book | False accepts | "not" | Unsure |
 |---|---|---|---|---|---|---|---|
-| The rules' set | 1,541 | 0 | 240 (15.6 %; 65 of 214 soft first pictures) | 240 | 0 | 113 | 127 |
-| Hold-out | 846 | 0 | 100 (11.8 %) | 300 | 0 | 145 | 155 |
+| The rules' set | 1,576 | 0 | 271 (17.2 %; 65 of 214 soft first pictures, the 30 frames of the five screens) | 252 | 0 | 109 | 143 |
+| Hold-out | 846 | 0 | 100 (11.8 %) | 315 | 0 | 141 | 174 |
 
+With the rules as they were before (a black page, colour and a picture no reason for "unsure"), the new frames gave
+2 false rejects - a black page alone, and the dark page beside a black one with the bar trimmed - and the pages of no
+book 115 "not" (146 in the hold-out): the 6 (5) more were pages of text with a picture and a shop's pages.
 A page of text, a document, a blank tab and the stand-in's other tabs come out "not" (the right pane says so at once,
 but where the window waits a pale or blank frame out as a page still loading: then after PICK_NOTHING_S, as for
-"unsure"); a shop, covers, a gallery or a forum "unsure" (nothing read, the right pane says so after PICK_NOTHING_S). One shelf of
+"unsure"); a page of text with a picture, a shop, covers, a gallery or a forum "unsure" (nothing read, the right pane
+says so after PICK_NOTHING_S). A column of squares raises the grid only on a frame of long lines (where a page of text
+has its lines): a column of panels of one size on a page of a book with none is not one. One shelf of
 grey covers came out "book" before a page with panels of lines only and no closed frame needed BUBBLES_LINES bubbles; a
 judgement took some 25-30 ms (100 ms at the most) on a 1900 x 915 frame.
 
@@ -182,6 +197,12 @@ rows' languages.
 * `tools/make_sample_page.py` draws the synthetic test pages in `tests/fixtures/` (no real book is in the repository);
   `--layout edges` a page whose bubbles are cut by its four edges, for a case reproduced on the stand-in (`--pages`).
 * `tools/fake_viewer.py` shows those pages in a window of its own, so the whole flow can be tried without a viewer.
+* `tools/book_screens.py` draws a book's first five screens made up, as a browser-based reader shows them in a
+  maximised window (the cover alone; a dark page beside a black one holding a plate; a colour spread with a column of
+  squares; a grey page beside a black one holding a picture; a grey spread running off the window's foot, a bubble cut
+  by the content's top), with glyphs of strokes or a font's made-up lines for lettering: shared by
+  `tests/test_see_book_walk.py`, `tests/test_bookpage.py`, `tools/bookpage_eval.py` and the stand-in's scenario bw
+  (`--out DIR` writes them as PNG).
 * `tools/page_area.py` prints what the page-area detector finds in a window, for tuning.
 * `tools/room_eval.py` letters the regions of OpenMantra's pages (or of a book's dev snapshots, `--frames`) with
   canned English and counts, numbers only, the regions whose rooms or lettering run into each other's, fragments of
@@ -741,7 +762,7 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then twelve stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+Then thirteen stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
 three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
 shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as the tool may on a runner,
 `GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor;
@@ -751,8 +772,12 @@ viewer chooser while the stand-in's other tab is in front - made-up Japanese lin
 that tab read or learnt and the right pane's line that it shows no page of a book (both tabs are pale pages the window
 waits out as pages still loading, so the line comes after PICK_NOTHING_S, and tab0 begins no sooner after the pick:
 `Director.pick_waited`); and fg-keys, scenario fg in editing with `--chooser --book-asked` (the viewer chooser and
-the start's dialog for the book's name answered as a person would, then a turn), judged on where the keys were; each
-with `--wait-done`, which
+the start's dialog for the book's name answered as a person would, then a turn), judged on where the keys were; and
+bw-walk, scenario bw in editing with `--chooser` at 1900 x 1000 (a book's first five screens, `tools/book_screens.py`,
+in a font's made-up lines, on the dark profile with no bars nor arrows, the stand-in's band 3 px into the capture area
+set by hand), judged on each screen read and translated, no frame read as one with no page, no trial nor "no page"
+said (the stand-in is known by its area), the panes never over the page, every patch on show and what was read with
+low confidence left as drawn (`run.book_walk`); each with `--wait-done`, which
 holds no rest of k; seven at a time).
 Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
 TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900

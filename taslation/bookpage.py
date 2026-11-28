@@ -17,17 +17,23 @@ looked at as light ink on dark. What is measured:
   GLYPHS_LEAST small dark pieces and nothing large - BUBBLES_LEAST of them in closed frames, BUBBLES_LINES where the
   panels are lines only;
 * what a web page has and a page of a book has not: a row of GRID_ROW frames or more of one size side by side (a
-  shop's cards, a shelf of covers), and colour (COLOUR_SHARE of the pixels) where no page of a page's shape is on a
-  ground (`PAGE_SHAPES`) with its paper unlike the ground (PAPER_EDGE).
+  shop's cards, a shelf of covers) or a column of as many squares of one size, and colour (COLOUR_SHARE of the
+  pixels) where no page of a page's shape is on a ground (`PAGE_SHAPES`) with its paper unlike the ground
+  (PAPER_EDGE);
+* what a page of text has not: colour, a picture (a piece of mid tones, TONE_LEVELS, of PICTURE_TONES of the page),
+  and black (BLACK_PAGE of the capture area no brighter than BLACK_LEVEL: a black page, or the viewer's black ground
+  round a page).
 
-`judge` says "book" for a drawing in panels with lettering in bubbles and no sign of a web page; "not" for a frame
-with next to no ink or with no drawing (a page of text, a document, a blank tab); "unsure" for anything else (a
-splash page with no panels, a page with one bubble or none, a colour page off a ground, a shop's or a gallery's
-pictures): the window waits for the next page then. Measured with tools/bookpage_eval.py on the sample set's 214
-pages as a viewer shows them, the repository's made-up pages and made-up pages of no book (`docs/DEVELOPMENT.md`): no
-page of no book taken for a book's, no page of a book taken for no book's; some one page of a book in eight
-"unsure", one in three of a soft first picture. Some 25-30 ms a full-HD frame (100 ms at the most), on the Tk thread,
-once per frame, and only while a pick is on trial."""
+`judge` says "book" for a drawing in panels with lettering in bubbles and no sign of a web page; "not" only for a
+blank tab (next to no ink, or a capture area of little ink with no panel and no bubble) or a page of text with no
+picture (a document, an article) - never for a frame with colour, a picture or black in it; "unsure" for anything
+else (a splash page with no panels, a page with one bubble or none, a colour page off a ground, a black page, a
+column of squares, a shop's or a gallery's pictures): the window waits for the next page then. Measured with
+tools/bookpage_eval.py on the sample set's 214 pages as a viewer shows them, the repository's made-up pages, a book's
+first five screens made up (tools/book_screens.py) and made-up pages of no book (`docs/DEVELOPMENT.md`): no page of
+no book taken for a book's, no page of a book taken for no book's; some one page of a book in six "unsure", one in
+three of a soft first picture, every one of the five screens. Some 25-40 ms a full-HD frame (100 ms at the most), on
+the Tk thread, once per frame, and only while a pick is on trial."""
 
 from __future__ import annotations
 
@@ -68,14 +74,20 @@ GRID_SLACK = (0.02, 0.05)  # ... their tops within this share of the page's heig
 COLOUR_SHARE = 0.06  # a page with more than this share of colourful pixels is no page of a black-and-white book
 PAGE_SHAPES = ((0.55, 0.8), (1.15, 1.6))  # a page's width to its height, and a spread's
 PAPER_EDGE = 0.5  # a page whose box edge is unlike the ground for this share of it is a page laid on the ground
+SQUARE = (0.8, 1.25)  # a frame this many times as wide as high is a square (a column of them: a web page's list)
+BLACK_LEVEL = 16  # a pixel no brighter than this in any channel is black
+BLACK_PAGE = 0.25  # a capture area with this share of black pixels or more may show a black page: never "not"
+TONE_LEVELS = (60, 200)  # the grey levels of a picture's mid tones (on the paper's side: a dark paper turned)
+PICTURE_TONES = 0.04  # a piece of mid tones this share of the page or more is a picture
 
 
 @dataclass(frozen=True)
 class Layout:
     """What one look at a frame's layout found (`layout`): the page box on a ground (whether one was found, of a
     page's shape, and the share of its edge unlike the ground), and the share of ink, of the ink in drawing, the
-    panels (closed frames), the lines across and down, the most frames of one size side by side, the bubbles with
-    lettering and the share of colourful pixels."""
+    panels (closed frames), the lines across and down, the most frames of one size side by side (or squares one above
+    the other), the bubbles with lettering, the share of colourful pixels, the share of ink in the whole capture
+    area, the share of it black and the share of the page in its largest piece of mid tones."""
 
     box: bool
     page_shaped: bool
@@ -89,6 +101,8 @@ class Layout:
     bubbles: int
     colour: float
     area_ink: float = 0.0
+    black: float = 0.0
+    tones: float = 0.0
 
 
 def _pieces(mask: np.ndarray) -> np.ndarray:
@@ -178,8 +192,10 @@ def layout(rgb: np.ndarray) -> Layout:
     aspect = part.shape[1] / max(1, part.shape[0])
     shaped = look.box is not None and any(lo <= aspect <= hi for lo, hi in PAGE_SHAPES)
     paper = _paper(rgb, look)
+    sample = np.ascontiguousarray(rgb[::4, ::4])
+    black = float((sample.max(axis=2) <= BLACK_LEVEL).mean()) if sample.size else 0.0
     if part.shape[0] < 20 or part.shape[1] < 20:
-        return Layout(look.box is not None, shaped, paper, 0.0, 0.0, 0, 0, 0, 0, 0, 0.0)
+        return Layout(look.box is not None, shaped, paper, 0.0, 0.0, 0, 0, 0, 0, 0, 0.0, 0.0, black)
     grey = cv2.cvtColor(part, cv2.COLOR_RGB2GRAY)
     dark_paper = float(np.median(grey)) < 128
     if dark_paper:
@@ -201,28 +217,36 @@ def layout(rgb: np.ndarray) -> Layout:
     n_down = int((columns[:, 2] <= thin_down).sum()) if len(columns) else 0
     frames = [f for f in _pieces(cv2.bitwise_or(across, down)) if f[2] >= run_across and f[3] >= run_down]
     grid = 0
-    for f in frames:  # (frames of one size side by side)
-        alike = sum(1 for g in frames if abs(int(g[1]) - int(f[1])) <= GRID_SLACK[0] * height
-                    and abs(int(g[2]) - int(f[2])) <= GRID_SLACK[1] * f[2]
-                    and abs(int(g[3]) - int(f[3])) <= GRID_SLACK[1] * f[3])
+    for f in frames:  # (frames of one size side by side, or squares of one size one above the other)
+        same = [g for g in frames if abs(int(g[2]) - int(f[2])) <= GRID_SLACK[1] * f[2]
+                and abs(int(g[3]) - int(f[3])) <= GRID_SLACK[1] * f[3]]
+        alike = sum(1 for g in same if abs(int(g[1]) - int(f[1])) <= GRID_SLACK[0] * height)
+        if SQUARE[0] <= f[2] / max(1, f[3]) <= SQUARE[1]:
+            alike = max(alike, sum(1 for g in same if abs(int(g[0]) - int(f[0])) <= GRID_SLACK[0] * width))
         grid = max(grid, alike)
+    mid = (grey >= TONE_LEVELS[0]) & (grey <= TONE_LEVELS[1])
+    tone_pieces = _pieces(mid)
+    tones = float(tone_pieces[:, 4].max()) / (height * width) if len(tone_pieces) else 0.0
     hsv = cv2.cvtColor(part, cv2.COLOR_RGB2HSV)
     colour = float(((hsv[..., 1] > 90) & (hsv[..., 2] > 60)).mean())
-    whole = cv2.cvtColor(np.ascontiguousarray(rgb[::4, ::4]), cv2.COLOR_RGB2GRAY)
+    whole = cv2.cvtColor(sample, cv2.COLOR_RGB2GRAY)
     if dark_paper:
         whole = 255 - whole
     return Layout(look.box is not None, shaped, paper, ink_share, drawn, len(frames), n_across, n_down, grid,
-                  _bubbles(grey), colour, float((whole < INK_LEVEL).mean()))
+                  _bubbles(grey), colour, float((whole < INK_LEVEL).mean()), black, tones)
 
 
 def verdict(found: Layout) -> str:
     """"book", "not" or "unsure" for the layout *found* (the module's text)."""
-    if found.ink < LEAST_INK or found.drawn < NO_DRAWING:
-        return "not"
     framed = found.panels >= PANELS_LEAST
     lined = found.across >= LINES_ENOUGH and found.down >= LINES_ENOUGH
-    if found.area_ink < SPARSE and not found.bubbles and not (framed or lined):
-        return "not"
+    plain = found.colour < COLOUR_SHARE and found.black < BLACK_PAGE  # (no colour, no black: a blank tab, a text)
+    if plain and (found.ink < LEAST_INK or (found.drawn < NO_DRAWING and found.tones < PICTURE_TONES)):
+        return "not"  # (nothing on it, or text with no picture)
+    if plain and found.area_ink < SPARSE and not found.bubbles and not (framed or lined):
+        return "not"  # (a new tab: a few small things on a plain ground)
+    if found.ink < LEAST_INK:
+        return "unsure"  # (a black page, a colour one with no ink)
     laid = found.page_shaped and found.paper >= PAPER_EDGE
     web = found.grid >= GRID_ROW or (found.colour >= COLOUR_SHARE and not laid)
     lettered = found.bubbles >= (BUBBLES_LEAST if framed else BUBBLES_LINES)

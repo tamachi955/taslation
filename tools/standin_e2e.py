@@ -69,6 +69,9 @@ stand-in's own:
   f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page
   k  (by its name only: k5, k1, k2; k3 by its own name) pages flipped past at a pace, then read back
   h  (by its name only, with --start-behind) two turns once the stand-in, out of sight at the start, is back
+  bw (by its name only, alone) a book's first five screens, made up (tools/book_screens.py), on the dark profile with
+     no bars nor arrows (unless --standin-profile is given), soft first unless --soft-first off, the stand-in's band
+     3 px into the capture area: each read whole (``run.book_walk``)
   m  (by its name only: m0-m4) the stand-in's window over this computer's monitors as they are: where it began, moved
      to the other monitor, straddling two, maximised on the second (never on the primary), back where it began; at
      each, once at rest, the window's dialogs and menus opened through their own objects and measured
@@ -86,7 +89,7 @@ stand-in's own:
      show before the window starts. The table is in ``run.tabs`` (`standin_tabs.TabRun.report`)
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
-the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2 and f3, the one at its end
+the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2, f3 and bw, the one at its end
 too (the driver changes the stand-in for the next scenario as soon as it waits for it), is held until
 the page on show is finished - the window shows it translated -, or the window has been at rest without it, or CAP_S
 has gone by (``hN`` in the stand-in's script, let go through its control file); x's screens of little text are kept
@@ -293,6 +296,13 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     # whether the stand-in's page has the keys, every 10 ms (`standin_seethrough.SeeWatch`'s fronts and the page's
     # focus and blur)
     "fg": ("the foreground after the start and one turn", ["n", "w20000"]),
+    # (by its name only, alone) a book's first five screens, made up (`book_screens`: the cover alone, a dark page
+    # beside a black one holding a plate, a colour spread with a column of squares, a grey page beside a black one
+    # holding a picture, a grey spread with a bubble cut by the page's top) on the stand-in with the dark profile -
+    # its black ground, the cover alone, no bars nor arrows, each turn soft first as a correctness run has it -, its
+    # band 3 px into the capture area set by hand (a strip along the area's top, as a browser's own bar under an area
+    # set 3 px into it): each screen read whole (`book_walk`)
+    "bw": ("a book's first five screens", ["w8000", "n", "w8000", "n", "w8000", "n", "w8000", "n", "w8000"]),
     # (by their names only, "m" asks for m0-m4) the stand-in's window over this computer's monitors
     # (`standin_monitors`): each place taken while the window is at rest, then every dialog and menu of the window's
     # opened there and measured (`standin_monitors.Tour`), then a turn
@@ -333,7 +343,7 @@ R_STEPS = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # what "resize" asks
 WINDOW_STEPS = (*M_STEPS, *R_STEPS)
 TAB_STEPS_ASKED = ("tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # what "tab" asks for (tab0 only by its name)
 TAB_SCENARIOS = ("tab0", *TAB_STEPS_ASKED)  # (tab6 moves the book into a window of its own: always the last)
-NAMED_ONLY = ("q", "f3", "s", "g", "h", "fg", *WINDOW_STEPS, *TAB_SCENARIOS)  # scenarios never in "all", by their names
+NAMED_ONLY = ("q", "f3", "s", "g", "h", "fg", "bw", *WINDOW_STEPS, *TAB_SCENARIOS)  # never in "all": by name
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 RELEASE = re.compile(r"o\d*")  # its release ("oN": the stand-in's answer drawn N ms after it)
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
@@ -360,7 +370,9 @@ CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the wi
 # --wait-done (a slower computer than the one the rests were written for): the rests of these scenarios held until
 # their page is finished (`held`, `hold_over`), and scenario x's soft frames kept until the window asked on them,
 # KEEP_SOFT_S at most. Not c (turns while the model loads) nor b (quick turns).
-HOLD_SCENARIOS = ("a", "d", "e", "x", "f2", "f3")
+HOLD_SCENARIOS = ("a", "d", "e", "x", "f2", "f3", "bw")
+WALK_STRIP_PX = 3  # scenario bw: the stand-in's band reaches so many px into the capture area set by hand
+WALK_OPTIONS = ("bars=none", "arrows=none")  # ... on the dark profile (its black ground, the cover alone)
 KEEP_SOFT_S = 15.0
 
 
@@ -802,6 +814,74 @@ def _where(e: BaseException) -> str:
     return " (" + " < ".join(f"{Path(f.filename).name}:{f.lineno} in {f.name}" for f in reversed(frames)) + ")"
 
 
+# scenario bw: the first pages of the stand-in's screens of a book's first five (`book_screens.write_pages`'s pages on
+# the dark profile: the cover alone, then the four spreads; a screen is told by its first page, the stand-in's code
+# says "spread" of its cover alone too)
+WALK_SCREENS = (0, 1, 3, 5, 7)
+
+
+def walk_facts(result: Any, shown: sv.Shown) -> dict[str, Any]:
+    """Scenario bw: what a page job's result held - the screen it was read from (*shown*), its regions by status and
+    how many were translated, its page units' fingerprints, the regions read with low confidence (below
+    `Settings.ocr_min_confidence`) and how many of them were left as drawn (the translated page the same as the
+    original over the region's text box, its lettering). Numbers only."""
+    import numpy as np
+
+    regions = list(getattr(result, "regions", None) or [])
+    low = [r for r in regions if getattr(r, "status", "") == "low-confidence"]
+    drawn = 0
+    try:
+        image = np.asarray(result.image.convert("RGB"))
+        original = np.asarray(result.original.convert("RGB"))
+        for r in low if image.shape == original.shape else ():
+            x0, y0, x1, y1 = (max(0, int(v)) for v in r.text_box)
+            drawn += bool(np.array_equal(image[y0:y1, x0:x1], original[y0:y1, x0:x1]))
+    except Exception:  # noqa: BLE001 - (no pictures to compare: none counted as left as drawn)
+        pass
+    return {"screen": list(shown.screen) if shown.screen else None, "regions": len(regions),
+            "statuses": dict(Counter(str(getattr(r, "status", "")) for r in regions)),
+            "translated": len(getattr(result, "translated", None) or []),
+            "fingerprints": len(getattr(result, "fingerprints", None) or []), "low": len(low), "low_drawn": drawn}
+
+
+def book_walk(notes: Notes, see: dict[str, Any]) -> dict[str, Any]:
+    """Scenario bw's report, from the page jobs' results (`walk_facts`, by the screen each was read from) and the
+    see-through watch's report *see*: for each of the five screens (WALK_SCREENS, by the first page the result's
+    frame showed) the results, the most regions and
+    the most translated in one, the fewest page units' fingerprints, the regions read with low confidence and how
+    many of them were left as drawn; the results of no fingerprint (no page found in the frame); the looks at which
+    the window had a pick on trial or said that no page is found in the tab; the side panes' most px over the page;
+    the pages where a lettered region's patch did not show for no meant reason (`SeeWatch.unshown_report`), all of
+    them and those where it was so while the stand-in showed that page's screen sharp, and those looks."""
+    by_screen: dict[Any, list[dict[str, Any]]] = {}
+    for job in notes.jobs:
+        facts = job.get("walk")
+        if facts:
+            by_screen.setdefault((facts["screen"] or [None])[0], []).append(facts)
+    screens = []
+    for screen in WALK_SCREENS:
+        got = by_screen.get(screen, [])
+        statuses: Counter[str] = Counter()
+        for facts in got:
+            statuses.update(facts["statuses"])
+        screens.append({"screen": screen, "results": len(got),
+                        "regions": max((f["regions"] for f in got), default=0),
+                        "translated": max((f["translated"] for f in got), default=0),
+                        "fingerprints": min((f["fingerprints"] for f in got), default=0),
+                        "low": sum(f["low"] for f in got), "low_drawn": sum(f["low_drawn"] for f in got),
+                        "statuses": dict(statuses)})
+    unshown = see.get("unshown") or {}
+    return {"screens": screens,
+            "other_screens": sorted(str(k) for k in by_screen if k not in WALK_SCREENS),  # (None: no screen read)
+            "no_fingerprints": sum(1 for got in by_screen.values() for f in got if not f["fingerprints"]),
+            "pick_looks": dict((see.get("pick") or {}).get("looks") or {}),
+            "overlap_px_max": dict((see.get("panes") or {}).get("overlap_px_max") or {}),
+            "pages_with_unmeant": unshown.get("pages_with_unmeant"),
+            "pages_with_unmeant_on_show": unshown.get("pages_with_unmeant_on_show"),
+            "unmeant": [[p.get("screen"), p.get("unmeant")] for p in unshown.get("pages") or [] if p.get("unmeant")],
+            "unmeant_looks": list(unshown.get("unmeant_looks") or [])[:10]}
+
+
 class Notes:
     """What the hooks see, as numbers and codes (`standin_viewer.Shown` of every picture): the page jobs, the
     translator's requests, the pictures the page area was given, the frames captured, the loads of the model, the OCR
@@ -859,6 +939,7 @@ class Notes:
         self.drew_soft: list[dict[str, Any]] = []
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
         self.modes: list[dict[str, Any]] = []  # the role (Reader mode: reader, editing: translator), as changed
+        self.walk = False  # scenario bw: each result's `walk_facts` kept with its job
         # what the driver changed between scenarios (the stand-in's size), and when: a rest on the page before ends
         # there (`turn_rows`)
         self.acts: list[dict[str, Any]] = []
@@ -1080,6 +1161,8 @@ class Notes:
                 job["result_translated"] = len(getattr(result, "translated", []) or [])
                 job["result_from"] = self.code(self.shown(getattr(result, "original", None)))["state"]
                 job["result_boxes"] = [[int(v) for v in r.bbox] for r in getattr(result, "translated", []) or []]
+                if self.walk:
+                    job["walk"] = walk_facts(result, self.shown(getattr(result, "original", None)))
                 job["cache_hits"] = getattr(result, "cache_hits", None)
                 job["cache_misses"] = getattr(result, "cache_misses", None)
                 job["stored"] = len(data.get("stored") or ())
@@ -4720,9 +4803,20 @@ def run(args: argparse.Namespace) -> int:
     for path in given:
         if not path.is_file():
             raise SystemExit(f"--pages: no such picture: {path.name}")
+    walk = "bw" in names
+    if walk:  # (the five screens' pages, made up into the stand-in's scratch folder, on the dark profile)
+        if len(names) > 1 or given:
+            raise SystemExit("scenario bw runs alone, on the screens' own pages (no other scenario, no --pages)")
+        import book_screens
+
+        given = book_screens.write_pages(standin_dir / "screens", "font")
+        count = len(given)
+        if not args.standin_profile:
+            args.standin_profile = "dark"
+            args.standin_option = [*WALK_OPTIONS, *args.standin_option]
     pictures: list[Any] | None = (None if args.synthetic or given else
                                   dataset_pages(args.series, args.first, count))
-    report["pages"] = "dataset" if pictures else "given" if given else "synthetic"
+    report["pages"] = "screens" if walk else "dataset" if pictures else "given" if given else "synthetic"
     if given:
         pictures = [(given[k % len(given)], "") for k in range(count)]
     if not pictures:
@@ -4946,7 +5040,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     if getattr(args, "standin_full_screen", False):
         area = (0, 0, 0, 0)  # (no title bar, no band: the whole frame is the viewer's)
     report["area"] = list(area)
-    sv.write_control(standin_dir, 0, band=round((area[1] - top) / dpr))
+    strip = WALK_STRIP_PX if "bw" in report["scenarios"] else 0  # (bw: the band's foot that many px into the area)
+    sv.write_control(standin_dir, 0, band=round((area[1] - top + strip) / dpr))
+    report["strip_px"] = strip
     selection = sv.SelectionGuard(hwnd)
     for more in browser.more:  # (the book's own window, opened at the start for a "z": the stand-in's as much)
         guard.also.add(int(more))
@@ -4965,12 +5061,20 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         return [w for w in (viewer_info(), *(viewer_info(more) for more in browser.more)) if w is not None]
 
     notes = Notes(top, dpr)
+    notes.walk = "bw" in report["scenarios"]
     patched = install(notes, args, guard, viewer_infos)
     watch_stuck(notes, out / "stacks.txt", url)
     watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt", standin_pids=lambda: {pid, *browser.tree})
     watch_input(notes)
     state = demo_video.scratch_state()
     info = viewer_info()
+    if other_first and info is not None:
+        # (the area is set for the book's tab, as a person sets it while the book is on show - not for the other tab
+        # in front at the start, which would then be a viewer known here: a pick of it never on trial)
+        import dataclasses
+
+        other = sv.OTHER_TITLES[{"plain": 0, "japanese": 1}[args.standin_start_tab]]
+        info = dataclasses.replace(info, title=info.title.replace(other, f"{sv.TITLE} {browser.token}", 1))
     edit = bool(getattr(args, "see_edit", False))
     editing = edit or bool(getattr(args, "editing", False))  # (--editing: the role alone, nothing done on the page)
     remember_role(state, BOOK, "translator" if editing else "reader")  # (editing: the left pane's Reader mode off)
@@ -5109,6 +5213,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     lat = [e["recv"] - e["t"] for e in director.events]
     run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
     run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
+    if notes.walk:
+        run_["book_walk"] = book_walk(notes, run_["see_through"])
     if see.standin is not None:  # (scenario s: the slides with the pointer, and the jobs and pictures of their frames)
         run_["see_through"]["slides"] = see.slide_report(slide_jobs(notes))
     see_pipeline = run_["see_through"].get("pipeline") or {}
@@ -6151,7 +6257,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--scenario", default="all",
                     help="all, or some of c,a,b,d,e,x,f2,k,q,m,resize (k is k5,k1,k2 and never in all, nor is q: for "
                          "--standin-profile; m is m0-m4, the stand-in over the monitors, and resize is r1-r8, its "
-                         "window resized: never in all either, `standin_monitors`)")
+                         "window resized: never in all either, `standin_monitors`; bw, a book's first five screens, "
+                         "alone and by its name only)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
     ap.add_argument("--cancel-soft-ms", type=int, default=700,

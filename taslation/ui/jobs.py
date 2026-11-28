@@ -1936,8 +1936,8 @@ class JobsMixin:
         whether or not Auto has taken it. While the models load or a job runs it waits, and runs after. A viewer
         not read yet is looked at first (`_enlarge_first`). A Book box that names no book gets its name first
         (`_ask_name`). The pages turned past that wait for a translator that did not answer go on too
-        (`backlog.go_on_after_silence`). A browser window picked, on trial, has nothing read of a frame judged no page
-        of a book; one the judgement cannot tell of is read (`viewers.ViewerMixin._pick_lets`, *asked*)."""
+        (`backlog.go_on_after_silence`). A browser window picked, on trial, has the frame on show read whatever its
+        layout was judged (`viewers.ViewerMixin._pick_lets`, *asked*; one captured as another tab came is not)."""
         go_on_after_silence(self)
         if not self.ready or self.busy:
             self._queue("translate")

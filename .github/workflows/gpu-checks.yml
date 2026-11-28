@@ -43,7 +43,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h,g-see-edit,tab0-pick,tab0-pick-plain,fg-keys"
+        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h,g-see-edit,tab0-pick,tab0-pick-plain,fg-keys,bw-walk"
         type: string
         default: all
       titles:
@@ -115,7 +115,7 @@ env:
   # its other tab - made-up Japanese lines, or grey bars - is in front; the name ending in -pick or -pick-plain;
   # "keys": scenario fg with --chooser and --book-asked, the start and one turn and then 20 s with no other: who is in
   # front and whether the stand-in's page has the keys, every 10 ms; the name ending in -keys)
-  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": "", "measure": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": "", "measure": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": "", "measure": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": "", "measure": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000", "measure": ""}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000", "measure": ""}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000", "measure": ""}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000", "measure": ""}, "g-see-edit": {"scenarios": "g", "role": "editing", "size": "", "measure": "edit"}, "tab0-pick": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick"}, "tab0-pick-plain": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick-plain"}, "fg-keys": {"scenarios": "fg", "role": "editing", "size": "", "measure": "keys"}}'
+  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": "", "measure": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": "", "measure": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": "", "measure": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": "", "measure": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000", "measure": ""}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000", "measure": ""}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000", "measure": ""}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000", "measure": ""}, "g-see-edit": {"scenarios": "g", "role": "editing", "size": "", "measure": "edit"}, "tab0-pick": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick"}, "tab0-pick-plain": {"scenarios": "tab0", "role": "reader", "size": "1900x1000", "measure": "pick-plain"}, "fg-keys": {"scenarios": "fg", "role": "editing", "size": "", "measure": "keys"}, "bw-walk": {"scenarios": "bw", "role": "editing", "size": "1900x1000", "measure": "walk"}}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}
@@ -170,7 +170,7 @@ jobs:
           foreach ($g in $all.Keys) {
               if ($all[$g].role -notin 'reader', 'editing') { throw "group $g's role is reader or editing, not '$($all[$g].role)'" }
               if ("$($all[$g].size)" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "group $g's size is WxH or nothing, not '$($all[$g].size)'" }
-              if ("$($all[$g].measure)" -notin '', 'edit', 'pick', 'pick-plain', 'keys') { throw "group $g's measure is edit, pick, pick-plain, keys or nothing, not '$($all[$g].measure)'" }
+              if ("$($all[$g].measure)" -notin '', 'edit', 'pick', 'pick-plain', 'keys', 'walk') { throw "group $g's measure is edit, pick, pick-plain, keys, walk or nothing, not '$($all[$g].measure)'" }
               if ("$($all[$g].measure)" -eq 'edit' -and $all[$g].role -ne 'editing') { throw "group $g measures editing: its role is editing" }
           }
           $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_].scenarios; role = $all[$_].role; size = "$($all[$_].size)"; measure = "$($all[$_].measure)" } })
@@ -482,7 +482,7 @@ jobs:
           . .github/gpu-checks/helpers.ps1
           if ($env:SCENARIO_TIMEOUT -notmatch '^\d{2,4}$') { throw "scenario_timeout is seconds, not '$env:SCENARIO_TIMEOUT'" }
           if ($env:ROLE -notin 'reader', 'editing') { throw "the role is reader or editing, not '$env:ROLE'" }
-          if ("$env:MEASURE" -notin '', 'edit', 'pick', 'pick-plain', 'keys') { throw "the measure is edit, pick, pick-plain, keys or nothing, not '$env:MEASURE'" }
+          if ("$env:MEASURE" -notin '', 'edit', 'pick', 'pick-plain', 'keys', 'walk') { throw "the measure is edit, pick, pick-plain, keys, walk or nothing, not '$env:MEASURE'" }
           if ("$env:STANDIN_SIZE" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "the stand-in's size is WxH or nothing, not '$env:STANDIN_SIZE'" }
           if ($env:CANCEL_SOFT_MS -notmatch '^\d{2,5}$') { throw "cancel_soft_ms is milliseconds, not '$env:CANCEL_SOFT_MS'" }
           if ($env:WAIT_DONE -notmatch '^\d{1,4}$') { throw "wait_done is seconds, not '$env:WAIT_DONE'" }
@@ -504,6 +504,8 @@ jobs:
           # the start (the viewer chooser, then the book's name asked) and one turn, the foreground looked at
           # (scenario fg)
           if ($env:MEASURE -eq 'keys') { $arguments += @('--chooser', '--book-asked') }
+          # a book's first five screens (scenario bw), the stand-in picked in the viewer chooser as a person picks it
+          if ($env:MEASURE -eq 'walk') { $arguments += @('--chooser') }
           # scenario k in a short form: 6 pages flipped past at each pace and 3 of them read back (the tool's own form
           # is 20 and all 20). On the CPU the window reads and translates a caught page in some 20 to 30 s, and each
           # pace waits until the backlog has nothing left: 20 pages would take near --timeout at the 2 s pace

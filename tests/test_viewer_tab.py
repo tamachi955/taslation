@@ -8,9 +8,10 @@ its own is followed there. The viewer chooser says under its list to bring the b
 browser window the person picked is on trial until a frame under its tab is judged a page of a book
 (`bookpage.judge`, stubbed here; tests/test_bookpage.py judges pages): nothing of it is read or learned before, a frame
 judged no book's page has the right pane say so at once and how to choose the window again (one the layout cannot tell
-of after a while), Translate reads such a frame and lettering read there ends the trial, and a tab that looks like a
-viewer's is followed as the chosen one. No window, no browser: tools/standin_e2e.py's tab scenarios play it on the
-stand-in viewer."""
+of after a while), Translate reads the frame on show whatever it was judged and lettering read there ends the trial,
+and a tab that looks like a viewer's is followed as the chosen one. A viewer known here - an area set by hand for it,
+or a book read in it before by what viewers.json remembers - is never on trial. No window, no browser:
+tools/standin_e2e.py's tab scenarios play it on the stand-in viewer."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -310,12 +311,20 @@ def test_on_trial_a_page_read_as_another_tab_came_teaches_nothing_and_a_frame_af
     assert pick._pick_trial is None and pick.learned == [("chosen", NOTES.title)]
 
 
-def test_on_trial_translate_reads_a_frame_the_layout_cannot_tell_of_and_lettering_read_so_ends_the_trial(pick):
-    from taslation.ui.constants import PICK_NOTHING_S
+def test_on_trial_translate_reads_the_frame_on_show_whatever_it_was_judged_and_lettering_read_so_ends_the_trial(
+        pick):
+    from taslation.ui.constants import PICK_NO_PAGE, PICK_NOTHING_S
 
     pick._pick_read(SimpleNamespace(regions=[object()]))  # (a page job of no frame asked for: nothing)
     assert pick._pick_trial is not None and pick.learned == []
-    assert not pick._pick_lets(frame(10), asked=True)  # (no page of a book: not even when asked)
+    assert not pick._pick_lets(frame(10)) and pick._pick_nothing  # (judged no book's page: Auto reads nothing)
+    assert pick._pick_lets(frame(10), asked=True) and pick._pick_trial["asked"]  # (Translate: read all the same)
+    assert not pick._pick_nothing and PICK_NO_PAGE not in right_lines(pick) and pick.judged == [10]
+    pick._pick_read(SimpleNamespace(regions=[]))  # (nothing to letter on it: the trial goes on)
+    assert pick._pick_trial is not None and pick.learned == []
+    pick.titles[NOTES.hwnd] = OTHER
+    assert not pick._pick_lets(frame(30), asked=True)  # (a frame of another tab: never read, not even when asked)
+    pick.titles[NOTES.hwnd] = NOTES.title
     assert pick._pick_lets(frame(20), asked=True) and pick._pick_trial["asked"]
     pick._pick_read(SimpleNamespace(regions=[]))  # (a page with nothing to letter: the wait begins again)
     assert pick.learned == [] and pick._pick_trial["since"] == pick.clock.now and not pick._pick_trial["asked"]
@@ -327,6 +336,65 @@ def test_on_trial_translate_reads_a_frame_the_layout_cannot_tell_of_and_letterin
     assert pick._pick_trial is None and not pick._pick_nothing and pick.learned == [("chosen", NOTES.title)]
     pick._pick_read(SimpleNamespace(regions=[object()]))  # (no trial: nothing more)
     assert pick.learned == [("chosen", NOTES.title)]
+
+
+def test_the_page_box_a_tab_with_no_page_gave_on_trial_is_forgotten_and_none_is_looked_for_meanwhile(monkeypatch):
+    forgot = []
+    app = SimpleNamespace(_pick_trial={"since": 0.0, "verdict": "not"}, _pick_nothing=False, busy=False,
+                          _forget_page_area=lambda: forgot.append(1), _page_areas={})
+    monkeypatch.setattr(viewers.time, "monotonic", lambda: 1.0)
+    viewers.ViewerMixin._pick_wait(app, "book")
+    assert app._pick_nothing and forgot == [1]  # (said: what the tab gave as its page box forgotten)
+    viewers.ViewerMixin._pick_wait(app, "book")
+    assert forgot == [1]  # (once, as it comes to say so)
+    live.LiveViewMixin._find_page(app, Image.new("RGB", (40, 30)))  # (no window chosen in the fake: none needed)
+    assert app._page_areas == {}
+    app._pick_trial["verdict"] = "unsure"
+    app._pick_nothing = False
+    viewers.ViewerMixin._pick_wait(app, "book")  # (an "unsure" frame: said after PICK_NOTHING_S only)
+    assert not app._pick_nothing and forgot == [1]
+
+
+def test_a_viewer_known_here_is_never_on_trial(monkeypatch, tmp_path):
+    from test_window_state import Chooser
+
+    from taslation.pagekeys import Profiles
+
+    titled = viewerparts.Memory(None, {"parts": ["FOLIO☆QAT"], "titles": ["Star Road 1 - Reading Site"]})
+    monkeypatch.setattr(viewerparts, "current", lambda: titled)
+    learned: list[str] = []
+    monkeypatch.setattr(viewerparts, "chosen", lambda win: learned.append(win.title) or [])
+    monkeypatch.setattr(viewers, "window_exists", lambda hwnd: True)
+    monkeypatch.setattr(viewers, "show_minimised", lambda app, win: False)
+    picks = [(BOOK, "read"),  # (a viewer's part at its end: a book read in it before)
+             (_as(BOOK, BEFORE), "read"),  # (its tab title chosen before: lettering read under it)
+             (_as(BOOK, "Moon Road 2 - Reading Site - Google Chrome"), "read"),  # (another book of that viewer)
+             (NOTES, "")]  # (nothing known of it)
+    for win, known in picks:
+        w = Chooser([win])
+        w.window_box.index = 0
+        w._on_window_selected(picked=True)
+        assert w._viewer_known == known and (w._pick_trial is None) == bool(known), win.title
+    assert learned == [BOOK.title, BEFORE, "Moon Road 2 - Reading Site - Google Chrome"]  # (remembered at once)
+    profiles = Profiles(tmp_path / "profiles.json")
+    profiles.set_margins(NOTES, (0, 85, 0, 0))  # (an area set by hand for it)
+    w = Chooser([NOTES])
+    w.profiles = profiles
+    w.window_box.index = 0
+    w._on_window_selected(picked=True)
+    assert w._viewer_known == "area" and w._pick_trial is None
+
+
+def test_an_area_set_in_the_window_on_trial_ends_the_trial(pick, tmp_path):
+    from taslation.pagekeys import Profiles
+
+    pick.profiles = Profiles(tmp_path / "profiles.json")
+    pick.settings = SimpleNamespace(margins=(0, 0, 0, 0))
+    pick.say = pick._look_soon = lambda *a, **k: None
+    pick._area_chosen = viewers.ViewerMixin._area_chosen.__get__(pick)
+    pick._area_chosen((0, 85, 1200, 900), (1200, 900))
+    assert pick._pick_trial is None and pick._viewer_known == "area" and pick.learned == [("chosen", NOTES.title)]
+    assert pick.profiles.margins_for(NOTES) == (0, 85, 0, 0)
 
 
 def test_on_trial_a_frame_that_cannot_be_judged_is_read_and_lettering_ends_the_trial(pick, monkeypatch):

@@ -179,6 +179,7 @@ class Chooser:
     """What choosing a viewer uses, down to the area it reads and its line."""
 
     _on_window_selected = viewers.ViewerMixin._on_window_selected
+    _known_viewer = viewers.ViewerMixin._known_viewer
     _learn_viewer = lambda self, win, by_person: None  # (the viewers learned: tests/test_viewer_parts.py)
     _title_book = lambda self, win: win.title
     _found_margins = lambda self: (0, 0, 0, 0)

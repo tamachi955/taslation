@@ -12,8 +12,14 @@ What is judged, all drawn in memory, nothing written:
   right to left, the page alone (a capture area that is the page), a window narrower than the page, and a soft first
   picture (the frame a quarter of its size and back);
 * the repository's made-up book pages (`make_sample_page.py`'s layouts and the test pages), on a ground, alone, soft;
+  a black page alone on the black ground, and beside a test page in a spread;
+* a book's first five screens, made up (`book_screens.py`: the cover, a dark page beside a black one with a plate, a
+  colour spread with a column of squares, a grey page beside a black one with a picture, a grey spread off the
+  window's foot), each with its lettering of strokes and of a font, captured whole, with an area that trims the
+  browser's bar and with one set about the spread;
 * made-up pages of no book, each in several window sizes and seeds: a page of text (in Latin letters, in Japanese, dark,
-  with a picture, with a table and a side column, in two columns), a document page on a grey ground, a shop's grid of
+  with a picture in colour or in grey, with a table and a side column, in two columns), a document page on a grey
+  ground, a shop's grid of
   cards (plain, bordered, dark, one item, cards with outlined buttons), a shelf of covers (colour and grey), a grid of
   pictures (light and dark), a forum of bordered posts with quotes, a blank tab (light, dark, empty) and the stand-in's
   other tab (grey bars, Japanese lines). No real site's content or name.
@@ -39,6 +45,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
+import book_screens  # noqa: E402
 import make_sample_page as msp  # noqa: E402
 from taslation import bookpage  # noqa: E402
 
@@ -156,7 +163,7 @@ def header(draw: ImageDraw.ImageDraw, w: int, colour: tuple[int, int, int], tall
 
 
 def text_page(seed: int, size: tuple[int, int], dark: bool = False, japanese: bool = False, photo: bool = False,
-              sidebar: bool = False, columns: int = 1) -> np.ndarray:
+              sidebar: bool = False, columns: int = 1, grey: bool = False) -> np.ndarray:
     rng = random.Random(seed)
     w, h = size
     bg, fg, soft = ((24, 24, 27), (230, 230, 230), (150, 150, 150)) if dark else (WHITE, (28, 28, 28), (110, 110, 110))
@@ -186,7 +193,8 @@ def text_page(seed: int, size: tuple[int, int], dark: bool = False, japanese: bo
         for _ in range(12):
             cx, cy, r = rng.randint(0, col_w), rng.randint(0, 260), rng.randint(20, 120)
             pd.ellipse((cx - r, cy - r, cx + r, cy + r), fill=tuple(rng.randint(0, 255) for _ in range(3)))
-        img.paste(pic.filter(ImageFilter.GaussianBlur(6)), (x0, y))
+        pic = pic.filter(ImageFilter.GaussianBlur(6))
+        img.paste(pic.convert("L").convert("RGB") if grey else pic, (x0, y))
         y += 284
     if sidebar:  # a table with ruled cells, and a column of links beside the text
         cw, rh = col_w // 4, 34
@@ -437,6 +445,7 @@ def no_book_frames(sizes: tuple[tuple[int, int], ...], seed0: int = 0):
             s = seed0 + seed + 10 * k
             yield from (("text", text_page(s, size)), ("text-japanese", text_page(s, size, japanese=True)),
                         ("text-dark", text_page(s, size, dark=True)), ("text-picture", text_page(s, size, photo=True)),
+                        ("text-picture-grey", text_page(s, size, photo=True, grey=True)),
                         ("text-table", text_page(s, size, sidebar=True)), ("text-2col", text_page(s, size, columns=2)),
                         ("document", document_page(s, size)), ("shop", shop_page(s, size)),
                         ("shop-bordered", shop_page(s, size, bordered=True)),
@@ -467,9 +476,29 @@ def book_frames(holdout: bool):
 
 
 def made_book_frames():
-    for page in made_up_book_pages():
+    pages = made_up_book_pages()
+    for page in pages:
         for mode in ("single", "alone", "soft"):
             yield f"made-up {mode}", present([page], mode)
+    black = Image.new("RGB", pages[0].size, BLACK)  # (a black page of a book: a chapter's end, a night)
+    yield "made-up black page alone", present([black], "single", BLACK)
+    for page in pages[:2]:
+        yield "made-up page beside a black one", present([black, page], "spread", BLACK)
+        yield "made-up page beside a black one", present([page, black], "spread", BLACK)
+
+
+def screen_frames():
+    """(kind, frame) of the made-up screens (`book_screens.SCREENS`) as captured: the whole client area, an area
+    that trims the browser's bar, one set about the spread; their lettering of strokes, and of a font where one is."""
+    for lettering in book_screens.LETTERINGS:
+        for name, make, _columns in book_screens.SCREENS:
+            try:
+                screen = make(lettering)
+            except SystemExit:  # (no Japanese font: the strokes alone)
+                break
+            for area, (left, top, right, bottom) in (("whole", (0, 0, 0, 0)), ("bar trimmed", book_screens.BARS_ONLY),
+                                                      ("area set", book_screens.HAND)):
+                yield f"screen {name}, {area}", screen[top:screen.shape[0] - bottom, left:screen.shape[1] - right]
 
 
 def main() -> int:
@@ -496,6 +525,8 @@ def main() -> int:
     if args.set in ("all", "made"):
         if not args.holdout:
             for kind, frame in made_book_frames():
+                judge("book", kind, frame)
+            for kind, frame in screen_frames():
                 judge("book", kind, frame)
         sizes = HOLDOUT_SIZES if args.holdout else SIZES
         for kind, frame in no_book_frames(sizes, 100 if args.holdout else 0):

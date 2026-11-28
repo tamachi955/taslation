@@ -7,10 +7,16 @@ the top. Before, every frame had a band across the area's top (that bar) and was
 bars over the page; bars that never went left the side panes' ground as the cover had given it, and the panes stood
 300 px from the cover's box, on the spreads, for good. Now: a page box from each screen at rest (bars that have
 stayed BAR_WAIT_S are a state, not bars sliding in), the capture area set by hand standing in where a screen gives
-none on a flat ground, and the panes never inside that area, nor over the page of the frame on show.
-Made-up screens drawn here (flat colour areas, blocks for lettering; no real page); no window."""
+none on a flat ground, and the panes never inside that area, nor over the page of the frame on show. Each screen's
+lettering is read and translated (a page found in each), what is read with low confidence - the plate's lettering on
+the black page - left as drawn, and every patch shown while the screen is; the stand-in's scenario bw walks the same
+screens on the runners (tools/standin_e2e.py, `book_walk`), whose report is judged here too.
+Made-up screens (tools/book_screens.py: flat colour areas, glyphs of strokes or a font's made-up lines for lettering;
+no real page); no window."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -22,142 +28,10 @@ from test_seethrough import Facts
 from taslation import panes as pn
 from taslation.ui import seethrough as ui
 
-W, H = 1920, 1032  # a maximised window's client area at 100 %
-BAR_ROWS = 88  # rows 0-87: the browser's tab strip and address bar, in the client area
-CONTENT_TOP = 87  # the pages' first row on the screens (the bar's last row, where a page is drawn over it)
-SPREAD = (294, 1626)  # the pages' columns on the screen (a spread of two pages 666 px wide)
-HAND = (296, 85, 292, 0)  # margins of a capture area set by hand about the spread (its top 3 px over the bar's foot)
-BARS_ONLY = (0, 85, 0, 0)  # margins of one that trims only the browser's bar
-
-
-def blank() -> np.ndarray:
-    out = np.zeros((H, W, 3), np.uint8)  # the viewer's black ground
-    out[:BAR_ROWS] = (222, 225, 230)
-    out[44:76, 200:1400] = 255  # (an address bar)
-    return out
-
-
-def blocks(out, x0, y0, n, w, h, gap, colour, outline=None):
-    """*n* blocks for lettering in a row (with an *outline* round each: large decorative lettering)."""
-    for i in range(n):
-        x = x0 + i * (w + gap)
-        if outline is not None:
-            out[y0 - 4:y0 + h + 4, x - 4:x + w + 4] = outline
-        out[y0:y0 + h, x:x + w] = colour
-
-
-def disc(out, cx, cy, r, colour):
-    ys, xs = np.ogrid[:H, :W]
-    out[(ys - cy) ** 2 + (xs - cx) ** 2 <= r * r] = colour
-
-
-def oval(out, cx, cy, rx, ry, line):
-    """A bubble: white inside an outline *line* px wide."""
-    ys, xs = np.ogrid[:H, :W]
-    out[((xs - cx) / rx) ** 2 + ((ys - cy) / ry) ** 2 <= 1] = 0
-    out[((xs - cx) / (rx - line)) ** 2 + ((ys - cy) / (ry - line)) ** 2 <= 1] = 255
-
-
-def glyphs(out, x, y, n, seed, size=26):
-    """*n* made-up glyphs in a column from (*x*, *y*): strokes whose lengths change from glyph to glyph (lettering,
-    not a tone of equal dots)."""
-    for k in range(n):
-        top, v = y + k * (size + 6), (seed + k * 7) % 5
-        out[top + 2:top + 5, x + 2 + v:x + size - 2] = 20
-        out[top + 2 + v:top + size - 2, x + size // 2 - 2:x + size // 2 + 1] = 20
-        out[top + size - 8:top + size - 5, x + 4:x + size - 4 - 2 * v] = 20
-        if (seed + k) % 2:
-            out[top + 9:top + 13, x + 5:x + 11] = 20
-        else:
-            out[top + 8:top + 18, x + size - 7:x + size - 4] = 20
-
-
-def cover() -> np.ndarray:
-    """A single colour page in the middle (629..1291 x 88..1030): flat colour areas, large outlined lettering."""
-    out = blank()
-    x0, x1, y0, y1 = 629, 1291, 88, 1030
-    out[y0:y1, x0:x1] = (90, 160, 230)
-    out[y0 + 380:y0 + 700, x0:x1] = (200, 40, 50)
-    out[y0 + 700:y1, x0:x1] = (240, 200, 40)
-    blocks(out, x0 + 60, y0 + 90, 6, 70, 110, 22, (20, 20, 60), outline=(255, 255, 255))
-    return out
-
-
-def dark_and_black() -> np.ndarray:
-    """A dark colour page (294..960, the full height) beside a page as black as the ground holding a small plate."""
-    out = blank()
-    out[87:1032, 294:960] = (50, 30, 80)
-    out[300:700, 400:800] = (90, 60, 140)
-    disc(out, 620, 820, 120, (140, 90, 60))
-    out[805:996, 1313:1591] = (200, 160, 60)
-    out[815:986, 1323:1581] = (40, 30, 20)
-    blocks(out, 1340, 860, 4, 44, 80, 16, (220, 180, 70))
-    return out
-
-
-def colour_spread() -> np.ndarray:
-    """A spread of colour pictures to the pages' edges, no gutter; on the right one a column of six squares of one
-    size, each with a round badge and lines of small lettering beside it, a plate at its top left."""
-    out = blank()
-    for i, colour in enumerate([(255, 120, 40), (40, 200, 120), (250, 230, 60), (60, 120, 240)]):
-        out[87 + i * 236:87 + (i + 1) * 236, 294:960] = colour
-    blocks(out, 340, 160, 5, 80, 120, 30, (250, 250, 250), outline=(10, 10, 10))
-    out[87:1032, 960:1626] = (30, 20, 50)
-    out[110:180, 975:1200] = (200, 170, 90)
-    for k in range(6):
-        y = 303 + 119 * k
-        out[y:y + 108, 983:1091] = [(180, 90, 90), (90, 180, 90), (90, 90, 180), (180, 180, 90), (90, 180, 180),
-                                    (180, 90, 180)][k]
-        disc(out, 1091, y + 100, 14, (240, 240, 240))
-        for line in range(3):
-            out[y + 20 + line * 22:y + 32 + line * 22, 1110:1300 - line * 40] = (230, 200, 120)
-    return out
-
-
-def grey_and_picture() -> np.ndarray:
-    """A greyscale page with panels and a bubble (294..960) beside a black page holding a small colour picture."""
-    out = blank()
-    out[87:1032, 294:960] = 245
-    out[100:400, 310:944] = 128
-    out[104:396, 314:940] = 200
-    out[420:1020, 310:620] = 90
-    out[420:1020, 640:944] = 180
-    disc(out, 800, 250, 70, (255, 255, 255))
-    out[200:300, 790:796] = 20
-    out[200:280, 810:816] = 20
-    out[570:1007, 1291:1599] = (160, 110, 70)
-    out[620:900, 1340:1550] = (60, 140, 200)
-    return out
-
-
-CUT_COLUMN = (1500, 1526)  # (`grey_spread`) the columns of the bubble's lettering the content's top cuts
-
-
-def grey_spread() -> np.ndarray:
-    """A greyscale spread (294..915 | 960..1626, a white gutter) running off the window's foot, a bubble cut by the
-    content's top - the browser's bar over all above it -, one of its two columns of lettering cut with it."""
-    out = blank()
-    out[CONTENT_TOP:BAR_ROWS] = 0  # (the content from that row on, the viewer's ground beside the page too)
-    out[CONTENT_TOP:1032, 294:1626] = 250
-    for x0, x1 in ((294, 915), (960, 1626)):
-        out[110:500, x0 + 16:x1 - 16] = 30
-        out[114:496, x0 + 20:x1 - 20] = 210
-        out[520:1032, x0 + 16:x1 - 16] = 30
-        out[524:1032, x0 + 20:x1 - 20] = 150
-    oval(out, 1490, 130, 85, 120, 5)
-    glyphs(out, CUT_COLUMN[0], 70, 5, seed=1)
-    glyphs(out, 1462, 95, 4, seed=2)
-    disc(out, 400, 700, 60, (255, 255, 255))
-    out[660:740, 396:402] = 20
-    out[:CONTENT_TOP] = blank()[:CONTENT_TOP]  # (the bar over the page and the bubble above the content's top)
-    return out
-
-
-# the screens, and the page box the look finds in each with no area set by hand or one that trims only the bar
-# (to LOOK_STEP: on every fourth pixel); the plate and the small picture on the black pages are the page's edge there
-SCREENS = [("cover", cover, (632, 1292)), ("dark page and black page", dark_and_black, (296, 1592)),
-           ("colour spread", colour_spread, (296, 1628)), ("grey page and black page", grey_and_picture, (296, 1600)),
-           ("grey spread", grey_spread, (296, 1628))]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import book_screens  # noqa: E402
+from book_screens import (BAR_ROWS, BARS_ONLY, CONTENT_TOP, CUT_COLUMN, HAND, PLATE, SCREENS, H, W,  # noqa: E402
+                          blank, colour_spread, cover, grey_spread)
 
 
 @pytest.fixture
@@ -296,6 +170,138 @@ def test_on_the_fifth_screen_the_bubble_cut_by_the_content_s_top_is_read_lettere
     store.put(1, (W, H), patches, sign=sign)
     chosen, shown, seen = st.visible(store.sets, bgra(picture))
     assert chosen.key == 1 and shown == tuple(range(len(patches))) and seen.bars == ()  # every patch, whole
+
+
+@pytest.mark.parametrize("lettering", book_screens.LETTERINGS)
+def test_each_screen_is_read_translated_and_shown_whole_and_the_plate_is_left_as_drawn(tmp_path, clock, lettering):
+    """The five screens one after the other in the owner's frame (an area set 3 px into the browser's bar): the strip
+    left out of what is read, a page found in each (its fingerprints), its lettering read and translated, a region
+    read with low confidence - the OCR here is unsure of light lettering on a dark ground, as the plate's - left as
+    drawn and the plate's pixels with it, and every patch of the page shown while it is on show."""
+    from helpers import EN_TEXTS, FakeOcr
+    from test_seethrough import bgra
+
+    from taslation import seethrough as st
+    from taslation.config import Settings
+    from taslation.pipeline import Pipeline
+    from taslation.translate.simple import DictTranslator
+
+    class PlateOcr(FakeOcr):
+        def read_with_confidence(self, image):
+            return self.read(image), (0.3 if float(np.asarray(image.convert("L")).mean()) < 128 else 0.95)
+
+    settings = Settings(state_dir=tmp_path / "state")
+    settings.validate()
+    settings.reuse_lines = False
+    app = window(tmp_path, BARS_ONLY)
+    for i, (name, make, _columns) in enumerate(SCREENS):
+        try:
+            picture = make(lettering)
+        except SystemExit:
+            pytest.skip("no Japanese font")
+        image = Image.fromarray(picture)
+        show(app, clock, picture, 6.0 if i == 0 else 2.0)
+        ui.note_strips(app, image, Facts(image))
+        settings.margins = ui.strip_margins(app, BARS_ONLY, (W, H))
+        assert settings.margins[1] in (CONTENT_TOP, BAR_ROWS), (name, settings.margins)  # (the strip left out)
+        result = Pipeline(settings, ocr=PlateOcr(), translator=DictTranslator(EN_TEXTS), cache=None).process(image)
+        assert result.fingerprints and not result.error, name  # (a page found in it)
+        assert result.translated, (name, [(r.kind, r.status) for r in result.regions])
+        lettered = np.asarray(result.image)
+        for r in result.regions:
+            if r.status == "low-confidence":
+                x0, y0, x1, y1 = r.text_box
+                assert (lettered[y0:y1, x0:x1] == picture[y0:y1, x0:x1]).all(), name
+        if make is book_screens.dark_and_black:
+            x0, y0, x1, y1 = PLATE
+            assert (lettered[y0:y1, x0:x1] == picture[y0:y1, x0:x1]).all()  # (the plate as drawn)
+        patches = st.make_patches(picture, lettered)
+        assert patches, name
+        ui.stamp_sign(app, image, Facts(image))
+        store = st.SetStore()
+        store.put(i + 1, (W, H), patches, sign=ui.sign_of(image, picture))
+        chosen, shown, _seen = st.visible(store.sets, bgra(picture))
+        assert chosen.key == i + 1 and shown == tuple(range(len(patches))), name  # (every patch, whole)
+
+
+def test_the_stand_in_s_walk_is_reported_by_screen_and_judged_on_the_runners():
+    """Scenario bw's report (`standin_e2e.walk_facts` of each result, `book_walk` of them all) and its judgement
+    (.github/gpu-checks/summarise.py, `_walk_correctness`): each of the five screens read and translated, no frame
+    read as one with no page, no pick on trial nor "no page" said, the panes never over the page, every patch on
+    show, what was read with low confidence left as drawn."""
+    import importlib.util
+
+    import standin_e2e
+
+    from taslation.regions import PageResult
+
+    original = Image.new("RGB", (40, 30), (200, 200, 200))
+    image = original.copy()
+    image.paste((255, 255, 255), (0, 0, 10, 10))  # (a region lettered at 0..10)
+
+    def region(status, box):
+        return SimpleNamespace(status=status, text_box=box, bbox=box)
+
+    result = PageResult(image=image, original=original, fingerprints=["a", "b"],
+                        regions=[region("translated", (0, 0, 10, 10)), region("low-confidence", (20, 0, 30, 10)),
+                                 region("low-confidence", (5, 5, 15, 15))])
+    facts = standin_e2e.walk_facts(result, SimpleNamespace(screen=(1, True)))
+    assert facts["screen"] == [1, True] and facts["fingerprints"] == 2 and facts["translated"] == 1
+    assert facts["low"] == 2 and facts["low_drawn"] == 1  # (the second overlaps the lettered one)
+    assert facts["statuses"] == {"translated": 1, "low-confidence": 2}
+    walked = {**facts, "low_drawn": 2}
+    jobs = [{"walk": {**walked, "screen": [page, True]}} for page in standin_e2e.WALK_SCREENS]
+    see = {"pick": {"looks": {}}, "panes": {"overlap_px_max": {"left:spread": 0, "right:cover": 0}},
+           "unshown": {"pages_with_unmeant": 0, "pages": []}}
+    good = standin_e2e.book_walk(SimpleNamespace(jobs=[*jobs, {"walk": {**walked, "screen": None}}, {}]), see)
+    assert [s["screen"] for s in good["screens"]] == list(standin_e2e.WALK_SCREENS)
+    assert all(s["results"] == 1 and s["translated"] == 1 for s in good["screens"])
+    assert good["other_screens"] == ["None"]  # (a frame of no screen of the stand-in's)
+
+    spec = importlib.util.spec_from_file_location(
+        "summarise", Path(__file__).resolve().parents[1] / ".github" / "gpu-checks" / "summarise.py")
+    summarise = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(summarise)
+
+    def failed(walk, names=("bw",)):
+        found = []
+        summarise._walk_correctness({"book_walk": walk}, list(names),
+                                    lambda _s, criterion, ok, seen=None: found.append((criterion, bool(ok))))
+        return [c for c, ok in found if not ok]
+
+    assert failed(good) == [] and failed(None, ("c",)) == []
+    assert failed(None) == ["the walk was reported"]
+    unread = {**good, "screens": [*good["screens"][:4], {**good["screens"][4], "translated": 0}]}
+    assert failed(unread) == ["each of the five screens was read and its lettering translated"]
+    assert failed({**good, "no_fingerprints": 1}) == ["no frame read as one with no page in it (no page unit's "
+                                                      "fingerprint)"]
+    assert failed({**good, "pick_looks": {"trial": 3}}) == ["the viewer, known by its capture area set by hand, was "
+                                                            "never on trial, nor was it said that no page is found "
+                                                            "in the tab"]
+    assert failed({**good, "overlap_px_max": {"right:spread": 12}}) == ["the side panes never lay over the page"]
+    assert failed({**good, "pages_with_unmeant": 1}) == ["every lettered region's patch showed while its page was on "
+                                                         "show"]
+    turned = {**good, "pages_with_unmeant": 1, "pages_with_unmeant_on_show": 0}  # (a look as the stand-in turned)
+    assert failed(turned) == [] and failed({**turned, "pages_with_unmeant_on_show": 1}) != []
+    drawn = {**good, "screens": [{**good["screens"][0], "low_drawn": 1}, *good["screens"][1:]]}
+    assert failed(drawn) == ["what was read with low confidence was left as drawn"]
+
+
+def test_a_look_that_found_a_patch_not_shown_is_told_by_what_the_stand_in_drew_then():
+    import standin_seethrough
+
+    watch = object.__new__(standin_seethrough.SeeWatch)
+    watch.app = SimpleNamespace(_see_unshown={7: {"looks": 2, "kinds_seen": {"no match": 1, "hover": 1}}})
+    watch.screens, watch.unshown_seen, watch.unmeant_looks = {7: (3, True)}, {}, []
+    watch._note_unmeant()
+    watch._note_unmeant()  # (each look once)
+    assert [(key, grew) for _t, key, grew in watch.unmeant_looks] == [(7, {"no match": 1})]  # (the pointer's: meant)
+    t = watch.unmeant_looks[0][0]
+    turned = watch.unshown_report([(t - 900, (3, True), "sharp"), (t - 200, (5, True), "soft")])
+    assert turned["pages_with_unmeant"] == 1 and turned["pages_with_unmeant_on_show"] == 0  # (another screen drawn)
+    assert turned["unmeant_looks"][0]["standin_drew"] == [[5, True], "soft"]
+    assert watch.unshown_report([(t - 900, (3, True), "sharp")])["pages_with_unmeant_on_show"] == 1
+    assert watch.unshown_report()["pages_with_unmeant_on_show"] is None  # (no draws told: not counted)
 
 
 def test_the_report_of_the_capture_area_tells_the_area_set_by_hand_from_the_page_found_inside_it(tmp_path):

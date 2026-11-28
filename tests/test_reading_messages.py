@@ -102,6 +102,7 @@ class Chooser(Lines):
     """What choosing a viewer in the list uses."""
 
     _on_window_selected = app_mod.App._on_window_selected
+    _known_viewer = app_mod.App._known_viewer
     _learn_viewer = app_mod.App._learn_viewer
     _title_book = app_mod.App._title_book
     _enlarge_first = lambda self: True  # (the window looked at as it is: tests/test_see_hidden.py)

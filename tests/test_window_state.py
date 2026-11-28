@@ -59,6 +59,7 @@ class Chooser:
     """What choosing a viewer uses, down to the area it reads."""
 
     _on_window_selected = A._on_window_selected
+    _known_viewer = A._known_viewer
     _learn_viewer = A._learn_viewer
     _title_book = A._title_book
     _enlarge_first = lambda self: True  # (the window looked at as it is: tests/test_see_hidden.py)

@@ -64,9 +64,9 @@ REGION_KEYS = ("number", "status", "source", "kind", "direction", "box", "page_b
                "bubble", "edges", "reading", "translation", "lettering", "erase", "dark_kept", "patches", "shown",
                "history")
 TEXT_KEYS = ("reading_text", "translation_text")
-SCREEN_KEYS = ("monitor", "viewer", "viewer_window", "viewer_client", "viewer_dpi", "viewer_state", "viewer_in_front",
-               "viewer_covered", "tab", "capture_route", "frame_size", "frames_per_s", "frame_states", "capture_area",
-               "page_at_rest", "steady_band", "bars")
+SCREEN_KEYS = ("monitor", "viewer", "viewer_known", "viewer_window", "viewer_client", "viewer_dpi", "viewer_state",
+               "viewer_in_front", "viewer_covered", "tab", "capture_route", "frame_size", "frames_per_s", "frame_states",
+               "capture_area", "page_at_rest", "steady_band", "bars")
 PANES_KEYS = ("left", "right", "lettering_window", "lettering", "takes_mouse", "insert_key", "foreground",
               "foreground_line", "keys_guard", "hidden_root")
 PROGRAM_KEYS = ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_language", "target_language", "mode",
@@ -437,6 +437,19 @@ def _states(app: Any) -> str:
     return f"last {len(kept)}: " + ", ".join(f"{k} {n}" for k, n in counts.most_common()) + f"; newest {kept[-1][1]}"
 
 
+def _known(app: Any, browser: bool) -> str:
+    """Whether the viewer is one known here, or a pick of it is on trial (`viewers.ViewerMixin._known_viewer`,
+    `_pick_trial`), and the last verdict on its frames then (`bookpage.judge`)."""
+    trial = getattr(app, "_pick_trial", None)
+    if trial is not None:
+        return f"no: picked, on trial (its last frame judged {trial.get('verdict') or 'nothing yet'})"
+    if not browser:
+        return "an app's window: never on trial"
+    known = getattr(app, "_viewer_known", "")
+    return {"area": "yes: an area set by hand for it", "read": "yes: a book read in it before"}.get(
+        known, "no, but not on trial (chosen without a pick, or lettering read since)")
+
+
 def screen_lines(app: Any, result: Any) -> list[str]:
     from ..capture import seethrough as window
     from ..capture import wgc, windows
@@ -453,6 +466,7 @@ def screen_lines(app: Any, result: Any) -> list[str]:
     else:
         browser = windows.is_browser_class(str(getattr(win, "class_name", "") or ""))
         lines.add("viewer", f"{'a browser' if browser else 'an app'} (not named)")
+        lines.add("viewer_known", _known(app, browser))
         lines.add("viewer_window", _box(_get(lambda: windows.window_rect(hwnd))))
         client = _get(lambda: windows.client_rect_on_screen(hwnd))
         lines.add("viewer_client", "none" if client is None else

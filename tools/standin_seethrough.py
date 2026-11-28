@@ -512,6 +512,14 @@ class SeeWatch:
         # its menus told apart (`standin_e2e.keys_report`); the hidden window's Tk child, read on the Tk thread
         self.front_kinds: list[tuple[float, str]] = []
         self.root_child = 0
+        # (every 10 ms) the looks at which the window had a pick on trial (`ui.viewers.ViewerMixin._pick_trial`) and
+        # at which its right pane said that no page is found in the tab (`_pick_nothing`), and the first of each
+        self.pick_looks: Counter[str] = Counter()
+        self.pick_first: dict[str, float] = {}
+        # (every 10 ms) the window's looks at the lettered regions not shown (`ui.seethrough.unshown_tick`): each look
+        # that found one not shown for no meant reason, when (epoch ms), the page's key and the kinds it added
+        self.unshown_seen: dict[int, dict[str, int]] = {}
+        self.unmeant_looks: list[tuple[float, int, dict[str, int]]] = []
         self.hits: Counter[str] = Counter()
         self.cpu: list[tuple[float, float, bool]] = []
         self.screens: dict[int, Any] = {}  # set key -> screen
@@ -701,6 +709,12 @@ class SeeWatch:
                 self.front_kinds.append((time.time() * 1000, kind))
                 last_kind = kind
             self.over()  # (kept)
+            for what, on in (("trial", getattr(self.app, "_pick_trial", None) is not None),
+                             ("no_page", bool(getattr(self.app, "_pick_nothing", False)))):
+                if on:
+                    self.pick_looks[what] += 1
+                    self.pick_first.setdefault(what, time.time() * 1000)
+            self._note_unmeant()
             if now >= next_cpu:
                 at = time.time() * 1000
                 self.cpu.append((at, time.process_time(), bool(getattr(self.app, "busy", False))))
@@ -2220,7 +2234,23 @@ class SeeWatch:
         out["lines"] = sorted(set(out["lines"]))
         return out
 
-    def unshown_report(self) -> dict[str, Any]:
+    def _note_unmeant(self) -> None:
+        """(the watch's loop) A look of the window's that found a lettered region not shown for no meant reason
+        (`unshown_report`'s *unmeant*): when, the page's key and the kinds it added (`unmeant_looks`)."""
+        try:
+            kept = list((getattr(self.app, "_see_unshown", None) or {}).items())
+        except RuntimeError:  # (changed by the Tk thread meanwhile: the next look)
+            return
+        for key, entry in kept:
+            seen = dict(entry.get("kinds_seen") or {})
+            before = self.unshown_seen.get(key, {})
+            grew = {k: n - before.get(k, 0) for k, n in seen.items() if n > before.get(k, 0)
+                    and k not in ("hover", "original") and not k.startswith("hidden:")}
+            if grew:
+                self.unmeant_looks.append((time.time() * 1000, key, grew))
+            self.unshown_seen[key] = seen
+
+    def unshown_report(self, draws: list[tuple[float, Any, str]] | None = None) -> dict[str, Any]:
         """Per page the window lettered (by the stand-in's screen its frame showed), the lettered regions whose patch
         did not show at the window's looks (`ui.seethrough.unshown_tick`, once a second while the page was on show):
         how many looks, the regions, those not shown at the last look and the kinds summed over the looks ("hover"
@@ -2240,7 +2270,21 @@ class SeeWatch:
                           "within": last.get("within"), "off_rows": last.get("off_rows"), "size": last.get("size"),
                           "last": [[i, kind, {k: v for k, v in facts.items() if k != "patches"}]
                                    for i, kind, facts in last.get("not_shown", ())][:12]})
-        return {"pages": pages, "pages_with_unmeant": unmeant}
+        # each look that found one, with what the stand-in had drawn last then (*draws*: (epoch ms, its screen, soft
+        # or sharp), in order): a look while it showed another screen, or that screen soft, is the window's look at a
+        # frame of no page of this one's patches; "pages_with_unmeant_on_show" counts the pages with a look while the
+        # stand-in showed their own screen sharp
+        looks, on_show = [], set()
+        for t, key, grew in self.unmeant_looks:
+            screen = self.screens.get(key)
+            drawn = next((d for d in reversed(draws or []) if d[0] <= t), None)
+            then = [list(drawn[1]), drawn[2]] if drawn is not None else None
+            if then is not None and screen is not None and tuple(drawn[1]) == tuple(screen) and drawn[2] == "sharp":
+                on_show.add(key)
+            looks.append({"screen": screen, "kinds": grew, "standin_drew": then,
+                          "since_draw_ms": round(t - drawn[0]) if drawn is not None else None})
+        return {"pages": pages, "pages_with_unmeant": unmeant, "unmeant_looks": looks[:20],
+                "pages_with_unmeant_on_show": len(on_show) if draws is not None else None}
 
     def report(self, events: list[dict[str, Any]], offset: float, end_ms: float) -> dict[str, Any]:
         over = self.over()
@@ -2272,6 +2316,7 @@ class SeeWatch:
         # the stand-in's changes of screen: each turn or jump, from its first change on the screen (spinner, black,
         # its washed-out picture or its draw)
         changes = []
+        draws: list[tuple[float, Any, str]] = []  # (every draw of the stand-in's: when, its screen, soft or sharp)
         last_screen = None
         pending: float | None = None
         for e in events:
@@ -2281,6 +2326,7 @@ class SeeWatch:
                 pending = t if pending is None else pending
             elif ev == "draw":
                 screen = (int(e["page"]), e.get("spread") == "1")
+                draws.append((t, screen, str(e.get("state") or "")))
                 if e.get("why") in ("next", "previous", "jump") and screen != last_screen:
                     changes.append({"t": pending if pending is not None else t, "draw_t": t, "to": screen,
                                     "from": last_screen, "why": e.get("why"), "kind": e.get("kind")})
@@ -2384,7 +2430,12 @@ class SeeWatch:
                 "panes": self.pane_report(),
                 "edit": self.edit_result if self.edit and not self.add else None,  # (`_edit_measure`: editing)
                 "add": self.add_result if self.add else None,  # (`_add_measure`: text areas added)
-                "unshown": self.unshown_report(),  # (lettered regions of the page on show whose patch did not show)
+                # (lettered regions of the page on show whose patch did not show)
+                "unshown": self.unshown_report(draws),
+                # (a pick on trial, and the right pane's "no page found in this tab", looked at every 10 ms)
+                "pick": {"looks": dict(self.pick_looks),
+                         "first_ms": {k: round(t - (changes[0]["t"] if changes else t))
+                                      for k, t in self.pick_first.items()}},
                 "copied_report": self.report_report(),  # (Copy a report, made every REPORT_EVERY_S: memory only)
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,

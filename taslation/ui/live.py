@@ -556,7 +556,10 @@ class LiveViewMixin(BlackViewerMixin):
         (`_inner_margins`); a page that fills the area within TIGHT_PX joins the area itself (a cover narrower than the
         spreads the area was drawn around narrows it only until a spread is shown). A frame taken while the button is
         held in the viewer joins nothing (`_held_in_viewer`: a page dragged along with the pointer is out of its
-        place)."""
+        place), nor does one of a browser window picked on trial while the right pane says its tab shows no page
+        (`viewers.ViewerMixin._pick_wait`, which forgot what that tab's frames gave)."""
+        if getattr(self, "_pick_nothing", False):
+            return
         win = self.selected
         if win is None or self._held_in_viewer():
             return
