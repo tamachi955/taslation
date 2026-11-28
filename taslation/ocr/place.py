@@ -356,7 +356,27 @@ def make_plan(settings: Any, choice: str = "ask", cuda: bool | None = None,
     found = (facts or gather)(settings)
     if found is None:
         return Plan(why=NO_GPU)
-    return judge(found, needs(settings, cuda), choice)
+    wanted = needs(settings, cuda)
+    say_facts(found, wanted)
+    return judge(found, wanted, choice)
+
+
+def say_facts(facts: GpuFacts, needs: Iterable[Need]) -> str:
+    """What a judgement stands on, said in the log, numbers only (no name of another program, no model of the
+    reader's own): the card's total and used memory, this process's, the translation model's now, what is left to
+    other programs, whether Ollama answered, the other models' MiB there, and each need with its extra (the readers'
+    graphs) - so that two starts that judged otherwise can be told apart by the line alone (what other programs held,
+    LaMa's tall figure, the window cache)."""
+    needs = list(needs)
+    parts = ", ".join(f"{n.part} {n.mib}" + (f" (graphs {n.extra})" if n.extra else "") + (" fixed" if n.fixed else "")
+                      for n in needs) or "none"
+    said = ("the GPU at the judgement: total %d MiB, used %d (this process %d, the translation model %d, other "
+            "programs %d; Ollama %s; other models there %d); needs %s, the context %d" % (
+                facts.total, facts.used, facts.own, facts.translator_now, facts.others,
+                "answered" if facts.answered else "did not answer", sum(m.mib for m in facts.loaded), parts,
+                CONTEXT_MIB if any(n.part != TRANSLATOR for n in needs) else 0))
+    LOG.info("%s", said)
+    return said
 
 
 # ------------------------------------------------------------------ the session's plan

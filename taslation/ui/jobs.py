@@ -614,6 +614,7 @@ class JobsMixin:
                     plan = place.Plan(why=place.NO_GPU)
                     break
                 needs = place.needs(s, ask=asks_ollama)
+                place.say_facts(facts, needs)
                 plan = place.judge(facts, needs, choice)
             except Exception as e:  # noqa: BLE001 - nothing to judge on: as the settings say
                 LOG.info("the GPU's room could not be judged at the start (%s)", type(e).__name__)

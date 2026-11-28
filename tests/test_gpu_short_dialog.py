@@ -226,11 +226,14 @@ def test_short_asks_once_and_start_on_the_processor_sends_only_what_does_not_fit
     assert not (tmp_path / "taslation.toml").exists()  # (nothing kept: the next start asks again)
 
 
-def test_check_again_judges_anew_on_the_facts_of_that_moment(tmp_path, card):
+def test_check_again_judges_anew_on_the_facts_of_that_moment(tmp_path, card, caplog):
     card.facts = [GpuFacts(total=6144, used=2700), GpuFacts(total=6144, used=1500)]  # (the person closed something)
     w = Window(_settings(tmp_path), replies=[("again", False)])
-    assert w.judge() is True and w.asked == [(896, (READERS, LAMA))]
+    with caplog.at_level("INFO", logger="taslation.ocr.place"):
+        assert w.judge() is True and w.asked == [(896, (READERS, LAMA))]
     assert place.session().why == place.ROOM and place.session().cpu == ()
+    said = [r.getMessage() for r in caplog.records if r.getMessage().startswith("the GPU at the judgement")]
+    assert [s.split("other programs ")[1].split(";")[0] for s in said] == ["2700", "1500"]  # (each look, in the log)
 
 
 def test_check_again_while_still_short_asks_again(tmp_path, card):

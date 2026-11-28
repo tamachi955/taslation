@@ -196,6 +196,23 @@ def test_a_plan_is_made_on_the_facts_of_the_moment_and_the_needs_of_the_settings
     assert place.make_plan(s, "processor", facts=lambda _s: _card(2000)).cpu == (READERS,)
 
 
+def test_a_judgement_says_what_it_stood_on_in_numbers(tmp_path, monkeypatch, caplog):
+    """Two starts that judged otherwise are told apart by the log alone: what other programs held, each need (LaMa's
+    tall figure, the translator's by the window cache, the readers' graphs), the context - numbers, no names."""
+    monkeypatch.setattr(place, "needs", lambda settings, cuda=None, ask=True: _needs(graphs=READERS_GRAPHS_MIB))
+    facts = GpuFacts(total=6144, used=3700, own=0, translator_now=PLAMO_WINDOW, answered=True,
+                     loaded=(place.Loaded("someones-model:7b", 900, False),))
+    with caplog.at_level("INFO", logger="taslation.ocr.place"):
+        place.make_plan(_settings(tmp_path), facts=lambda _s: facts)
+    said = [r.getMessage() for r in caplog.records if r.getMessage().startswith("the GPU at the judgement")]
+    assert said == [
+        f"the GPU at the judgement: total 6144 MiB, used 3700 (this process 0, the translation model {PLAMO_WINDOW}, "
+        f"other programs {3700 - PLAMO_WINDOW}; Ollama answered; other models there 900); needs translator "
+        f"{PLAMO_WINDOW}, readers {OCR + READERS_GRAPHS_MIB} (graphs {READERS_GRAPHS_MIB}), lama {LAMA_MIB}, layout "
+        f"{LAYOUT_MIB}, the context {CONTEXT_MIB}"]
+    assert "someones-model" not in said[0]
+
+
 # ------------------------------------------------------------------ what the settings put on the GPU
 @pytest.fixture
 def page_models(monkeypatch):
