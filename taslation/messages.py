@@ -147,7 +147,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "{bubbles} line(s) translated in {seconds:.0f} s.",
     "pipeline.to_review": "{review} worth a look (with Reader mode off, Menu > Review...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "No page found in the viewer. Check the book is open, or use Set area... in the left pane.",
+    "pipeline.no_content": "No page found in the viewer. Check the book is open, or use Set area... in the Menu.",
     "pipeline.no_text": "No text on this page.",
     "ollama.unreachable": ("TASlation could not reach the translation program. Press Translate in a moment; it "
                            "starts it by itself."),

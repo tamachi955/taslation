@@ -32,7 +32,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "Çevrilen satır: {bubbles} ({seconds:.0f} sn).",
     "pipeline.to_review": "Bakmaya değer: {review} (Okuyucu modu'nu kapatın, sonra Menü > Gözden geçir...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Görüntüleyicide sayfa bulunamadı. Kitabın açık olduğunu denetleyin veya sol bölmedeki Alan belirle... seçeneğini kullanın.",
+    "pipeline.no_content": "Görüntüleyicide sayfa bulunamadı. Kitabın açık olduğunu denetleyin veya Menü'deki Alan belirle... seçeneğini kullanın.",
     "ollama.unreachable": "TASlation çeviri programına ulaşamadı. Biraz sonra Çevir'e basın; kendiliğinden başlar.",
     "ollama.model_missing": ("{model} çeviri modeli kurulu değil. Kurmak için install.cmd dosyasını yeniden çalıştırın."),
     "ollama.http_error": "Çeviri programı reddetti ({status}). Yeniden denemek için Çevir'e basın; tekrarlarsa bilgisayarınızı yeniden başlatın.",

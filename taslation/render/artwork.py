@@ -57,7 +57,7 @@ import cv2
 import numpy as np
 
 from ..config import LAMA_MODEL
-from ..detect.bubbles import fill_holes
+from ..detect.bubbles import fill_holes, sides_of
 from ..regions import TextRegion
 from . import pagescale
 from .erase import MANUAL_KINDS, erase_region, line_pixels, paper_colour, paper_surface, within_paper
@@ -219,7 +219,7 @@ def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> 
     shows through it (`see_through`)."""
     if region.kind in ("bubble", "dark-bubble"):
         if region.tier == 3:
-            closed = closed_interior(image, box_of(image, region), region.dark, pagescale.of(region))
+            closed = closed_interior(image, box_of(image, region), region.dark, pagescale.of(region), region.bounds)
             return closed is None or see_through(image, region, closed)
         if region.tier != 2:
             return False
@@ -258,11 +258,14 @@ def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
     h, w = image.shape[:2]
     scale = pagescale.of(region)
     out, inn = pagescale.px(RING_OUT, scale), pagescale.px(RING_IN, scale)
-    ox0, oy0, ox1, oy1 = max(0, x0 - out), max(0, y0 - out), min(w, x1 + out), min(h, y1 + out)
+    ax0, ay0, ax1, ay1 = region.bounds or (0, 0, w, h)  # (the ring inside the capture area, as its paper is)
+    ox0, oy0, ox1, oy1 = max(ax0, x0 - out), max(ay0, y0 - out), min(ax1, x1 + out), min(ay1, y1 + out)
+    if ox1 - ox0 < 4 or oy1 - oy0 < 4:
+        return False
     gray = cv2.cvtColor(image[oy0:oy1, ox0:ox1], cv2.COLOR_RGB2GRAY).astype(np.float32)
     ring = np.ones(gray.shape, bool)
     ring[max(0, y0 - inn - oy0):y1 + inn - oy0, max(0, x0 - inn - ox0):x1 + inn - ox0] = False
-    closed = closed_interior(image, (x0, y0, x1, y1), region.dark, scale)
+    closed = closed_interior(image, (x0, y0, x1, y1), region.dark, scale, region.bounds)
     if closed is not None:
         (wx0, wy0, wx1, wy1), inside, paper = closed
         # (its paper clear of the ink: the rim of a bubble with no outline, white on black, shades off into the black
@@ -277,7 +280,8 @@ def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
     return float(np.percentile(np.abs(ground - np.median(ground)), 90)) >= flat
 
 
-def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: bool = False, scale: float = 1.0
+def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: bool = False, scale: float = 1.0,
+                    bounds: tuple[int, int, int, int] | None = None
                     ) -> tuple[tuple[int, int, int, int], np.ndarray, np.ndarray] | None:
     """The light paper closed all round that the lettering box *box* lies on (a bubble's interior, whatever tier of
     the detectors found it or none did), as (window, bool mask of the window, the part of it clear of the ink), or
@@ -290,10 +294,11 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     paper the box lies on runs out of that window, it is looked for again in the box grown by `CLOSED_WIDE` times its
     size: the paper of two bubbles joined into one, whose lettering lies in the smaller (the closed paper was not found
     round it, the inpainting took it, and its hole the line where the bubbles join). Pixels at the page's *scale*
-    (`pagescale`)."""
-    found, open_ = _closed_at(image, box, dark, scale, CLOSED_REACH)
+    (`pagescale`). *bounds*: the capture area where the frame goes on beyond it (`TextRegion.bounds`): the window stays
+    inside it, and paper that reaches its edge there is closed by it, as by an outline."""
+    found, open_ = _closed_at(image, box, dark, scale, CLOSED_REACH, bounds)
     if found is None and open_:
-        found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE)
+        found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE, bounds)
     return found
 
 
@@ -303,7 +308,7 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     drawn in by `ROOM_IN` - where its translation is set, as in a white area's (tier 2), not over the outline and past
     it where the box's corners reach. None where there is no such paper, or it holds less than `ROOM_HOLD` of the
     text box. Pixels at the page's *scale* (`pagescale`)."""
-    closed = closed_interior(image, box_of(image, region), region.dark, scale)
+    closed = closed_interior(image, box_of(image, region), region.dark, scale, region.bounds)
     if closed is None:
         return None
     (wx0, wy0, wx1, wy1), inside, _far = closed
@@ -311,7 +316,8 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     if x1 <= x0 or y1 <= y0:
         return None
     room = np.zeros((region.height, region.width), np.uint8)
-    filled = fill_holes(inside.astype(np.uint8) * 255)
+    sides = sides_of((wx0, wy0, wx1, wy1), region.bounds, (image.shape[1], image.shape[0]))
+    filled = fill_holes(inside.astype(np.uint8) * 255, sides)
     room[y0 - region.y0:y1 - region.y0, x0 - region.x0:x1 - region.x0] = filled[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
     tx0, ty0, tx1, ty1 = region.text_box
     held = room[max(0, ty0 - region.y0):max(0, ty1 - region.y0), max(0, tx0 - region.x0):max(0, tx1 - region.x0)]
@@ -321,18 +327,20 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     return room if cv2.countNonZero(room) else None
 
 
-def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, scale: float, reach: float
+def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, scale: float, reach: float,
+               bounds: tuple[int, int, int, int] | None = None
                ) -> tuple[tuple[tuple[int, int, int, int], np.ndarray, np.ndarray] | None, bool]:
-    """`closed_interior` in the box grown by *reach* times its size, and whether the paper the box lies on ran out of
-    that window where it holds less than the whole page (it may close in a wider one)."""
-    x0, y0, x1, y1 = box
+    """`closed_interior` in the box grown by *reach* times its size (within *bounds*), and whether the paper the box
+    lies on ran out of that window where it holds less than the whole page (it may close in a wider one)."""
+    h, w = image.shape[:2]
+    ax0, ay0, ax1, ay1 = bounds if bounds is not None else (0, 0, w, h)
+    x0, y0, x1, y1 = max(box[0], ax0), max(box[1], ay0), min(box[2], ax1), min(box[3], ay1)
     bw, bh = x1 - x0, y1 - y0
     if bw < 4 or bh < 4:
         return None, False
-    h, w = image.shape[:2]
     least = pagescale.px(RING_OUT, scale)
     gx, gy = max(least, int(reach * bw)), max(least, int(reach * bh))
-    wx0, wy0, wx1, wy1 = max(0, x0 - gx), max(0, y0 - gy), min(w, x1 + gx), min(h, y1 + gy)
+    wx0, wy0, wx1, wy1 = max(ax0, x0 - gx), max(ay0, y0 - gy), min(ax1, x1 + gx), min(ay1, y1 + gy)
     gray = cv2.cvtColor(np.ascontiguousarray(image[wy0:wy1, wx0:wx1, :3]), cv2.COLOR_RGB2GRAY)
     light = (gray <= 255 - OUTLINE_LEVEL) if dark else (gray >= OUTLINE_LEVEL)
     n, labels = cv2.connectedComponents(light.astype(np.uint8), connectivity=4)
@@ -340,13 +348,15 @@ def _closed_at(image: np.ndarray, box: tuple[int, int, int, int], dark: bool, sc
     seeds = np.unique(inner[inner > 0])
     if not seeds.size:
         return None, False
-    edge = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    shut = sides_of((wx0, wy0, wx1, wy1), bounds, (w, h))  # (the window's sides on the area's edge: closed)
+    lines = [line for line, off in zip((labels[0], labels[-1], labels[:, 0], labels[:, -1]), shut) if not off]
+    edge = np.unique(np.concatenate(lines)) if lines else np.zeros(0, labels.dtype)
     closed = np.zeros(n, bool)
     closed[seeds] = True
     closed[edge] = False
     held = closed[inner]
     if int(held.sum()) < CLOSED_SHARE * int((inner > 0).sum()):
-        whole = (wx0, wy0, wx1, wy1) == (0, 0, w, h)
+        whole = (wx0, wy0, wx1, wy1) == (ax0, ay0, ax1, ay1)
         return None, not whole and bool(np.isin(seeds, edge).any())
     inside = closed[labels]
     ink = (~light).astype(np.uint8)

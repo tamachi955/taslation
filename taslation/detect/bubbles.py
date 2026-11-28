@@ -55,21 +55,70 @@ class DetectorConfig:
     lobe_link: float = 0.6  # pieces within this many glyphs of each other are one block of lettering
 
 
-def fill_holes(mask: np.ndarray) -> np.ndarray:
-    """Return *mask* (uint8 0/255) with all enclosed holes filled."""
+Sides = tuple[bool, bool, bool, bool]  # top, bottom, left, right
+OPEN: Sides = (False, False, False, False)
+GAP_SHARE = 1 / 3  # a closed side closes a gap in the shape along it of at most this share of the shape's reach there
+
+
+def fill_holes(mask: np.ndarray, closed: Sides = OPEN) -> np.ndarray:
+    """Return *mask* (uint8 0/255) with all enclosed holes filled.
+
+    *closed*: the sides of *mask* (top, bottom, left, right) that lie on a boundary of what is looked at - the capture
+    area's edge where the frame goes on beyond it (`sides_of`). The area's edge closes a bubble cut by it as the
+    bubble's own outline would: where the shape meets such a side, the gaps between its pixels along it (the lettering
+    cut with the bubble) are closed, and what they let out becomes a hole - not a gap wider than `GAP_SHARE` of the
+    shape's reach along that side (the stretch between two shapes that both meet it)."""
     h, w = mask.shape
     padded = np.zeros((h + 2, w + 2), np.uint8)
     padded[1:-1, 1:-1] = mask
-    inv = cv2.bitwise_not(padded)  # outside + holes = 255, shape = 0
-    ff_mask = np.zeros((h + 4, w + 4), np.uint8)
-    cv2.floodFill(inv, ff_mask, (0, 0), 0)  # outside -> 0, holes stay 255
-    return cv2.bitwise_or(mask, inv[1:-1, 1:-1])
+    if not any(closed):
+        inv = cv2.bitwise_not(padded)  # outside + holes = 255, shape = 0
+        ff_mask = np.zeros((h + 4, w + 4), np.uint8)
+        cv2.floodFill(inv, ff_mask, (0, 0), 0)  # outside -> 0, holes stay 255
+        return cv2.bitwise_or(mask, inv[1:-1, 1:-1])
+    edges = ((padded[1, 1:-1], padded[0, 1:-1]), (padded[-2, 1:-1], padded[-1, 1:-1]),
+             (padded[1:-1, 1], padded[1:-1, 0]), (padded[1:-1, -2], padded[1:-1, -1]))
+    for (line, pad), on in zip(edges, closed):
+        if on:
+            pad[_closing(line)] = 255
+    inv = (padded == 0).astype(np.uint8)  # outside + holes = 1, shape and the closed sides = 0
+    _n, labels = cv2.connectedComponents(inv, connectivity=4)
+    border = np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    outside = np.isin(labels, np.unique(border[border > 0]))
+    holes = (inv > 0) & ~outside
+    return cv2.bitwise_or(mask, holes[1:-1, 1:-1].astype(np.uint8) * 255)
+
+
+def _closing(line: np.ndarray) -> np.ndarray:
+    """Where a closed side closes the shape whose pixels along it are *line*'s (`fill_holes`): from its first pixel to
+    its last, but for gaps wider than `GAP_SHARE` of that reach."""
+    out = np.zeros(line.shape, bool)
+    on = np.flatnonzero(line)
+    if on.size < 2:
+        return out
+    out[on] = True
+    reach = int(on[-1] - on[0] + 1)
+    for a, b in zip(on[:-1], on[1:]):
+        if 1 < b - a <= GAP_SHARE * reach + 1:
+            out[a + 1:b] = True
+    return out
+
+
+def sides_of(box: tuple[int, int, int, int], bounds: tuple[int, int, int, int] | None,
+             frame: tuple[int, int]) -> Sides:
+    """The sides of the crop *box* (x0, y0, x1, y1 in the frame) that the capture area *bounds* closes (`fill_holes`):
+    those lying on an edge of it that is not the frame's (*frame*: width, height), the frame going on beyond it. None
+    for *bounds*: no side."""
+    if bounds is None:
+        return OPEN
+    w, h = frame
+    return box[1] == bounds[1] > 0, box[3] == bounds[3] < h, box[0] == bounds[0] > 0, box[2] == bounds[2] < w
 
 
 def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: np.ndarray, inner: np.ndarray,
                       glyph: float, dark_threshold: int, margin: int = 8, max_glyph: float = 2.0,
                       white_threshold: int = 225, debug: dict | None = None,
-                      limit: tuple[int, int, int, int] | None = None, scale: float = 1.0,
+                      limit: tuple[int, int, int, int] | None = None, scale: float = 1.0, closed: Sides = OPEN,
                       ) -> tuple[tuple[int, int, int, int], np.ndarray, tuple[int, int, int, int], int] | None:
     """Find the lettering a bubble's white area does not enclose: glyphs that touch the outline.
 
@@ -107,7 +156,9 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
     candidate and taken, and the reason for returning None. The measures in
     pixels (the edge band, the distances, a piece's least ink and thickness,
     the closing) are taken at the page's *scale* (`render.pagescale`); the
-    one-pixel rings are not.
+    one-pixel rings are not. *closed*: the sides of *gray* that are the capture
+    area's edge (`fill_holes`): where the window lies on one, nothing beyond it
+    is outside, and a glyph cut by it is no piece of the outline.
     """
     from ..render import pagescale  # (here: the render package imports this module)
 
@@ -127,12 +178,18 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
     edge_band = (near & ~filled_w & (g < white_threshold)) | ring  # the bubble's edge: what kept its white area apart
     barrier = (dark > 0) | edge_band
     _n_nd, lab_nd = cv2.connectedComponents((~barrier).astype(np.uint8), connectivity=4)
-    edge = np.concatenate([lab_nd[0, :], lab_nd[-1, :], lab_nd[:, 0], lab_nd[:, -1]])
+    shut = (closed[0] and wy0 == 0, closed[1] and wy1 == H, closed[2] and wx0 == 0, closed[3] and wx1 == W)
+
+    def borders(lab: np.ndarray) -> np.ndarray:  # the window's sides that are not the capture area's edge
+        lines = [lab[0, :], lab[-1, :], lab[:, 0], lab[:, -1]]
+        return np.concatenate([line for line, off in zip(lines, shut) if not off] or [lab[:0, 0]])
+
+    edge = borders(lab_nd)
     edge = edge[edge > 0]
     outside = np.isin(lab_nd, np.unique(edge)) if edge.size else np.zeros(dark.shape, bool)
     _n_d, lab_d, st_d, _ = cv2.connectedComponentsWithStats(dark, connectivity=8, ltype=cv2.CV_32S)
     touching = cv2.dilate(outside.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
-    on_border = np.concatenate([lab_d[0, :], lab_d[-1, :], lab_d[:, 0], lab_d[:, -1]])
+    on_border = borders(lab_d)
     rim_ids = np.union1d(np.unique(lab_d[touching & (dark > 0)]), np.unique(on_border))
     rim = np.isin(lab_d, rim_ids[rim_ids > 0])
     dbg.update(origin=(wx0, wy0), labels=lab_d, rim=set(int(v) for v in rim_ids if v > 0), result="")
@@ -146,7 +203,7 @@ def recover_edge_text(gray: np.ndarray, box: tuple[int, int, int, int], filled: 
         return None  # the outline is open (or not dark): no inside to speak of
     inside = lab_e == ids[np.argmax(counts)]
     dbg["inside"] = set(int(v) for v in np.unique(lab_d[inside & (dark > 0)]) if v > 0)
-    if inside[0, :].any() or inside[-1, :].any() or inside[:, 0].any() or inside[:, -1].any():
+    if borders(inside).any():
         dbg["result"] = "inside reaches the border"
         return None  # the inside reaches the window's border: nothing encloses it
     inner_w = np.zeros(dark.shape, bool)
@@ -219,13 +276,17 @@ class BubbleDetector:
     def __init__(self, config: DetectorConfig | None = None):
         self.cfg = config or DetectorConfig()
 
-    def detect(self, rgb: np.ndarray, inverted: bool = False, scale: float = 1.0) -> list[TextRegion]:
+    def detect(self, rgb: np.ndarray, inverted: bool = False, scale: float = 1.0,
+               closed: Sides = OPEN) -> list[TextRegion]:
         """Find bubbles in an RGB uint8 image. Returned regions are not yet ordered.
 
         With ``inverted=True`` the image is negated first, which finds dark
         bubbles with light lettering (regions come back with kind "dark-bubble").
         *scale* is the page's (`render.pagescale.page_scale`): the measures in
         pixels set on the sample set's pages are taken at it (1: as set).
+        *closed*: the sides of the image (top, bottom, left, right) that are the
+        capture area's edge, the frame going on beyond (`fill_holes`): a bubble
+        cut by one is closed by it, its lettering up to it.
         """
         from ..render import pagescale  # (here: the render package imports this module)
 
@@ -262,7 +323,8 @@ class BubbleDetector:
                 continue
 
             comp = (labels[y : y + bh, x : x + bw] == i).astype(np.uint8) * 255
-            filled = fill_holes(comp)
+            sides = (closed[0] and y == 0, closed[1] and y + bh == h, closed[2] and x == 0, closed[3] and x + bw == w)
+            filled = fill_holes(comp, sides)
             filled_area = int(cv2.countNonZero(filled))
             if filled_area / float(bw * bh) < cfg.min_fill:
                 continue
@@ -281,16 +343,16 @@ class BubbleDetector:
                      if cfg.split_lobes and not inverted else None)
             whole = None
             if parts:
-                found = [self._region(gray, (x + px, y + py, pw_, ph_), p_filled, p_inner, p_dark, kind, scale)
-                         for px, py, pw_, ph_, p_filled, p_inner, p_dark in parts]
+                found = [self._region(gray, (x + px, y + py, pw_, ph_), p_filled, p_inner, p_dark, kind, scale,
+                                      closed) for px, py, pw_, ph_, p_filled, p_inner, p_dark in parts]
                 if any(r is None for r in found):
                     # a bubble's lettering would not pass on its own (a line of dots, two glyphs): read the area
                     # whole, as before, rather than lose that line; when the whole does not pass either, the parts
                     # that do are kept
-                    whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale)
+                    whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale, closed)
                 regions.extend([whole] if whole is not None else [r for r in found if r is not None])
             else:
-                whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale)
+                whole = self._region(gray, (x, y, bw, bh), filled, inner, dark, kind, scale, closed)
                 if whole is not None:
                     regions.append(whole)
         if inverted and cfg.recover_edge_text and cfg.take_columns_beyond:
@@ -298,10 +360,10 @@ class BubbleDetector:
         return regions
 
     def _region(self, gray: np.ndarray, box: tuple[int, int, int, int], filled: np.ndarray, inner: np.ndarray,
-                dark: np.ndarray, kind: str, scale: float = 1.0) -> TextRegion | None:
+                dark: np.ndarray, kind: str, scale: float = 1.0, closed: Sides = OPEN) -> TextRegion | None:
         """The text region of one white area (*box* x, y, w, h in *gray*; its filled shape, erase mask and dark
         pixels inside, in that box), or None when what is inside it is a drawing rather than lettering. Measures in
-        px at the page's *scale*."""
+        px at the page's *scale*; *closed*: the sides of *gray* that are the capture area's edge (`detect`)."""
         from ..render import pagescale  # (here: the render package imports this module)
 
         cfg = self.cfg
@@ -349,7 +411,8 @@ class BubbleDetector:
         if cfg.recover_edge_text:
             found = recover_edge_text(gray, (x, y, bw, bh), filled, inner, glyph, cfg.dark_threshold,
                                       pagescale.px(cfg.edge_margin, scale), cfg.edge_max_glyph, cfg.white_threshold,
-                                      limit=focus_window(text_box, (x, y, x + bw, y + bh)), scale=scale)
+                                      limit=focus_window(text_box, (x, y, x + bw, y + bh)), scale=scale,
+                                      closed=closed)
             if found is not None:
                 (x, y, bw, bh), inner, rb, extra = found
                 core_box = text_box

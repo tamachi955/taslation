@@ -300,24 +300,24 @@ def test_the_menu_has_the_windows_entries_that_still_mean_something_and_each_is_
     monkeypatch.setattr(gpu_release, "release_now", lambda a: opened.append(("release", a._see_asked)))
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
     sm.build(app, menu, language, help_menu)
-    assert entries(menu) == ["Viewer...", "Series and Volume...", "-", "Saved translations...",
+    assert entries(menu) == ["Viewer...", "Set area...", "Series and Volume...", "-", "Saved translations...",
                              "Names rendered in more than one way...", gpu_release.RELEASE_ENTRY, "-", "Copy a report",
-                             "-", "Language", "Help"]
+                             "-", "Language", "Help"]  # (Set area...: the left pane's row before)
     assert entries(help_menu) == ["How to use...", "Legal notice...", "-", "Check for updates...", "About TASlation"]
     assert len(entries(language)) == len(sm.UI_LANGUAGES)
-    for i in (0, 1, 3, 4, 5):
+    for i in (0, 1, 2, 4, 5, 6):
         menu.invoke(i)
     for i in (0, 1, 3, 4):
         help_menu.invoke(i)
     language.invoke(1)
     assert [n for n, _t in opened] == ["viewer", "book", "release"]
-    assert [n for n, _t in app.done] == ["open_caches", "review_names", "open_help", "open_notice", "open_updates",
-                                         "open_about", "_on_ui_language"]
+    assert [n for n, _t in app.done] == ["set_area", "open_caches", "review_names", "open_help", "open_notice",
+                                         "open_updates", "open_about", "_on_ui_language"]
     assert all(t is not None for _n, t in opened + app.done)  # (each the reader's asking: its dialog takes the keys)
     assert app.ui_lang_var.get() == list(sm.UI_LANGUAGES)[1]
     # what only the window's own page and canvas had is not there
     for gone in ("Show original", "Always on top", "Over the full-screen viewer", "Reading-order numbers", "Keys...",
-                 "Page keys...", "Set area...", "Settings...", "Quit", "Full screen (F11)"):
+                 "Page keys...", "Settings...", "Quit", "Full screen (F11)"):
         assert gone not in entries(menu) + entries(help_menu)
     # built again, the same entries (each opening fills the menu anew)
     sm.build(app, menu, language, help_menu)
@@ -337,15 +337,16 @@ def test_the_buttons_menu_adds_the_left_panes_controls_settings_and_quit_and_qui
     app = menu_app(hidden_root)
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
     sm.build(app, menu, language, help_menu, full=True)
-    assert entries(menu)[:7] == ["Translate", "Auto", "Translate into", "Lettering", "Add area", "Set area...", "-"]
-    assert entries(menu)[-4:] == ["Help", "-", "Settings...", "Quit"]
+    assert entries(menu)[:8] == ["Translate", "Auto", "Translate into", "Lettering", "Add area", "-", "Viewer...",
+                                 "Set area..."]  # (once, where the pane's Menu has it)
+    assert entries(menu).count("Set area...") == 1 and entries(menu)[-4:] == ["Help", "-", "Settings...", "Quit"]
     menu.invoke(len(entries(menu)) - 1)
     assert app.done == [("_on_close", None)]
     menu.invoke(len(entries(menu)) - 2)
     assert app.done[-1][0] == "open_settings" and app.done[-1][1] is not None
     menu.invoke(0)
-    menu.invoke(5)
-    assert [n for n, _t in app.done[-2:]] == ["translate_now", "set_area"]
+    menu.invoke(7)
+    assert [n for n, _t in app.done[-2:]] == ["translate_now", "set_area"] and app.done[-1][1] is not None
     menu.invoke(1)
     assert app.auto_var.get() is False
     menu.invoke(3)

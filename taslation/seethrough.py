@@ -1,16 +1,19 @@
 """See-through mode's pure parts (the mode is the program): TASlation's lettering laid over the viewer's own window
-by a click-through window of its own (`capture.seethrough`), each patch shown only while the viewer's pixels under it
-are those it was made from.
+by a click-through window of its own (`capture.seethrough`), a page's patches shown whole while the viewer's frame is
+the page they were made for.
 
 * A patch is a piece of the translated page: where the lettered page differs from the frame it was read from (the
-  erased ground and the lettering), grouped into one piece per bubble (`make_patches`). It keeps the frame's pixels
-  round it (its box and MARGIN px about it, every STEP-th pixel - the margin of the page's own pixels alone:
-  `compare_box`), and it may show only while the viewer's latest frame has those pixels there (`patch_matches`): a
-  turn, a jump's black, a half-drawn spread, a washed-out preview, bars laid over it or a sharper picture of the page
-  change them, and the patch goes at that frame; it comes back as soon as they are as they were. Nothing else decides
-  it: not the page job, not the follow. Where a patch's compared pixels differ, part by part, is told for the report
-  (`where_differs`).
-* What the overlay shows (`visible`): the patches of the newest set whose pixels match, those that match.
+  erased ground and the lettering), grouped into one piece per bubble (`make_patches`). The patches of a page are
+  shown or not by the page, never one by one by their own pixels: the set carries the page's sign (`PageSign`, made
+  from the frame read: the steady part of its page area as a grey thumbnail, and its capture area's pixels every
+  ROW_STEP-th), and while the viewer's frame has that steady part as it was (within PAGE_TOL: a soft or a sharp
+  picture of the same page alike) every patch of the set shows whole, to the capture area's edge and the page's -
+  but those that a bar of the viewer's lies over (`bar_rows`: rows from the area's top or bottom that are other than
+  when read, across it or across the ground beside the page). A turn, a jump's black, a half-drawn spread, a page
+  moved or zoomed change the steady part, and the set goes at that frame; it comes back as soon as the page is
+  there again. Before, each patch was compared by its own pixels and a margin about it, and a margin that met the
+  area's edge, a browser's band or a page's border row kept a bubble at the page's top hidden.
+* What the overlay shows (`visible`): the newest set whose page is on show, its patches less those under a bar.
 * The window's picture (`compose`): the frame's size, transparent but for the patches shown (premultiplied BGRA, as
   ``UpdateLayeredWindow`` wants it).
 * Editing (`Marks`, `edit_grip`, `edit_drag`, `edit_compose`): the regions of the page on show, numbered, take the mouse
@@ -35,41 +38,64 @@ except ImportError:  # pragma: no cover - cv2 is a dependency of the package
 Box = tuple[int, int, int, int]  # left, top, right, bottom (frame pixels)
 
 # ------------------------------------------------------------------ the patches
-MARGIN = 6  # px of the frame round a patch that must be as they were, too (a bar's edge just beside it) - of the page's
-# own pixels: the margin stops at the page box and the capture area, and short of rows painted over (`compare_box`)
-STEP = 2  # every so many pixels of a patch's place (and its margin) is compared, across and down
-PIXEL_TOL = 24  # a pixel compared is another when one of its channels differs by more than this (of 255)
-CHANGED_SHARE = 0.01  # a patch's pixels are another's when more than this share of those compared is another
 GROUP_PX = 9  # changed pixels this close together are one patch (the letters of one bubble, its erased ground)
 MIN_PATCH_PX = 4  # a group of fewer changed pixels is no patch (a stray pixel of the lettering's edge)
-BASE_DPI = 96  # the pixel sizes here (MARGIN, GROUP_PX, LOOK_STEP) are at this DPI: `scaled` takes them to a viewer's
+BASE_DPI = 96  # the pixel sizes here (MARGIN, GROUP_PX, BAR_REACH, LOOK_STEP) are at this DPI: `scaled` takes them to
+# a viewer's
 SETS_KEPT = 3  # the overlay keeps the patches of so many pages (a page turned back to shows at once)
+
+# ------------------------------------------------------------------ the page on show
+PAGE_TOL = 2.0  # the steady part's grey thumbnails (`page_sign`) differ by at most this (mean, of 255) while the frame
+# is the page a set was made for: on the sample set's 214 pages in a made-up browser frame the same page drawn soft
+# and sharp differed by 0.4 to 1.4, the page 2 px aside by 3.0 at the least, 4 px by 5.3, another page by 32.7
+ROW_STEP = 4  # (`bar_rows`) the capture area's pixels kept with a set and compared for bars, every so many px both ways
+PIXEL_TOL = 24  # a pixel compared is another when one of its channels differs by more than this (of 255)
+BAR_SHARE = 0.5  # a row of the capture area is under a bar when more than this share of it is other than when read,
+# or of its ground beside the page (a bar lies across the viewer's window, over the page and its ground)
+BAR_REACH = 12  # px at 96 DPI: rows under a bar count only as a run from within this of the area's top or bottom
+# (the viewer's bars come there; another page changes all of it, and that the steady part tells)
+MARGIN = 6  # px at 96 DPI: a patch this near a bar's rows goes with them (its edge just under the bar's)
+STRIP_PX = 8  # a band along the capture area's top or bottom edge no higher than this (px at 96 DPI) is a strip of
+# what lies beyond the area - a browser's own bar under an area set by hand 3 px over its foot -, not a viewer's bar
 
 
 @dataclass(frozen=True)
 class Patch:
     """A piece of the translated page: *box* in the frame's pixels, *bgra* its picture there (premultiplied BGRA:
-    opaque where the page was lettered or erased, transparent elsewhere), *near* the box with MARGIN about it (within
-    the frame) and *source* the frame's pixels there, every STEP-th one (BGR), which the viewer's must be for it to
-    show."""
+    opaque where the page was lettered or erased, transparent elsewhere)."""
 
     box: Box
     bgra: np.ndarray
-    near: Box
-    source: np.ndarray
+
+
+@dataclass(frozen=True)
+class PageSign:
+    """What tells that the viewer's frame is the page a set was made for (`page_sign`): *area* the capture area of the
+    frame read, *steady* the part of it a turn changes and bars never lie over (the page box's columns and the area's
+    rows without their top STEADY_TOP and bottom STEADY_BOTTOM, rows painted over in the frame read left out) and
+    *thumb* its grey thumbnail (THUMB x THUMB, float32), *rows* the area's pixels every ROW_STEP-th (BGR: as the
+    viewer's frames come) and *page* the page box's columns (left, right; None: none found), whose ground beside them
+    a bar lies across."""
+
+    area: Box
+    steady: Box
+    thumb: np.ndarray
+    rows: np.ndarray
+    page: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
 class PatchSet:
     """The patches of one page as lettered so far: *key* names the frame it was read from (a set presented again with
     the same key replaces the one before: drafts, then the final page), *size* (width, height) is that frame's,
-    *serial* says which set is newer."""
+    *serial* says which set is newer, *sign* tells its page (`PageSign`; None: never shown)."""
 
     key: int
     size: tuple[int, int]
     patches: tuple[Patch, ...]
     serial: int = 0
     final: bool = False
+    sign: PageSign | None = None
 
 
 _ONES = np.ones((1, 3), np.float32)  # (`changed_mask`: the three channels' differences summed, saturated)
@@ -121,55 +147,18 @@ def grow(box: Box, by: int, size: tuple[int, int]) -> Box:
     return max(0, box[0] - by), max(0, box[1] - by), min(width, box[2] + by), min(height, box[3] + by)
 
 
-def sample(pixels: np.ndarray, box: Box, step: int = STEP) -> np.ndarray:
-    """Every *step*-th pixel of *pixels* (H, W, >=3) in *box*, the first three channels."""
-    left, top, right, bottom = box
-    return pixels[top:bottom:step, left:right:step, :3]
-
-
 def scaled(px: int, dpi: int | float | None) -> int:
     """*px* at BASE_DPI as many pixels at *dpi* (a viewer's window at 125 % is at 120, at 150 % at 144; None or 0: as
     BASE_DPI), rounded half up, at least 1: what the viewer draws is that much larger in its frames."""
     return max(1, int(px * float(dpi or BASE_DPI) / BASE_DPI + 0.5))
 
 
-def compare_box(box: Box, margin: int, size: tuple[int, int], within: Box | None = None,
-                off_rows: tuple[tuple[int, int], ...] | list[tuple[int, int]] = ()) -> Box:
-    """What a patch (or a box with no patch: `probe`) of *box* is compared by (`Patch.near`): *box* grown by *margin*
-    px, within the frame of *size* (width, height) and, given, within *within* - the page's own pixels, the capture
-    area and the page box at rest a little inside their edges (`ui.seethrough.compare_within`) -, and short of the
-    rows *off_rows* ((start, end) pairs: those painted over in the frame read, its bars') that lie wholly above or
-    below *box*. Never smaller than *box* itself (within the frame). The margin is the page's alone: the ground beside
-    a page, the browser's own band over it, a page's border row drawn a shade apart and the painted rows (once the bars
-    have gone, the page is there) change while the page under the patch does not - a patch whose margin took them in
-    stayed hidden (a bubble touching the page's top)."""
-    width, height = size
-    left, top, right, bottom = grow(box, margin, size)
-    if within is not None:
-        left = min(max(left, int(within[0])), max(0, box[0]))
-        top = min(max(top, int(within[1])), max(0, box[1]))
-        right = max(min(right, int(within[2])), min(width, box[2]))
-        bottom = max(min(bottom, int(within[3])), min(height, box[3]))
-    for start, end in off_rows:
-        start, end = int(start), int(end)
-        if end <= box[1] and end > top:
-            top = min(end, max(0, box[1]))
-        elif start >= box[3] and start < bottom:
-            bottom = max(start, min(height, box[3]))
-    return left, top, right, bottom
-
-
-def make_patches(original: np.ndarray, lettered: np.ndarray, margin: int = MARGIN,
-                 step: int = STEP, gap: int = GROUP_PX, within: Box | None = None,
-                 off_rows: tuple[tuple[int, int], ...] | list[tuple[int, int]] = ()) -> tuple[Patch, ...]:
+def make_patches(original: np.ndarray, lettered: np.ndarray, gap: int = GROUP_PX) -> tuple[Patch, ...]:
     """The patches of the page *lettered* read from the frame *original* (both RGB, (H, W, 3) uint8): one for every
     group of pixels the lettering changed, pixels up to *gap* apart being of one (`groups`), its picture opaque where
-    it changed, *margin* px round it compared too - of the page's own pixels (*within*, *off_rows*: `compare_box`).
-    The frame's pixels are kept as BGR, as the viewer's frames come (Windows.Graphics.Capture's BGRA)."""
+    it changed (BGRA, as the layered window takes it)."""
     mask = changed_mask(original, lettered)
-    height, width = mask.shape
     out = []
-    bgr_frame = original[:, :, ::-1]
     for box in groups(mask, gap):
         left, top, right, bottom = box
         piece = lettered[top:bottom, left:right]
@@ -178,69 +167,146 @@ def make_patches(original: np.ndarray, lettered: np.ndarray, margin: int = MARGI
         bgra[..., :3] = piece[:, :, ::-1]
         bgra[..., 3] = alpha * 255
         bgra[~alpha] = 0  # premultiplied: no colour where it is transparent
-        near = compare_box(box, margin, (width, height), within, off_rows)
-        out.append(Patch(box, bgra, near, np.ascontiguousarray(sample(bgr_frame, near, step))))
+        out.append(Patch(box, bgra))
     return tuple(out)
 
 
-def changed_share(patch: Patch, frame: np.ndarray, step: int = STEP, tol: int = PIXEL_TOL) -> float:
-    """The share of the pixels compared round *patch* that are other in the viewer's frame *frame* (BGR or BGRA,
-    (H, W, >=3), the client area as captured) than in the frame the patch was made from; 1.0 when the frame does not
-    hold its place."""
-    now = sample(frame, patch.near, step)
-    if now.shape != patch.source.shape:
-        return 1.0
-    diff = np.abs(now.astype(np.int16) - patch.source.astype(np.int16)).max(axis=2)
-    return float((diff > tol).mean()) if diff.size else 0.0
+def _clip(box: Box, size: tuple[int, int]) -> Box:
+    width, height = size
+    left, top = max(0, min(width, int(box[0]))), max(0, min(height, int(box[1])))
+    return left, top, max(left, min(width, int(box[2]))), max(top, min(height, int(box[3])))
 
 
-SIDES = ("box", "top", "bottom", "left", "right")  # (`where_differs`) the parts of what a patch is compared by
+def grey_thumb(pixels: np.ndarray, box: Box, bgr: bool = False, size: int | None = None) -> np.ndarray | None:
+    """The grey thumbnail (*size* x *size*, float32) of *box* of the picture *pixels* (RGB, or with *bgr* BGR or BGRA:
+    the viewer's frames); None for an empty box."""
+    size = size or THUMB
+    left, top, right, bottom = _clip(box, (pixels.shape[1], pixels.shape[0]))
+    part = pixels[top:bottom, left:right, :3]
+    if part.size == 0:
+        return None
+    if cv2 is None:  # pragma: no cover
+        grey = part.mean(axis=2)
+        ys = np.linspace(0, grey.shape[0] - 1, size).astype(int)
+        xs = np.linspace(0, grey.shape[1] - 1, size).astype(int)
+        return grey[np.ix_(ys, xs)].astype(np.float32)
+    grey = cv2.cvtColor(np.ascontiguousarray(part), cv2.COLOR_BGR2GRAY if bgr else cv2.COLOR_RGB2GRAY)
+    return cv2.resize(grey, (size, size), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
-def where_differs(patch: Patch, frame: np.ndarray, step: int = STEP, tol: int = PIXEL_TOL
-                  ) -> dict[str, tuple[float, int]]:
-    """Where the pixels compared round *patch* (`changed_share`) are other in *frame*: for each part of its `near`
-    that has pixels compared - "box" (the patch's own place), "top" and "bottom" (the margin's rows above and below
-    it), "left" and "right" (its columns beside it) - the share of them that are other and their count. A frame that
-    does not hold the place: {"size": (1.0, 0)}. Numbers only, for the report (`SeeThrough.why_not_shown`)."""
-    now = sample(frame, patch.near, step)
-    if now.shape != patch.source.shape:
-        return {"size": (1.0, 0)}
-    other = np.abs(now.astype(np.int16) - patch.source.astype(np.int16)).max(axis=2) > tol
-    left, top = patch.near[0], patch.near[1]
-    ys = top + np.arange(other.shape[0]) * step
-    xs = left + np.arange(other.shape[1]) * step
-    above, below = ys < patch.box[1], ys >= patch.box[3]
-    rows_in = ~above & ~below
-    before, after = xs < patch.box[0], xs >= patch.box[2]
-    cols_in = ~before & ~after
-    parts = {"box": other[np.ix_(rows_in, cols_in)], "top": other[above], "bottom": other[below],
-             "left": other[np.ix_(rows_in, before)], "right": other[np.ix_(rows_in, after)]}
-    return {name: (round(float(part.mean()), 4), int(part.size)) for name, part in parts.items() if part.size}
+def page_sign(rgb: np.ndarray, area: Box, page: tuple[int, int] | None = None,
+              cut: tuple[tuple[int, int], ...] | list[tuple[int, int]] = ()) -> PageSign:
+    """The sign of the page read from the frame *rgb* (RGB, (H, W, 3)) whose capture area is *area* (frame pixels),
+    its page box's columns *page* (left, right; None: none found) and the rows *cut* painted over in it ((start, end)
+    pairs: bars read with their rows painted, `ui.seethrough.reading_frame`), which the steady part keeps clear of."""
+    height, width = rgb.shape[:2]
+    area = _clip(area, (width, height))
+    if area[2] <= area[0] or area[3] <= area[1]:
+        area = (0, 0, width, height)
+    cols = (area[0], area[2])
+    if page is not None:
+        cols = (max(area[0], int(page[0])), min(area[2], int(page[1])))
+        if cols[1] - cols[0] < 8:
+            cols, page = (area[0], area[2]), None
+    steady = steady_box((width, height), (cols[0], area[1], cols[1], area[3]))
+    top, bottom = steady[1], steady[3]
+    for start, end in cut:
+        if start <= top < end:
+            top = int(end)
+        if start < bottom <= end:
+            bottom = int(start)
+    if bottom - top >= 8:
+        steady = (steady[0], top, steady[2], bottom)
+    thumb = grey_thumb(rgb, steady)
+    if thumb is None:
+        thumb = np.zeros((THUMB, THUMB), np.float32)
+    rows = np.ascontiguousarray(rgb[area[1]:area[3]:ROW_STEP, area[0]:area[2]:ROW_STEP, 2::-1])
+    return PageSign(area, steady, thumb, rows, None if page is None else (int(cols[0]), int(cols[1])))
 
 
-def patch_matches(patch: Patch, frame: np.ndarray, share: float = CHANGED_SHARE) -> bool:
-    """Whether the viewer's frame *frame* has, round *patch*, the pixels it was made from (`changed_share`)."""
-    return changed_share(patch, frame) <= share
-
-
-def visible(sets: list[PatchSet], frame: np.ndarray, share: float = CHANGED_SHARE
-            ) -> tuple[PatchSet | None, tuple[int, ...], list[float]]:
-    """What the overlay shows over the viewer's frame *frame* (its client area, (H, W, >=3)): the newest set of
-    *sets* of the frame's size of which a patch matches (`patch_matches`), and the indices of its patches that do;
-    (None, ()) when none does. Also the changed shares of the chosen set's patches - or, with none chosen, of the
-    newest set's of that size - for the overlay's log."""
+def page_distance(sign: PageSign, frame: np.ndarray) -> float:
+    """How far the viewer's frame *frame* (its client area, BGR or BGRA (H, W, >=3)) is from the page of *sign*: the
+    mean difference of the steady part's grey thumbnails (255.0 for a frame that does not hold that part)."""
     height, width = frame.shape[:2]
-    newest: list[float] = []
-    for s in sorted(sets, key=lambda s: -s.serial):
-        if s.size != (width, height) or not s.patches:
+    if sign.steady[2] > width or sign.steady[3] > height:
+        return 255.0
+    now = grey_thumb(frame, sign.steady, bgr=True)
+    if now is None or now.shape != sign.thumb.shape:
+        return 255.0
+    return float(np.abs(now - sign.thumb).mean())
+
+
+def bar_rows(sign: PageSign, frame: np.ndarray, reach: int = BAR_REACH, least: int = STRIP_PX
+             ) -> tuple[tuple[int, int], ...]:
+    """The rows (top, bottom; frame pixels) of the capture area that a bar of the viewer's lies over in *frame* (BGR or
+    BGRA): runs of rows other than in the frame read (`PageSign.rows`, PIXEL_TOL) across more than BAR_SHARE of the
+    area or of the ground beside the page, higher than *least* px (a line along the area's edge drawn another shade
+    is no bar), that begin within *reach* px of the area's top or end within it of its bottom (one row between two
+    such rows joins them). The whole area for a frame that does not hold it."""
+    left, top, right, bottom = sign.area
+    now = frame[top:bottom:ROW_STEP, left:right:ROW_STEP, :3]
+    if now.shape != sign.rows.shape:
+        return ((top, bottom),)
+    if not now.size:
+        return ()
+    other = np.abs(now.astype(np.int16) - sign.rows.astype(np.int16)).max(axis=2) > PIXEL_TOL
+    barred = other.mean(axis=1) > BAR_SHARE
+    if sign.page is not None:
+        xs = left + np.arange(other.shape[1]) * ROW_STEP
+        beside = (xs < sign.page[0]) | (xs >= sign.page[1])
+        if int(beside.sum()) >= 4:
+            barred |= other[:, beside].mean(axis=1) > BAR_SHARE
+    if barred.size > 2:
+        barred[1:-1] |= barred[:-2] & barred[2:]
+    out: list[tuple[int, int]] = []
+    k, n = 0, int(barred.size)
+    while k < n:
+        if not barred[k]:
+            k += 1
             continue
-        shares = [changed_share(p, frame) for p in s.patches]
-        shown = tuple(i for i, v in enumerate(shares) if v <= share)
-        if shown:
-            return s, shown, shares
-        newest = newest or shares
-    return None, (), newest
+        j = k
+        while j < n and barred[j]:
+            j += 1
+        start, end = top + k * ROW_STEP, min(bottom, top + j * ROW_STEP)
+        if end - start > least and (start - top <= reach or bottom - end <= reach):
+            out.append((start, end))
+        k = j
+    return tuple(out)
+
+
+def under_rows(box: Box, rows: tuple[tuple[int, int], ...] | list[tuple[int, int]], margin: int = 0) -> bool:
+    """Whether the patch place *box* comes within *margin* px of any of the rows *rows* ((top, bottom) pairs)."""
+    return any(box[1] < end + margin and start - margin < box[3] for start, end in rows)
+
+
+@dataclass(frozen=True)
+class Seen:
+    """What a look made of the sets (`visible`): the distance of the set chosen's page (None: none chosen), the bars'
+    rows over it, and each set of the frame's size looked at, newest first, with its distance ((key, distance))."""
+
+    distance: float | None = None
+    bars: tuple[tuple[int, int], ...] = ()
+    looked: tuple[tuple[int, float], ...] = ()
+
+
+def visible(sets: list[PatchSet], frame: np.ndarray, reach: int = BAR_REACH, margin: int = MARGIN,
+            tol: float = PAGE_TOL, least: int = STRIP_PX) -> tuple[PatchSet | None, tuple[int, ...], Seen]:
+    """What the overlay shows over the viewer's frame *frame* (its client area, BGR or BGRA (H, W, >=3)): the newest
+    set of *sets* of the frame's size whose page is on show (`page_distance` within *tol*), and the indices of its
+    patches less those within *margin* px of a bar's rows (`bar_rows`, *reach*, *least*); (None, ()) when no set's
+    page is there. A set with no patches is chosen too (its regions' marks go by it while editing)."""
+    height, width = frame.shape[:2]
+    looked: list[tuple[int, float]] = []
+    for s in sorted(sets, key=lambda s: -s.serial):
+        if s.size != (width, height) or s.sign is None:
+            continue
+        distance = page_distance(s.sign, frame)
+        looked.append((s.key, round(distance, 2)))
+        if distance <= tol:
+            bars = bar_rows(s.sign, frame, reach, least)
+            shown = tuple(i for i, p in enumerate(s.patches) if not under_rows(p.box, bars, margin))
+            return s, shown, Seen(round(distance, 2), bars, tuple(looked))
+    return None, (), Seen(None, (), tuple(looked))
 
 
 def compose(size: tuple[int, int], patches: list[Patch] | tuple[Patch, ...], out: np.ndarray | None = None
@@ -302,9 +368,10 @@ class SetStore:
     sets: list[PatchSet] = field(default_factory=list)
     serial: int = 0
 
-    def put(self, key: int, size: tuple[int, int], patches: tuple[Patch, ...], final: bool = False) -> PatchSet:
+    def put(self, key: int, size: tuple[int, int], patches: tuple[Patch, ...], final: bool = False,
+            sign: PageSign | None = None) -> PatchSet:
         self.serial += 1
-        new = PatchSet(key, size, patches, self.serial, final)
+        new = PatchSet(key, size, patches, self.serial, final, sign)
         self.sets = [new, *[s for s in self.sets if s.key != key]][:SETS_KEPT]
         return new
 
@@ -345,9 +412,9 @@ class Marks:
     an editor open, a change being stored, the reading order being clicked), whether the next drag draws a region to
     add (*adding*: in Reader mode too; the whole page takes the mouse meanwhile, as it does while editing), the boxes a
     change was made to, outlined until the page has them (*ghosts*), and the newest press the Tk thread had taken
-    when it made these (*seen*). *serial* tells one set of marks from the next. *probes* holds, for each box, the
-    frame's pixels round it (`probe`, or None): a box with no patch takes nothing while the viewer's pixels there are
-    not those (its bars over it, another page)."""
+    when it made these (*seen*). *serial* tells one set of marks from the next. *lettered* says, for each box, whether
+    its region is lettered or erased (`pipeline.erases`): such a box with none of its lettering on show is outlined
+    dashed (`edit_compose`'s *unshown*), never as a box translated over the page's own lettering."""
 
     key: int
     boxes: tuple[Box, ...]
@@ -360,19 +427,12 @@ class Marks:
     ghosts: tuple[Box, ...] = ()
     seen: int = 0
     serial: int = 0
-    probes: tuple[Patch | None, ...] = ()
     colours: tuple[tuple[int, int, int], ...] = ()
+    lettered: tuple[bool, ...] = ()
 
 
 GROUND = Marks(key=0, boxes=())  # (the window's) the whole page taking the mouse while editing on a page with no marks of
 # its own (not translated yet, another page): a drag draws a rectangle, a click does nothing
-
-
-def probe(near: Box, pixels: np.ndarray, step: int = STEP) -> Patch:
-    """What a region's box with no patch of its own is checked by while editing (`Marks.probes`): a patch with no picture
-    that keeps the frame's pixels in *near* (the box with MARGIN about it, within the frame) - *pixels* the frame's
-    there, (h, w, >=3) BGR as the viewer's come -, every *step*-th one, as `make_patches` keeps them."""
-    return Patch(near, np.zeros((0, 0, 4), np.uint8), near, np.ascontiguousarray(pixels[::step, ::step, :3]))
 
 
 def plate_box(plate: tuple[np.ndarray, tuple[int, int]] | None) -> Box | None:
@@ -457,6 +517,28 @@ def _frame(out: np.ndarray, box: Box, bgr: tuple[int, int, int], width: int) -> 
     out[top:bottom, right - w:right] = colour
 
 
+DASH_PX = 6  # (`_dashed`) a dashed outline's dashes and gaps, so long each (px at 96 DPI)
+
+
+def _dashed(out: np.ndarray, box: Box, bgr: tuple[int, int, int], width: int, dash: int) -> None:
+    """A dashed outline *width* px wide just inside *box* (clipped to *out*): dashes of *dash* px in *bgr* with gaps
+    as long, the page showing through them."""
+    height_px, width_px = out.shape[:2]
+    left, top = max(0, int(box[0])), max(0, int(box[1]))
+    right, bottom = min(width_px, int(box[2])), min(height_px, int(box[3]))
+    if right <= left or bottom <= top:
+        return
+    colour = (*bgr, 255)
+    w = max(1, min(width, (right - left + 1) // 2, (bottom - top + 1) // 2))
+    dash = max(1, dash)
+    for x in range(left, right, 2 * dash):
+        out[top:top + w, x:min(right, x + dash)] = colour
+        out[bottom - w:bottom, x:min(right, x + dash)] = colour
+    for y in range(top, bottom, 2 * dash):
+        out[y:min(bottom, y + dash), left:left + w] = colour
+        out[y:min(bottom, y + dash), right - w:right] = colour
+
+
 def _square(out: np.ndarray, centre: tuple[int, int], side: int, bgr: tuple[int, int, int]) -> None:
     """A corner handle: a square of *side* px about *centre*, dark with a light inside (it shows on any page)."""
     height, width = out.shape[:2]
@@ -472,7 +554,7 @@ def _square(out: np.ndarray, centre: tuple[int, int], side: int, bgr: tuple[int,
 
 def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[int, Box] | None,
                  dpi: int | float, left_out: frozenset[int] = frozenset(), drawing: Box | None = None,
-                 holes: tuple[Box, ...] = ()) -> None:
+                 holes: tuple[Box, ...] = (), unshown: frozenset[int] = frozenset()) -> None:
     """the editing marks laid on the overlay's picture *out* (premultiplied BGRA with the patches on it, changed in place):
     EDIT_ALPHA wherever nothing is drawn, over the whole picture (every press, every move and every release on the
     page are the window's: the viewer gets the keys alone); every region's box outlined in its colour
@@ -480,14 +562,19 @@ def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[i
     them now (*moved*, by index) and the ghosts outlined in OUTLINE, the box under the pointer (*hover*) in OUTLINE's
     stronger line, and so the one chosen alone, with its corner handles as well (a click chose it: a drag moves it, a
     drag on a corner sizes it; none while presses only click); the rectangle being drawn (*drawing*). The boxes of
-    *left_out* (covered, or not over their page now) get nothing, and the *holes* (the windows over the viewer, frame
-    pixels) are left at alpha 0: a press there is that window's."""
+    *left_out* (covered, or under a bar of the viewer's) get nothing, those of *unshown* (lettered, none of their
+    lettering on show) a dashed outline in their colour instead of the line, and the *holes* (the windows over the
+    viewer, a bar's rows; frame pixels) are left at alpha 0: a press there is that window's."""
     height, width = out.shape[:2]
     alpha = out[..., 3]
     alpha[alpha == 0] = EDIT_ALPHA
     line = scaled(LINE_PX, dpi)
     for i, colour in enumerate(marks.colours[:len(marks.boxes)]):
-        if i not in left_out:
+        if i in left_out:
+            continue
+        if i in unshown:
+            _dashed(out, (moved or {}).get(i, marks.boxes[i]), colour, line, scaled(DASH_PX, dpi))
+        else:
             _frame(out, (moved or {}).get(i, marks.boxes[i]), colour, line)
     outlined = {i for i in (*marks.chosen, marks.held) if i is not None and i not in left_out}
     for i in sorted(outlined):
@@ -634,6 +721,19 @@ def ground_box(rgb: np.ndarray) -> Box | None:
     return left, top, right, bottom
 
 
+def _ground_columns(width: int, page: Box | None) -> np.ndarray:
+    """The columns beside the page box *page* (the frame's edges' when None) that `bands` looks along."""
+    if page is None:
+        return np.r_[0:EDGE_COLUMNS, width - EDGE_COLUMNS:width]
+    left, _t, right, _b = page
+    return np.r_[0:max(1, left), min(width - 1, right):width]
+
+
+def _across(rows: np.ndarray, colour: np.ndarray) -> np.ndarray:
+    """Which of *rows* (N, columns, 3: the ground's columns of each) something lies across, as a band's (`bands`)."""
+    return (~np.all(np.abs(rows.astype(np.int16) - colour) <= GROUND_TOL, axis=2)).mean(axis=1) > BAND_SHARE
+
+
 def bands(rgb: np.ndarray, page: Box | None = None) -> list[tuple[int, int]]:
     """The bands of rows (top, bottom) where something lies across the ground beside the page *page* (the frame's
     ground box when None): a viewer's bars over the page and its ground. Only bands that touch the frame's top or
@@ -644,13 +744,7 @@ def bands(rgb: np.ndarray, page: Box | None = None) -> list[tuple[int, int]]:
     height, width = rgb.shape[:2]
     if page is None:
         page = ground_box(rgb)
-    if page is None:
-        cols = np.r_[0:EDGE_COLUMNS, width - EDGE_COLUMNS:width]
-    else:
-        left, _t, right, _b = page
-        cols = np.r_[0:max(1, left), min(width - 1, right):width]
-    strip = rgb[:, cols].astype(np.int16)
-    other = (~np.all(np.abs(strip - colour) <= GROUND_TOL, axis=2)).mean(axis=1) > BAND_SHARE
+    other = _across(rgb[:, _ground_columns(width, page)], colour)
     out: list[tuple[int, int]] = []
     if other[0]:
         end = int(np.argmin(other)) if not other.all() else height
@@ -720,36 +814,78 @@ LOOK_STEP = 4  # a frame is looked at in every so many pixels across and down (s
 @dataclass(frozen=True)
 class Look:
     """What one look at a frame's capture area found (`look`), in the area's own pixels: the page box on a flat ground
-    (None: none found), the bands across it (bars), whether it is a frame to wait out (`loading_kind`) and the ground's
-    colour (RGB; None: not one colour)."""
+    (None: none found), the bands across it (bars), whether it is a frame to wait out (`loading_kind`), the ground's
+    colour (RGB; None: not one colour) and the strips along the area's top and bottom edges (rows of what lies beyond
+    the area, the same on every frame: no bars; the page is looked for between them)."""
 
     box: Box | None
     bands: tuple[tuple[int, int], ...]
     kind: str | None
     ground: tuple[int, int, int] | None
+    strips: tuple[tuple[int, int], ...] = ()
 
 
-def look(rgb: np.ndarray, before: Box | None = None, step: int = LOOK_STEP) -> Look:
+def look(rgb: np.ndarray, before: Box | None = None, step: int = LOOK_STEP, strip: int = STRIP_PX) -> Look:
     """`ground_box`, `bands` and `loading_kind` of the capture area *rgb* (H, W, 3), on every *step*-th pixel, the
     boxes and rows given back in its own pixels (to within *step*); *before*: the page box at the last rest (for a
-    half-drawn spread)."""
+    half-drawn spread). A band at the area's top or bottom no higher than *strip* px is a strip (`Look.strips`), not a
+    band: the rest is looked at between the strips."""
     small = np.ascontiguousarray(rgb[::step, ::step])
     height, width = rgb.shape[:2]
-    box = ground_box(small)
-    found = bands(small, box)
-    shrunk = None if before is None else tuple(v // step for v in before)
-    kind = loading_kind(small, box, shrunk)  # type: ignore[arg-type]
-    colour = ground_colour(small)
 
     def up(v: int, limit: int) -> int:
         return min(limit, v * step)
 
-    big = None if box is None else (up(box[0], width), up(box[1], height), up(box[2], width), up(box[3], height))
+    first, last = 0, small.shape[0]
+    strips = []
+    page = ground_box(small)
+    for a, b in bands(small, page):
+        rows = (up(a, height), height if b >= small.shape[0] else up(b, height))
+        if rows[1] - rows[0] > strip or b - a >= small.shape[0] // 2:
+            continue
+        strips.append(_to_the_row(rgb, rows, a == 0, small, page, step))
+        if a == 0:
+            first = b
+        else:
+            last = a
+    if strips:
+        small = np.ascontiguousarray(small[first:last])
+    box = ground_box(small)
+    found = bands(small, box)
+    shrunk = None if before is None else tuple(v // step - (first if k % 2 else 0) for k, v in enumerate(before))
+    kind = loading_kind(small, box, shrunk)  # type: ignore[arg-type]
+    colour = ground_colour(small)
+    low = height if last >= rgb[::step].shape[0] else up(last, height)  # (the lower strip's top, or the area's foot)
+    big = None if box is None else (up(box[0], width), up(box[1] + first, height), up(box[2], width),
+                                    up(box[3] + first, height))
     if big is not None and box is not None:
         big = (big[0], big[1], width if box[2] >= small.shape[1] else big[2],
-               height if box[3] >= small.shape[0] else big[3])
-    rows = tuple((up(a, height), height if b >= small.shape[0] else up(b, height)) for a, b in found)
-    return Look(big, rows, kind, None if colour is None else tuple(int(c) for c in colour))  # type: ignore[arg-type]
+               low if box[3] >= small.shape[0] else big[3])
+    rows = tuple((up(a + first, height), low if b >= small.shape[0] else up(b + first, height)) for a, b in found)
+    return Look(big, rows, kind, None if colour is None else tuple(int(c) for c in colour),  # type: ignore[arg-type]
+                tuple(strips))
+
+
+def _to_the_row(rgb: np.ndarray, rows: tuple[int, int], top: bool, small: np.ndarray, page: Box | None,
+                step: int) -> tuple[int, int]:
+    """A strip's *rows* as `look` found them on every *step*-th row, to the row: its inner edge (the foot of one along
+    the area's *top*, else the top of one along its foot) where the rows of the frame *rgb* beside the page stop
+    differing from the ground as a band's do - the rows between two looked at are the page's as often as the strip's
+    (a browser's bar 2 px into the area read as 4 took the first 2 rows of a bubble cut by the content's top)."""
+    colour = ground_colour(small)
+    if colour is None:
+        return rows
+    cols = _ground_columns(small.shape[1], page) * step
+    a, b = rows
+    if top:
+        between = np.arange(max(a + 1, b - step + 1), b)
+        across = _across(rgb[between][:, cols], colour) if between.size else np.zeros(0, bool)
+        return a, int(between[np.argmin(across)]) if between.size and not across.all() else b
+    between = np.arange(a - 1, max(a - step, 0), -1)  # (from the strip's top up to the row after the one looked at)
+    across = _across(rgb[between][:, cols], colour) if between.size else np.zeros(0, bool)
+    if not between.size:
+        return rows
+    return (int(between[-1]) if across.all() else int(between[np.argmin(across)]) + 1), b
 
 
 def masked(rgb: np.ndarray, rows: tuple[tuple[int, int], ...] | list[tuple[int, int]],

@@ -590,7 +590,7 @@ def test_the_page_summary_reads_as_the_review_asked(flow):
     assert flow._summary(result) == ("0 行を翻訳しました（0 秒）。 - "
                                      "TASlation から翻訳プログラムに接続できませんでした。少し待って「翻訳」を押してください。プログラムは自動で起動します。")
     result.fingerprints = []
-    assert flow._summary(result) == "ビューアにページが見つかりません。本が開いているか確かめるか、左のパネルの「範囲設定...」を使ってください。"
+    assert flow._summary(result) == "ビューアにページが見つかりません。本が開いているか確かめるか、「メニュー」の「範囲設定...」を使ってください。"
     set_language("en")
     result.fingerprints, result.error, result.cache_misses = ["a" * 16], "", 1
     result.regions = [SimpleNamespace(flags=("short",), status="translated", translated_text="Hi")]

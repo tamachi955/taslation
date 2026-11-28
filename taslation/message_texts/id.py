@@ -31,7 +31,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "{bubbles} baris diterjemahkan dalam {seconds:.0f} dtk.",
     "pipeline.to_review": "{review} layak dilihat (dengan Mode pembaca mati, Menu > Tinjau...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Tidak ada halaman di penampil. Pastikan buku terbuka, atau pakai Atur area... di panel kiri.",
+    "pipeline.no_content": "Tidak ada halaman di penampil. Pastikan buku terbuka, atau pakai Atur area... di Menu.",
     "ollama.unreachable": "TASlation tidak dapat menjangkau program penerjemah. Tekan Terjemahkan sebentar lagi; program berjalan sendiri.",
     "ollama.model_missing": "Model terjemahan {model} belum terpasang. Jalankan install.cmd lagi untuk memasangnya.",
     "ollama.http_error": "Program penerjemah menolak ({status}). Tekan Terjemahkan untuk mencoba lagi; jika terulang, mulai ulang PC Anda.",

@@ -24,6 +24,7 @@ from taslation.ui import seethrough as ui
 
 W, H = 1920, 1032  # a maximised window's client area at 100 %
 BAR_ROWS = 88  # rows 0-87: the browser's tab strip and address bar, in the client area
+CONTENT_TOP = 87  # the pages' first row on the screens (the bar's last row, where a page is drawn over it)
 SPREAD = (294, 1626)  # the pages' columns on the screen (a spread of two pages 666 px wide)
 HAND = (296, 85, 292, 0)  # margins of a capture area set by hand about the spread (its top 3 px over the bar's foot)
 BARS_ONLY = (0, 85, 0, 0)  # margins of one that trims only the browser's bar
@@ -48,6 +49,27 @@ def blocks(out, x0, y0, n, w, h, gap, colour, outline=None):
 def disc(out, cx, cy, r, colour):
     ys, xs = np.ogrid[:H, :W]
     out[(ys - cy) ** 2 + (xs - cx) ** 2 <= r * r] = colour
+
+
+def oval(out, cx, cy, rx, ry, line):
+    """A bubble: white inside an outline *line* px wide."""
+    ys, xs = np.ogrid[:H, :W]
+    out[((xs - cx) / rx) ** 2 + ((ys - cy) / ry) ** 2 <= 1] = 0
+    out[((xs - cx) / (rx - line)) ** 2 + ((ys - cy) / (ry - line)) ** 2 <= 1] = 255
+
+
+def glyphs(out, x, y, n, seed, size=26):
+    """*n* made-up glyphs in a column from (*x*, *y*): strokes whose lengths change from glyph to glyph (lettering,
+    not a tone of equal dots)."""
+    for k in range(n):
+        top, v = y + k * (size + 6), (seed + k * 7) % 5
+        out[top + 2:top + 5, x + 2 + v:x + size - 2] = 20
+        out[top + 2 + v:top + size - 2, x + size // 2 - 2:x + size // 2 + 1] = 20
+        out[top + size - 8:top + size - 5, x + 4:x + size - 4 - 2 * v] = 20
+        if (seed + k) % 2:
+            out[top + 9:top + 13, x + 5:x + 11] = 20
+        else:
+            out[top + 8:top + 18, x + size - 7:x + size - 4] = 20
 
 
 def cover() -> np.ndarray:
@@ -108,20 +130,26 @@ def grey_and_picture() -> np.ndarray:
     return out
 
 
+CUT_COLUMN = (1500, 1526)  # (`grey_spread`) the columns of the bubble's lettering the content's top cuts
+
+
 def grey_spread() -> np.ndarray:
     """A greyscale spread (294..915 | 960..1626, a white gutter) running off the window's foot, a bubble cut by the
-    top of the capture area."""
+    content's top - the browser's bar over all above it -, one of its two columns of lettering cut with it."""
     out = blank()
-    out[87:1032, 294:1626] = 250
+    out[CONTENT_TOP:BAR_ROWS] = 0  # (the content from that row on, the viewer's ground beside the page too)
+    out[CONTENT_TOP:1032, 294:1626] = 250
     for x0, x1 in ((294, 915), (960, 1626)):
         out[110:500, x0 + 16:x1 - 16] = 30
         out[114:496, x0 + 20:x1 - 20] = 210
         out[520:1032, x0 + 16:x1 - 16] = 30
         out[524:1032, x0 + 20:x1 - 20] = 150
-    disc(out, 1500, 110, 80, (255, 255, 255))
-    out[87:180, 1495:1502] = 20
+    oval(out, 1490, 130, 85, 120, 5)
+    glyphs(out, CUT_COLUMN[0], 70, 5, seed=1)
+    glyphs(out, 1462, 95, 4, seed=2)
     disc(out, 400, 700, 60, (255, 255, 255))
     out[660:740, 396:402] = 20
+    out[:CONTENT_TOP] = blank()[:CONTENT_TOP]  # (the bar over the page and the bubble above the content's top)
     return out
 
 
@@ -174,7 +202,8 @@ def test_the_page_box_is_taken_from_each_screen_and_the_panes_never_lie_on_its_p
     seen_right = []
     for name, columns, (left, right) in walk(app, clock):
         assert app._see_rest_box is not None and app._see_rest_box[::2] == columns, name  # (this screen's, at rest)
-        assert app._see_bars_since is not None  # (the browser's bar across the area's top, all the while)
+        # the browser's bar: a bar with no area set; with an area set 3 px into it a strip, never the viewer's bars
+        assert (app._see_bars_since is not None) == (margins is None), name
         assert left is not None and right is not None, name
         assert left[2] <= columns[0] - pn.GAP and right[0] >= columns[1] + pn.GAP, name  # (beside it, a gap off)
         seen_right.append(right[0])
@@ -221,6 +250,52 @@ def test_the_area_set_by_hand_stands_in_for_the_page_box_only_on_a_flat_ground_b
     patterned = spread.copy()
     patterned[BAR_ROWS:, :296:8] = 200  # (no flat ground beyond it: a list or a sidebar, say)
     assert box_of(HAND, patterned)[0] is None
+
+
+def test_on_the_fifth_screen_the_bubble_cut_by_the_content_s_top_is_read_lettered_up_to_it_and_shown(tmp_path, clock):
+    """The owner's case: an area set by hand 3 px into the browser's bar, a strip of it along the area's top the same
+    on every frame, and a bubble the content's top cuts, a column of its lettering cut with it. The strip is no bar
+    and is not read; the bubble is closed by the area's edge, its cut column read with the rest and erased up to that
+    edge, and its patch - reaching the edge - shown with all the others while the page is on show."""
+    from helpers import EN_TEXTS, FakeOcr
+    from test_seethrough import bgra
+
+    from taslation import seethrough as st
+    from taslation.config import Settings
+    from taslation.pipeline import Pipeline
+    from taslation.translate.simple import DictTranslator
+
+    app = window(tmp_path, BARS_ONLY)
+    picture = grey_spread()
+    image = Image.fromarray(picture)
+    show(app, clock, picture, 2.0)
+    ui.note_strips(app, image, Facts(image))  # (as each frame is captured)
+    assert app._see_bars_since is None  # (the strip: no bar, no wait)
+    margins = ui.strip_margins(app, BARS_ONLY, (W, H))
+    assert margins == (0, CONTENT_TOP, 0, 0)  # (read from the content's top: the strip left out)
+    settings = Settings(state_dir=tmp_path / "state")
+    settings.validate()
+    settings.margins, settings.reuse_lines = margins, False
+    result = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=None).process(image)
+    cut = [r for r in result.regions if r.y0 == CONTENT_TOP]
+    assert len(cut) == 1 and cut[0].kind == "bubble" and cut[0].status == "translated", result.regions
+    bubble = cut[0]
+    assert bubble.text_box[1] == CONTENT_TOP and bubble.text_box[2] >= CUT_COLUMN[1] - 3  # (the cut column in it)
+    cut_ink = np.zeros((H, W), bool)
+    cut_ink[CONTENT_TOP:CONTENT_TOP + 8, CUT_COLUMN[0]:CUT_COLUMN[1]] = picture[CONTENT_TOP:CONTENT_TOP + 8,
+                                                                              CUT_COLUMN[0]:CUT_COLUMN[1], 0] < 140
+    ys, xs = np.nonzero(cut_ink)
+    assert len(ys) and (bubble.mask[ys - bubble.y0, xs - bubble.x0] > 0).all()  # (erased: in its mask, to the edge)
+    lettered = np.asarray(result.image)
+    patches = st.make_patches(picture, lettered)
+    assert any(p.box[1] <= CONTENT_TOP + 2 for p in patches)  # (its patch from the area's edge)
+    ui.stamp_sign(app, image, Facts(image))
+    sign = ui.sign_of(image, picture)
+    assert sign.area[1] == CONTENT_TOP  # (the sign made of the area less the strip)
+    store = st.SetStore()
+    store.put(1, (W, H), patches, sign=sign)
+    chosen, shown, seen = st.visible(store.sets, bgra(picture))
+    assert chosen.key == 1 and shown == tuple(range(len(patches))) and seen.bars == ()  # every patch, whole
 
 
 def test_the_report_of_the_capture_area_tells_the_area_set_by_hand_from_the_page_found_inside_it(tmp_path):

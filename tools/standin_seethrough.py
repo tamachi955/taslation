@@ -2323,13 +2323,12 @@ class SeeWatch:
                                  "last_to": last[-1]["to"] if last else None,
                                  "until_next_ms": round(ahead[0]["t"] - r["t"]) if ahead else None})
         offsets = Counter(tuple(o) for r in self.truth_rows for o in r["offsets"])
-        # the comparison's margins: the worst share of changed pixels among the patches shown, and the least among
-        # those hidden (`seethrough.CHANGED_SHARE` between them), each as a frame came
-        worst = sorted(n["worst"] for n in notes if n["ev"] == "show" and n.get("new") and n.get("worst") is not None)
-        least = sorted([n["least_hidden"] for n in notes if n["ev"] == "show" and n.get("new")
-                        and (n.get("least_hidden") or -1) >= 0]
-                       + [n["least"] for n in notes
-                          if n["ev"] == "hide" and n.get("new") and n.get("least") is not None])
+        # the page rule's margins: the distance of the page shown from its set's sign, and the nearest page's among
+        # the frames where none was shown (`seethrough.PAGE_TOL` between them), each as a frame came
+        worst = sorted(n["distance"] for n in notes if n["ev"] == "show" and n.get("new")
+                       and n.get("distance") is not None)
+        least = sorted(n["nearest"] for n in notes if n["ev"] == "hide" and n.get("new")
+                       and n.get("nearest") is not None)
 
         def shares(v: list[float]) -> dict[str, Any]:
             if not v:
@@ -2359,7 +2358,7 @@ class SeeWatch:
                 "stale_ms": spread(stale), "stale_rows": rows, "changes_with_nothing_shown": nothing,
                 "own_frame_to_change_ms": spread(own_ms),
                 "hides_by_why": dict(Counter(n["why"] for n in notes if n["ev"] == "hide")),
-                "shares": {"shown_worst": shares(worst), "hidden_least": shares(least)},
+                "distances": {"shown": shares(worst), "hidden_nearest": shares(least)},
                 "hits": dict(self.hits), "front_changes": len(self.fronts) - 1 if self.fronts else 0,
                 "fronts": [[round(t - (changes[0]["t"] if changes else t)), w] for t, w in self.fronts],
                 # the window in front before TASlation's was made, how often one of TASlation's came in front after,

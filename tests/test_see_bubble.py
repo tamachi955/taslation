@@ -45,8 +45,8 @@ class FakeOver:
     def look_key(self):
         return self.key
 
-    def present(self, key, size, patches, final=False):
-        self.presented.append((key, size, patches, final))
+    def present(self, key, size, patches, final=False, sign=None):
+        self.presented.append((key, size, patches, final, sign))
 
 
 class Var:
@@ -268,7 +268,7 @@ def test_the_patch_under_the_pointer_is_left_out_once_the_pointer_has_rested_the
     chosen = FakeSet([(100, 100, 200, 160), (300, 100, 380, 160)], key=77)
     over, drawn = watching(monkeypatch, (origin[0] + 150, origin[1] + 130))
     over.set_hover_delay(450)
-    look = (chosen, (0, 1), [0.0] * 2, 1, 0.0, origin, (900, 800), True)
+    look = (chosen, (0, 1), st.Seen(), 1, 0.0, origin, (900, 800), True)
     over._show_look(*look)
     assert drawn[-1] == ("show", (0, 1)) and over.hovered() is None and over.look_key() == 77
     assert over._hover_wait is not None  # (the looks go on while it waits)
@@ -354,12 +354,13 @@ def test_the_patches_are_made_off_the_tk_thread_the_newest_state_of_a_page_once(
     one.paste((0, 0, 0), (10, 10, 30, 30))
     two.paste((0, 0, 0), (10, 10, 30, 30))
     two.paste((0, 0, 0), (60, 40, 90, 60))
-    patcher.put(frame, one, False, 6, 9)
-    patcher.put(other, other, True, 6, 9)
-    patcher.put(frame, two, True, 6, 9)  # (a newer state of the first page: it replaces the one waiting, and goes last)
+    patcher.put(frame, one, False, 9)
+    patcher.put(other, other, True, 9)
+    patcher.put(frame, two, True, 9)  # (a newer state of the first page: it replaces the one waiting, and goes last)
     patcher.drain()
-    assert [(key, len(patches), final) for key, _size, patches, final in over.presented] == [
+    assert [(key, len(patches), final) for key, _size, patches, final, _sign in over.presented] == [
         (id(other), 0, True), (id(frame), 2, True)]
+    assert all(sign.area == (0, 0, 120, 80) for *_rest, sign in over.presented)  # (each with its page's sign)
     assert patcher.made == 2 and patcher._waiting == {}
     patcher.close()
 

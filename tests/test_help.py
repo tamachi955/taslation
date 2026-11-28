@@ -137,7 +137,7 @@ def _guide(start: str) -> str:
 NAMED = (  # (the start of a topic paragraph, the window's words it names)
     ("At every start TASlation asks", ("OK", "Quit", "Menu", "Viewer...")),
     ("Translate translates the page", ("Translate", "Lettering")),
-    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Reader mode", "Add area", "Set area...",
+    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Reader mode", "Add area",
                            "Settings...", "Menu", "Quit")),
     ("Right of the page,", ("Indicators", "Copy the Japanese", "Copy the translation", "Ask again")),
     ("Rest the pointer", ("Copy the Japanese", "Copy the translation")),
@@ -149,7 +149,7 @@ NAMED = (  # (the start of a topic paragraph, the window's words it names)
                            "Review...", "My corrections...", "Lines to review...", "Find and replace...",
                            "Series sheet...", "Book settings...")),
     ("A bubble stays untranslated", ("Translate", "Add area")),
-    ("TASlation finds no page", ("Set area...",)),
+    ("TASlation finds no page", ("Set area...", "Menu")),
     ("Nothing happens", ("Indicators", "Menu", "Viewer...", "Auto")),
     ("A name comes out wrong", ("Find and replace...", "Menu")),
     ("While you read,", ("Menu", "Help", "Check for updates...")),

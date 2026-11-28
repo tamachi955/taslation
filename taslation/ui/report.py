@@ -263,15 +263,10 @@ def _shown(page: _Page, i: int, region: Any) -> tuple[str, str]:
         return "yes", ""
     kind, facts = page.hidden[i]
     parts = [kind]
-    if "share" in facts and facts.get("share") is not None:
-        parts.append(f"share {facts['share']} over the limit {facts.get('limit')}")
-    where = facts.get("where") or {}
-    if where:
-        parts.append("differing " + ", ".join(f"{k} {v}" for k, v in sorted(where.items())))
-    if facts.get("box") is not None:
-        parts.append(f"patch {_box(facts['box'])} compared in {_box(facts.get('near'))}")
-    if facts.get("held"):
-        parts.append("held")
+    if facts.get("distance") is not None:
+        parts.append(f"the page's distance {facts['distance']} over the limit {facts.get('limit')}")
+    if facts.get("rows"):
+        parts.append("a bar over rows " + ", ".join(f"{a}-{b}" for a, b in facts["rows"]))
     if "patches" in facts:
         parts.append(f"{facts['patches']} patch(es)")
     if "set_known" in facts:
@@ -404,7 +399,10 @@ def page_lines(app: Any, result: Any, page: _Page | None, regions: Sequence[Any]
         if found is None:
             lines.add("lettered", "not known (another page on show, or no look yet)")
         else:
-            lines.add("lettered", f"{found['regions']} lettered; {found['regions'] - len(found['not_shown'])} shown")
+            distance = (f"; the page on show by its sign: distance {found['distance']} (limit {found['limit']})"
+                        if found.get("distance") is not None else "")
+            lines.add("lettered", f"{found['regions']} lettered; {found['regions'] - len(found['not_shown'])} shown"
+                      + distance)
             lines.add("not_shown", ", ".join(f"{k} {n}" for k, n in sorted(found["kinds"].items())) or "none")
         times = jobs.job_times(app)
         if times:
@@ -481,8 +479,12 @@ def screen_lines(app: Any, result: Any) -> list[str]:
         margins = _get(lambda: app._margins_of(image))
         hand = _get(app._hand_set) if getattr(app, "_manual_area", False) and callable(
             getattr(app, "_hand_set", None)) else None
+        from . import seethrough
+
+        trimmed = _get(lambda: seethrough.strip_margins(app, hand, image.size), hand) if hand is not None else None
         how = "found" if hand is None else "set by hand" if tuple(hand) == tuple(margins or ()) else \
-            f"the page found inside the area set by hand, margins {_box(hand)}"
+            f"set by hand, margins {_box(hand)}, less the strip along its edge" if tuple(trimmed or ()) == tuple(
+                margins or ()) else f"the page found inside the area set by hand, margins {_box(hand)}"
         lines.add("capture_area", f"margins {_box(margins)} ({how})")
     rest = getattr(app, "_see_rest_box", None)
     size = getattr(app, "_see_rest_size", None)
@@ -493,7 +495,10 @@ def screen_lines(app: Any, result: Any) -> list[str]:
               f"rows {ground[2][0]}-{ground[2][1]}; ground colour {'flat' if ground[3] is not None else 'not one colour'}; "
               f"area columns {ground[4][0]}-{ground[4][1]}")
     since = getattr(app, "_see_bars_since", None)
-    lines.add("bars", "none" if since is None else f"over the page for {time.monotonic() - float(since):.1f} s")
+    strips = sorted({rows for found in (getattr(app, "_see_strips", None) or {}).values() for rows in found})
+    lines.add("bars", ("none" if since is None else f"over the page for {time.monotonic() - float(since):.1f} s")
+              + ("; strips along the area's edge (beyond the area, not read): rows "
+                 + ", ".join(f"{a}-{b}" for a, b in strips) if strips else ""))
     return lines.lines
 
 

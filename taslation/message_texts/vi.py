@@ -29,7 +29,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "Đã dịch {bubbles} dòng trong {seconds:.0f} giây.",
     "pipeline.to_review": "{review} chỗ đáng xem lại (tắt Chế độ người đọc, rồi Menu > Rà soát...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Không tìm thấy trang trong trình xem. Hãy kiểm tra sách đang mở, hoặc dùng Đặt vùng... ở khung bên trái.",
+    "pipeline.no_content": "Không tìm thấy trang trong trình xem. Hãy kiểm tra sách đang mở, hoặc dùng Đặt vùng... trong Menu.",
     "ollama.unreachable": "TASlation không kết nối được với chương trình dịch. Hãy bấm Dịch sau một lát; chương trình tự khởi động.",
     "ollama.model_missing": ("Mô hình dịch {model} chưa được cài đặt. Hãy chạy lại install.cmd để cài đặt."),
     "ollama.http_error": "Chương trình dịch đã từ chối ({status}). Bấm Dịch để thử lại; nếu lặp lại, hãy khởi động lại máy tính.",

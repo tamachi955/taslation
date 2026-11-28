@@ -88,6 +88,7 @@ from .headings import heading, labels_in, printed
 from .detect import layout as layout_model
 from .detect import prose as prose_lines
 from .detect.beyond import ocr_view
+from .detect.bubbles import sides_of
 from .detect.layout import LayoutModel, Shaper, cover_of, covered, model_regions, take_shape
 from .detect.textblocks import block_mask
 from .detect.tilt import Tilt, Upright, ink_frame, lettering_tilt, region_ink
@@ -2876,6 +2877,12 @@ class Pipeline:
         """The capture area of *rgb*: what the margins leave of it, where text is looked for."""
         return fp.capture_area(rgb.shape[1], rgb.shape[0], self.settings.margins)
 
+    def _bounds(self, rgb: np.ndarray) -> Box | None:
+        """The capture area of *rgb* where the frame goes on beyond it on a side (margins left something there), whose
+        edges close a bubble cut by them (`TextRegion.bounds`); None where it is the whole frame."""
+        box = self._capture(rgb)
+        return None if box == (0, 0, rgb.shape[1], rgb.shape[0]) else box
+
     def _owners(self, rgb: np.ndarray, regions: Sequence[TextRegion],
                 units: Sequence[fp.PageUnit]) -> dict[int, fp.PageUnit | None]:
         """The page unit each region (by id) belongs to (`unit_for`): None only outside the capture area."""
@@ -2915,12 +2922,14 @@ class Pipeline:
             return classical
         model = model_regions(rgb, found, boxes)
         scale = self.page_scale(rgb)
+        bounds = self._bounds(rgb)
         for r in model:
-            r.after = self.shaper.rebuilt(rgb, r, classical, scale)
+            r.bounds = bounds
+            r.after = self.shaper.rebuilt(rgb, r, classical, scale, bounds)
         claimed = Counter(id(r.after.adopted) for r in model if r.after.adopted is not None)
         for r in model:  # a classical region two model regions claim joined two bubbles: neither takes its shape
             if r.after.adopted is not None and claimed[id(r.after.adopted)] > 1:
-                r.after = self.shaper.rebuilt(rgb, r, (), scale)
+                r.after = self.shaper.rebuilt(rgb, r, (), scale, bounds)
         for r in model:  # a bubble with no shape of its own on paper closed round it: that paper is its room
             if r.after.tier == 3 and r.after.kind in ("bubble", "dark-bubble"):
                 room = artwork.closed_room(rgb, r.after, scale)
@@ -2929,18 +2938,22 @@ class Pipeline:
         return [*model, *classical]
 
     def _detect_classical(self, rgb: np.ndarray, cancel: threading.Event | None = None) -> list[TextRegion]:
-        """The classical detectors' regions of *rgb* (in the capture area); `Cancelled` between two of them once
-        *cancel* is set."""
+        """The classical detectors' regions of *rgb* (in the capture area, whose edges close a bubble cut by them where
+        the frame goes on beyond: `_bounds`); `Cancelled` between two of them once *cancel* is set."""
         x0, y0, x1, y1 = self._capture(rgb)
         sub = rgb[y0:y1, x0:x1]
         gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
         dark = self.detector.cfg.dark_threshold
         scale = self.page_scale(rgb)  # (the detectors' measures in px at the page's scale)
-        regions = drop_nested(focus_oversized(self.detector.detect(sub, scale=scale)), gray, dark, scale=scale)
+        bounds = self._bounds(rgb)
+        sides = sides_of((x0, y0, x1, y1), bounds, (rgb.shape[1], rgb.shape[0]))
+        edges = {"closed": sides} if any(sides) and accepts(self.detector.detect, "closed") else {}
+        regions = drop_nested(focus_oversized(self.detector.detect(sub, scale=scale, **edges)), gray, dark,
+                              scale=scale)
         if self.settings.detect_dark_bubbles:
             check_cancel(cancel)
             regions = merge_regions(regions, drop_nested(focus_oversized(
-                self.detector.detect(sub, inverted=True, scale=scale)), 255 - gray, dark, scale=scale))
+                self.detector.detect(sub, inverted=True, scale=scale, **edges)), 255 - gray, dark, scale=scale))
         if self.text_detector is not None:
             # text blocks are looked for outside the lettering of the regions found so far: bubbles (closed by an
             # outline), and the text a white or dark area too large for a bubble was cut down to (`focus_oversized`),
@@ -2952,6 +2965,8 @@ class Pipeline:
                 check_cancel(cancel)
                 regions = merge_regions(regions, self.text_detector.detect(sub, inverted=True, taken=bubbles,
                                                                            scale=scale))
+        for r in regions:
+            r.bounds = bounds
         if x0 or y0:
             for r in regions:
                 r.x0 += x0

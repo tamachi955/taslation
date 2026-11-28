@@ -26,7 +26,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "Translate translates the page on show now; the circular arrow beside it translates it again, asking every line anew. Lettering hides the translation, so that the page shows as the viewer has it, and shows it again.",
     )),
     ("The side panes", (
-        "Left of the page: Translate (Stop while a page is being translated), Auto, your language, Lettering, Indicators, Reader mode, Add area, Set area..., Settings..., Menu and Quit.",
+        "Left of the page: Translate (Stop while a page is being translated), Auto, your language, Lettering, Indicators, Reader mode, Add area, Settings..., Menu and Quit.",
         "Right of the page, while Indicators is on: the bubble last under the pointer, its Japanese and its translation, with Copy the Japanese, Copy the translation and Ask again, then what TASlation is doing. At the bottom, in places that do not move: how much of the page is done, the mode, where the translator runs, the viewer followed, and your language with the book's name.",
         "Rest the pointer on a bubble to see the original lettering in its place. TASlation puts nothing on the clipboard by itself: only Copy the Japanese and Copy the translation do.",
         "The panes lie on the viewer's ground beside the page, and a pane hides where it would come near the page. TASlation's taskbar button then opens the Menu with the left pane's controls.",
@@ -45,7 +45,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "Some viewers do not allow their window to be read and always show black. TASlation leaves that as it is. Such a viewer cannot be used with TASlation.",
         "A bubble stays untranslated: press Translate. If it is still empty, press Add area in the left pane (or Insert) and drag a rectangle over the text; if a box is already there, drag or resize it while editing.",
         "A line of one character, or lettering far larger than the rest, is not read by itself: add it by hand.",
-        "TASlation finds no page, or reads too much of the window: Set area... in the left pane lets you mark the page yourself.",
+        "TASlation finds no page, or reads too much of the window: Set area... in the Menu lets you mark the page yourself.",
         "Nothing happens: read the lines in the right pane (Indicators on). Check Menu > Viewer... and that Auto is on.",
         "The translation program starts by itself. If new pages are not translated, press Translate in a moment; if that does not help, restart your PC.",
         "When you close TASlation, it stops the translation program it started, unless another program is using it. If you started the translation program yourself, TASlation leaves it running.",

@@ -160,24 +160,15 @@ def _editor_region(app: Any) -> Any:
     return None
 
 
-def _probe(app: Any, original: Any, box: st.Box, size: tuple[int, int], dpi: int) -> st.Patch | None:
-    """The frame's pixels round *box* (`seethrough.probe`), kept for the page *original* (the frame read, RGB): what
-    tells the see-through window whether a box with no patch is still over the page it was read from."""
-    kept: dict[Any, Any] = app.__dict__.setdefault("_see_probes", {})
-    if kept.get("frame") != id(original):
-        kept.clear()
-        kept["frame"] = id(original)
-    within, off_rows = seethrough.compared_by(original)  # (the page's own pixels alone, as a patch's: `compare_box`)
-    near = st.compare_box(box, st.scaled(st.MARGIN, dpi), size, within, off_rows)
-    found = kept.get(near)
-    if found is None and near[2] > near[0] and near[3] > near[1]:
-        try:
-            import numpy as np
+def _lettered(region: Any) -> bool:
+    """Whether *region* is lettered or erased on the page (`pipeline.erases`): its box is marked when none of that
+    shows (`seethrough.Marks.lettered`)."""
+    from ..pipeline import erases
 
-            found = kept[near] = st.probe(near, np.asarray(original.crop(near).convert("RGB"))[:, :, ::-1])
-        except Exception:  # noqa: BLE001 - (no pixels to go by: the box takes the mouse as ever)
-            return None
-    return found
+    try:
+        return bool(erases(region))
+    except AttributeError:  # (a region with no translation kept: nothing lettered)
+        return False
 
 
 def marks_for(app: Any) -> st.Marks | None:
@@ -246,8 +237,7 @@ def marks_for(app: Any) -> st.Marks | None:
                      chosen=tuple(i for i in (index(r) for r in chosen) if i is not None),
                      held=index(held) if held is not None else None, bare=index(bare) if bare is not None else None,
                      locked=locked, adding=adding, ghosts=tuple(pending), seen=seen, serial=serial,
-                     probes=tuple(_probe(app, result.original, box, size, dpi) for box in boxes),
-                     colours=tuple(colours))
+                     colours=tuple(colours), lettered=tuple(_lettered(r) for r in regions))
     app._see_edit_memo = (content, marks, list(regions))
     kept = app.__dict__.setdefault("_see_edit_regions", {})
     kept[serial] = list(regions)

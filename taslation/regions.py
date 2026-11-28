@@ -90,6 +90,10 @@ class TextRegion:
     # holds more (`Pipeline._prose`): no detection finds it again, so a page from the cache draws it from its stored
     # outline where the live page shows those pieces (`CachedBubble.joined`)
     joined: bool = False
+    # the capture area it was found in when the frame goes on beyond it (`Pipeline._detect`): the area's edges there
+    # close paper cut by them as an outline would (`detect.bubbles.fill_holes`, `render.artwork.closed_interior`); None
+    # = the image's edges alone. Memory only
+    bounds: Box | None = None
     # what its reading was as a sound word (`Pipeline._sound_word`, `taslation.soundwords`): "" not one to look at
     # (in a bubble, not short kana, dropped by the gate), "read" (a sound word as read), "corrected" (its reading set
     # right: another reader's, or one kana changed), "unsure" (each reader read another thing and none is a sound word:

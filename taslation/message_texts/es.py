@@ -29,7 +29,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "{bubbles:línea traducida|líneas traducidas} en {seconds:.0f} s.",
     "pipeline.to_review": "{review:línea merece|líneas merecen} un vistazo (con Modo lector desactivado, Menú > Revisar...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "No se encontró ninguna página en el visor. Comprueba que el libro esté abierto o usa Definir área... en el panel izquierdo.",
+    "pipeline.no_content": "No se encontró ninguna página en el visor. Comprueba que el libro esté abierto o usa Definir área... en el Menú.",
     "ollama.unreachable": "TASlation no pudo conectar con el programa de traducción. Pulsa Traducir dentro de un momento; arranca solo.",
     "ollama.model_missing": ("El modelo de traducción {model} no está instalado. Ejecuta install.cmd de nuevo para "
                              "instalarlo."),

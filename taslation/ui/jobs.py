@@ -1175,7 +1175,7 @@ class JobsMixin:
             if self._area_hint_due():  # the chosen viewer's frames showed no page panel: Set area... is the way
                 self._area_hinted = True
                 self.status(lambda: _(READY) + "\n"
-                            + _("No area is set for this viewer: Set area... in the left pane lets you drag a rectangle around the page."))
+                            + _("No area is set for this viewer: Set area... in the Menu lets you drag a rectangle around the page."))
             else:
                 self.say(READY)
             self._load_ocr_if_due()

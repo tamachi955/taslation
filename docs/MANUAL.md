@@ -25,7 +25,7 @@ There is no account to make and no limit on the pages it translates. Nothing of 
    before you press "OK"; then the right pane's foot says "Viewer: <title>" for as long as that window is followed. When the viewer's window is closed, the lettering and the side panes go
    and the same dialog comes again, saying so: a new window of the same viewer is selected in it, not chosen by itself. "Menu > Viewer..." opens the dialog
    to choose another window (its last button is then "Close"). A browser window is judged by its tab title without the browser's name. In a browser-based reader,
-   the part that is the page, without the tabs, the address bar and the reader's own frame, is found automatically, and only that part is read. If that does not work, use "Set area..." in the left pane once
+   the part that is the page, without the tabs, the address bar and the reader's own frame, is found automatically, and only that part is read. If that does not work, use "Menu" > "Set area..." once
    and drag a rectangle around the page on the picture it shows (it is remembered per window). The area you set is treated as an outer frame,
    and the page part is looked for and read inside it as well (the part found is shown with a dashed line). The rectangle is resized with its eight handles, moved by dragging inside it,
    and drawn again by dragging outside it. Enter confirms, Esc cancels, and "Clear area" goes back to finding the page automatically.
@@ -85,14 +85,14 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
 
 * **The left pane** holds the controls: "Translate" ("Stop" while a page is being translated), with the circular arrow at the right end of its row that translates the page on show again;
   "Auto"; the target language (a click lists every language at the right side of the pane, and a click on one takes it at once; a click elsewhere, or Esc, closes the list with no change); "Lettering"; "Indicators"; "Reader mode" (checked: the mouse is the viewer's; unchecked: editing);
-  "Add area" (or Insert while the viewer is in front; see "Editing: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and in Reader mode a click between the rows goes to the viewer.
+  "Add area" (or Insert while the viewer is in front; see "Editing: correcting the page"); "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and in Reader mode a click between the rows goes to the viewer.
 * **The right pane** (while "Indicators" is on) shows, at its top, the bubble last under the pointer (see "The bubble under the pointer"); under it what changes: the lines of the setup
   (what is missing and how to fix it), the status line and how many pages turned past are still to do. Its foot keeps its rows in their places whatever the rest says:
   how far the page on show is, the mode ("Editing: turn pages with the keys" or "Reader mode"), where the translator runs (on the GPU or the processor; and the OCR, where it runs elsewhere),
   the viewer followed ("Viewer: <title>", a long title shortened in the middle), and, where there is room, the target language with the book's name. What does not fit above the foot is left out,
   the oldest lines first and the warnings last. In Reader mode, clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
   the right pane is not shown, and the lines of the setup come in a small dialog of their own while there is something to say.
-* **"Menu"** opens the rest: "Viewer...", "Series and Volume...", "Saved translations...", "Names rendered in more than one way...", "Release the model now",
+* **"Menu"** opens the rest: "Viewer...", "Set area...", "Series and Volume...", "Saved translations...", "Names rendered in more than one way...", "Release the model now",
   "Copy a report" (see "Reporting a problem"), "Language" and "Help" ("How to use...", "Legal notice...", "Check for updates...", "About TASlation"). While editing, the editing comes first (see "Editing: correcting the page").
   While the setup has something TASlation can fix for you ("Start translator again", "Download model", "Show viewer"), those buttons come first in the Menu.
 
@@ -100,7 +100,7 @@ A pane needs room beside the page: one that would come near the page, or that th
 (beside a two-page spread in a 1920 x 1080 window there is room; in a narrow window, or beside a wide page, there may be none). The panes also hide while the viewer is minimised or hidden,
 and where another window lies over them.
 Once the viewer is in sight again and there is room beside the page, the panes come back within about half a second, with no page turned (a viewer brought in front with its bars over the page too). While the left pane has no room, a click on TASlation's button on the taskbar opens the Menu at the pointer,
-with the left pane's controls ("Translate", "Auto", "Translate into" (the list of the target languages), "Lettering", "Add area", "Set area..."), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
+with the left pane's controls ("Translate", "Auto", "Translate into" (the list of the target languages), "Lettering", "Add area"), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
 closing it there (from the button's menu, or with Alt+F4) quits TASlation as "Quit" does.
 
 TASlation's dialogs open over the viewer, on the viewer's monitor. A dialog you asked for takes the keys while it is open; once it closes, the keys go back to the viewer at once.
@@ -297,7 +297,8 @@ TASlation starts editing. "Reader mode" in the left pane (checked: you only read
 starts editing, or in Reader mode with "Start in Reader mode" in "Settings...", `--role reader` or `role = "reader"` in the settings file); until the book's choice is known,
 a moment after its name is, the lettering takes no clicks and shows no boxes. While editing, every region of the page on show
 is outlined over the viewer in its colour, with its number in the reading order on a small plate of that colour (green: translated, orange: not translated, blue: a region you marked yourself,
-red: translated but flagged for review). The right pane's foot says "Editing: turn pages with the keys" or "Reader mode".
+red: translated but flagged for review). A translated region whose lettering is not on the screen at the moment (the picture on show is not quite the page that was read,
+for example) is outlined with a dashed line in its colour. The right pane's foot says "Editing: turn pages with the keys" or "Reader mode".
 
 * **The viewer takes the keys only**: while editing, the mouse over the viewer's window is TASlation's, and the keys stay the viewer's (Insert excepted, "Adding a text area", and Delete while a region is selected, "The mouse on the boxes", below).
   Turn the pages with the keys; to use the mouse in the viewer (its buttons, its page slider, the wheel), check "Reader mode". The wheel reaches nothing while editing,

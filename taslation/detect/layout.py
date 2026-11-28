@@ -31,7 +31,7 @@ import numpy as np
 
 from ..config import LAYOUT_MODEL
 from ..regions import Box, TextRegion
-from .bubbles import BubbleDetector, DetectorConfig, fill_holes
+from .bubbles import OPEN, BubbleDetector, DetectorConfig, Sides, fill_holes, sides_of
 from .textblocks import TextBlockConfig, TextBlockDetector
 
 LOG = logging.getLogger(__name__)
@@ -394,9 +394,11 @@ class Shaper:
         return False
 
     def rebuilt(self, rgb: np.ndarray, region: TextRegion, classical: Sequence[TextRegion],
-                scale: float = 1.0) -> TextRegion:
+                scale: float = 1.0, bounds: tuple[int, int, int, int] | None = None) -> TextRegion:
         """A copy of *region* with the classical shape; its ``adopted`` is the classical region that gave it. *scale*:
-        the page's, at which the classical detectors take their measures in px (`render.pagescale.page_scale`)."""
+        the page's, at which the classical detectors take their measures in px (`render.pagescale.page_scale`).
+        *bounds*: the capture area where the frame goes on beyond it (`TextRegion.bounds`): the crop looked at stays
+        inside it, and its edges close a bubble cut by them."""
         from ..render import pagescale  # (here: the render package imports the detectors)
 
         r = copy.copy(region)
@@ -404,12 +406,17 @@ class Shaper:
             return r
         h, w = rgb.shape[:2]
         pad = pagescale.px(CROP_PAD, scale)
-        x0, y0, x1, y1 = max(0, r.x0 - pad), max(0, r.y0 - pad), min(w, r.x1 + pad), min(h, r.y1 + pad)
+        bx0, by0, bx1, by1 = bounds if bounds is not None else (0, 0, w, h)
+        x0, y0, x1, y1 = max(bx0, r.x0 - pad), max(by0, r.y0 - pad), min(bx1, r.x1 + pad), min(by1, r.y1 + pad)
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            r.tier = 3  # (nothing of it inside the area: the plain box stays its mask)
+            return r
+        sides = sides_of((x0, y0, x1, y1), bounds, (w, h))
         sub = rgb[y0:y1, x0:x1]
         gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
         tb = (r.text_box[0] - x0, r.text_box[1] - y0, r.text_box[2] - x0, r.text_box[3] - y0)
         try:
-            found = self.bubbles.detect(sub, inverted=r.dark, scale=scale)
+            found = self.bubbles.detect(sub, inverted=r.dark, scale=scale, closed=sides)
             if r.kind not in ("bubble", "dark-bubble"):
                 found = self.blocks.detect(sub, inverted=r.dark, taken=[], scale=scale) + found
         except Exception:  # noqa: BLE001 - a crop the classical detectors cannot take: the white area or the plain box
@@ -427,18 +434,26 @@ class Shaper:
             canvas[best.y0:best.y1, best.x0:best.x1] = mask
             r.tier = 1
         else:
-            area = self._white_area(255 - gray if r.dark else gray, tb, scale)
+            area = self._white_area(255 - gray if r.dark else gray, tb, scale, sides)
             if area is None:
                 r.tier = 3  # the plain box stays its mask
                 return r
             canvas, r.tier = area, 2
-        r.mask = np.ascontiguousarray(canvas[r.y0 - y0:r.y1 - y0, r.x0 - x0:r.x1 - x0])
+        if (x0, y0, x1, y1) == (max(0, r.x0 - pad), max(0, r.y0 - pad), min(w, r.x1 + pad), min(h, r.y1 + pad)):
+            r.mask = np.ascontiguousarray(canvas[r.y0 - y0:r.y1 - y0, r.x0 - x0:r.x1 - x0])
+            return r
+        mask = np.zeros((r.height, r.width), np.uint8)  # (a crop the area cut: what of the box lies in it)
+        ox0, oy0, ox1, oy1 = max(r.x0, x0), max(r.y0, y0), min(r.x1, x1), min(r.y1, y1)
+        if ox1 > ox0 and oy1 > oy0:
+            mask[oy0 - r.y0:oy1 - r.y0, ox0 - r.x0:ox1 - r.x0] = canvas[oy0 - y0:oy1 - y0, ox0 - x0:ox1 - x0]
+        r.mask = mask
         return r
 
-    def _white_area(self, gray: np.ndarray, tb: tuple[int, int, int, int], scale: float = 1.0) -> np.ndarray | None:
+    def _white_area(self, gray: np.ndarray, tb: tuple[int, int, int, int], scale: float = 1.0,
+                    closed: Sides = OPEN) -> np.ndarray | None:
         """Tier 2: the white area most of the text box lies on, its holes filled and drawn in a little (as a bubble's
         interior is, `DetectorConfig.outline_erosion` at the page's *scale*); None when there is none as large as
-        the text box."""
+        the text box. *closed*: the crop's sides that are the capture area's edge (`fill_holes`)."""
         from ..render import pagescale  # (here: the render package imports the detectors)
 
         white = cv2.erode(((gray >= self.white) * 255).astype(np.uint8), np.ones((3, 3), np.uint8))
@@ -448,7 +463,7 @@ class Shaper:
         counts, ids = counts[ids > 0], ids[ids > 0]
         if not len(ids):
             return None
-        filled = fill_holes(((labels == int(ids[counts.argmax()])) * 255).astype(np.uint8))
+        filled = fill_holes(((labels == int(ids[counts.argmax()])) * 255).astype(np.uint8), closed)
         inner = cv2.erode(filled, pagescale.disc(2 * self.bubbles.cfg.outline_erosion + 1, scale))
         return inner if cv2.countNonZero(inner) >= 0.8 * max(1, _area(tb)) else None
 

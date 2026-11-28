@@ -541,7 +541,7 @@ class LiveViewMixin(BlackViewerMixin):
         known = self._page_areas.get(viewer_key(self.selected)) if self.selected is not None else None
         if known is None or (size is not None and known[0] != size):
             return (0, 0, 0, 0)
-        return area_margins(known[1], known[0])
+        return seethrough.strip_margins(self, area_margins(known[1], known[0]), known[0])
 
     def _find_page(self, image: Image.Image) -> None:
         """The page panel in the chosen viewer's frame (`find_page_area`). While the reader has set no area for the
@@ -562,6 +562,8 @@ class LiveViewMixin(BlackViewerMixin):
             return
         key, size = viewer_key(win), image.size
         see = seethrough.on(self)
+        if see:  # (a strip of what lies beyond the area along its edge: left out of what is read)
+            seethrough.note_strips(self, image, _facts(self, image))
         if self._manual_area:
             hand = self._hand_set()
             inner = getattr(self, "_inner_areas", None)
@@ -585,7 +587,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._area_hinted = True
             title = win.title
             self.status(lambda: _("Viewer: {title}").format(title=title) + "  " + _(
-                "No area is set for this viewer: Set area... in the left pane lets you drag a rectangle around the page."))
+                "No area is set for this viewer: Set area... in the Menu lets you drag a rectangle around the page."))
 
     def _hand_set(self) -> tuple[int, int, int, int]:
         """The chosen viewer's capture area as the reader set it (``_hand_area``; a window without that record - a
@@ -597,14 +599,16 @@ class LiveViewMixin(BlackViewerMixin):
     def _inner_margins(self, size: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
         """The capture area within the reader's own: the page panel found inside it so far, as far as it lies within
         the area (`_find_page`); the area itself while none is found for this viewer, capture size (*size*, when
-        given) and area."""
+        given) and area. In see-through mode either without a strip of what lies beyond it along its edge
+        (`seethrough.strip_margins`: a browser's bar 3 px inside it)."""
         hand = self._hand_set()
         known = getattr(self, "_inner_areas", {}).get(viewer_key(self.selected)) \
             if self.selected is not None else None
         if known is None or known[1] != hand or known[2] is None or (size is not None and known[0] != size):
-            return hand
+            seen = size or (known[0] if known is not None else getattr(getattr(self, "_live", None), "size", None))
+            return seethrough.strip_margins(self, hand, seen)
         found_size, _hand, box = known
-        return area_margins(box, found_size, hand)
+        return seethrough.strip_margins(self, area_margins(box, found_size, hand), found_size)
 
     def _apply_found_margins(self) -> None:
         """The page found so far becomes the capture area - within the reader's own area when there is one
@@ -1167,7 +1171,7 @@ class LiveViewMixin(BlackViewerMixin):
             facts = _facts(self, image)
             seethrough.note_frame(self, image, facts)
             image = seethrough.reading_frame(self, image, facts)
-            seethrough.compare_within(self, image, facts)  # (its patches' margins: the page's own pixels alone)
+            seethrough.stamp_sign(self, image, facts)  # (what tells its page on show: its patches go by it)
         if seq is not None:
             self._captured = (hwnd, seq, image)
         return image

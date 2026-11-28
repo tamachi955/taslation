@@ -29,7 +29,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "已翻譯 {bubbles} 行，用時 {seconds:.0f} 秒。",
     "pipeline.to_review": "有 {review} 處值得看一下（關閉「讀者模式」，再用「選單 > 檢查...」）。",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "在檢視器中找不到頁面。請確認書已開啟，或使用左側窗格中的「設定區域...」。",
+    "pipeline.no_content": "在檢視器中找不到頁面。請確認書已開啟，或使用「選單」中的「設定區域...」。",
     "ollama.unreachable": "TASlation 無法連線翻譯程式。請稍後按「翻譯」；它會自動啟動。",
     "ollama.model_missing": "尚未安裝翻譯模型 {model}。請再次執行 install.cmd 進行安裝。",
     "ollama.http_error": "翻譯程式拒絕了要求（{status}）。請按「翻譯」重試；如果反覆出現，請重新啟動電腦。",

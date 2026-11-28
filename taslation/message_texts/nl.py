@@ -30,7 +30,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "{bubbles:regel|regels} vertaald in {seconds:.0f} s.",
     "pipeline.to_review": "{review:regel is|regels zijn} een blik waard (zet Lezersmodus uit, dan Menu > Nakijken...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Geen pagina gevonden in de viewer. Controleer of het boek open is, of gebruik Gebied instellen... in het linkerpaneel.",
+    "pipeline.no_content": "Geen pagina gevonden in de viewer. Controleer of het boek open is, of gebruik Gebied instellen... in het Menu.",
     "ollama.unreachable": "TASlation kon het vertaalprogramma niet bereiken. Druk zo meteen op Vertalen; het start vanzelf.",
     "ollama.model_missing": ("Het vertaalmodel {model} is niet geïnstalleerd. Voer install.cmd opnieuw uit om het te "
                              "installeren."),

@@ -4,10 +4,11 @@ hosts the dialogs), in places of their own.
 * The menu (`build`, `popup`): the left pane's Menu row opens it at the pane's right edge, level with the row
   (`popup_at_pane`), and a click on TASlation's taskbar button while the left pane has no room beside the page opens
   it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Translate
-  into - the target languages as a cascade -, Lettering, Add area, Set area...) and Settings... and Quit added. While
+  into - the target languages as a cascade -, Lettering, Add area) and Settings... and Quit added. While
   the setup banner has buttons
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
-  in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
+  in the right pane). Its entries: the viewer chooser, Set area... (the capture area's dialog, `ViewerMixin.set_area`:
+  the left pane had it as a row before) and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
   Copy a report (and, while editing with regions chosen, Copy a report of the chosen regions and, with one, Copy a
   report with this region's text: `report.menu_entries`, the clipboard alone), TASlation's language, and Help (How to
@@ -108,7 +109,7 @@ def banner_actions(app: Any) -> list[tuple[str, Callable[[], None]]]:
 def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: bool = False) -> None:
     """*menu* filled anew with the entries (see the module's notes), its cascades *language* and *help_menu* too;
     *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Translate into - the
-    target languages, `build_targets` -, Lettering, Add area, Set area...: the left pane is not on the screen) and
+    target languages, `build_targets` -, Lettering, Add area: the left pane is not on the screen) and
     Settings... and Quit at its end. The setup banner's buttons come first while it has some (`banner_actions`)."""
     from . import updates
     from .gpu_release import RELEASE_ENTRY, release_now
@@ -144,9 +145,9 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
         menu._see_adding = tk.BooleanVar(menu, value=see_edit.adding(app))
         menu.add_checkbutton(label=_(see_edit.ADD_AREA), command=lambda: see_edit.toggle_adding(app),
                              variable=menu._see_adding)
-        menu.add_command(label=_("Set area..."), command=_asking(app, app.set_area))
         menu.add_separator()
     menu.add_command(label=_("Viewer..."), command=_asking(app, lambda: open_viewer(app)))
+    menu.add_command(label=_("Set area..."), command=_asking(app, lambda: app.set_area()))
     menu.add_command(label=_("Series and Volume..."), command=_asking(app, lambda: open_book(app)))
     menu.add_separator()
     menu.add_command(label=_("Saved translations..."), command=_asking(app, app.open_caches))

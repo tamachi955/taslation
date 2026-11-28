@@ -33,7 +33,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "Przetłumaczone wiersze: {bubbles} ({seconds:.0f} s).",
     "pipeline.to_review": "Warto spojrzeć: {review} (wyłącz Tryb czytelnika, potem Menu > Przegląd...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Nie znaleziono strony w czytniku. Sprawdź, czy książka jest otwarta, albo użyj Ustaw obszar... w lewym panelu.",
+    "pipeline.no_content": "Nie znaleziono strony w czytniku. Sprawdź, czy książka jest otwarta, albo użyj Ustaw obszar... w Menu.",
     "ollama.unreachable": "TASlation nie może połączyć się z programem tłumaczącym. Naciśnij Przetłumacz za chwilę; uruchamia się sam.",
     "ollama.model_missing": "Model tłumaczenia {model} nie jest zainstalowany. Uruchom ponownie install.cmd, aby go "
                              "zainstalować.",

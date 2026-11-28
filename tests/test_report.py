@@ -54,18 +54,15 @@ def _page():
 
 
 class _Over:
-    """The see-through window as a report asks it: its last look found the first region's patch differing at the
-    top, the second one shown."""
+    """The see-through window as a report asks it: its last look found the page on show, a bar of the viewer's over
+    the first region's patch, the second one shown."""
 
     def __init__(self, original, why=None):
         self.key = id(original)
         self.why = why if why is not None else {
             "key": self.key, "boxes": ((100, 40, 160, 260), (220, 60, 300, 140)),
-            "near": ((94, 34, 166, 266), (214, 54, 306, 146)), "valid": (1,), "covered": (), "drawn": (1,),
-            "hover": None, "shares": (0.0192, 0.0), "share_limit": 0.01,
-            "where": {0: {"box": (0.0, 300), "top": (0.3333, 30), "bottom": (0.0, 30), "left": (0.0, 20),
-                          "right": (0.0, 20)}},
-            "frame_at": time.monotonic(), "final": True, "hidden": ""}
+            "valid": (1,), "barred": (0,), "bars": ((0, 44),), "covered": (), "drawn": (1,), "hover": None,
+            "distance": 0.4, "limit": 2.0, "frame_at": time.monotonic(), "final": True, "hidden": ""}
 
     def why_not_shown(self):
         return self.why
@@ -228,16 +225,16 @@ def test_a_region_report_holds_why_its_lettering_is_not_shown(tmp_path):
     text = report.report_text(app, [first])
     lines, page = _values(text, "region"), _values(text, "page")
     shown = lines["shown"]
-    assert shown.startswith("no: differs:top; share 0.0192 over the limit 0.01")
-    assert "top 0.3333" in shown and "patch 100,40,160,260 compared in 94,34,166,266" in shown
-    assert lines["history"].startswith("shown never; not shown") and "(differs:top)" in lines["history"]
+    assert shown == "no: bars; a bar over rows 0-44; 1 patch(es)"
+    assert lines["history"].startswith("shown never; not shown") and "(bars)" in lines["history"]
     assert lines["patches"] == "1; 100,40,160,260 opaque 0.21"
     assert lines["dark_kept"] == "6"  # (the original's dark pixels left inside the bubble)
     assert lines["lettering"].startswith("size 14 (cap 0, room 0); could not none; changed 110,150,140,202")
     assert lines["edges"].startswith("left 80, top 30, right 220, bottom 30")
     assert lines["number"] == "1 on its plate; 1 of 2 in the editor; index 0"
     assert lines["reading"].startswith("17 chars; confidence 1.0; readers split no; corrected by the person yes")
-    assert page["not_shown"] == "differs:top 1" and page["lettered"] == "2 lettered; 1 shown"
+    assert page["not_shown"] == "bars 1"
+    assert page["lettered"] == "2 lettered; 1 shown; the page on show by its sign: distance 0.4 (limit 2.0)"
     assert page["region"].startswith("2 (index 1): translated; bubble; box 220,60,300,140 (80x80); shown yes;")
     assert page["key"] == f"{id(app.last_result.original) & 0xFFFF:04x} (as the log names it)"
     # the lettering hidden, or another page on show: said so

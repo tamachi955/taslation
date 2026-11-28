@@ -33,7 +33,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "Lignes traduites : {bubbles}, en {seconds:.0f} s.",
     "pipeline.to_review": "À regarder : {review} (Mode lecteur désactivé, Menu > Relire...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Aucune page trouvée dans la visionneuse. Vérifiez que le livre est ouvert, ou utilisez Définir la zone... dans le volet gauche.",
+    "pipeline.no_content": "Aucune page trouvée dans la visionneuse. Vérifiez que le livre est ouvert, ou utilisez Définir la zone... dans le Menu.",
     "ollama.unreachable": "TASlation n'a pas pu joindre le programme de traduction. Appuyez sur Traduire dans un instant ; il démarre tout seul.",
     "ollama.model_missing": ("Le modèle de traduction {model} n'est pas installé. Exécutez de nouveau install.cmd "
                              "pour l'installer."),

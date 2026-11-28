@@ -31,7 +31,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.translated": "{bubbles} 行を翻訳しました（{seconds:.0f} 秒）。",
     "pipeline.to_review": "確認するとよいものが {review} 件あります（「読者モード」をオフにして「メニュー」>「レビュー...」）。",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "ビューアにページが見つかりません。本が開いているか確かめるか、左のパネルの「範囲設定...」を使ってください。",
+    "pipeline.no_content": "ビューアにページが見つかりません。本が開いているか確かめるか、「メニュー」の「範囲設定...」を使ってください。",
     "ollama.unreachable": "TASlation から翻訳プログラムに接続できませんでした。少し待って「翻訳」を押してください。プログラムは自動で起動します。",
     "ollama.model_missing": "翻訳モデル {model} がインストールされていません。install.cmd をもう一度実行してインストールしてください。",
     "ollama.http_error": "翻訳プログラムが要求を断りました（{status}）。「翻訳」を押してもう一度試してください。繰り返すときはパソコンを再起動してください。",

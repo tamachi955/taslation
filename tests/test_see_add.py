@@ -128,7 +128,7 @@ def test_the_key_or_a_right_click_while_a_rectangle_is_drawn_gives_the_adding_up
     see = keyed.see
     marks = st.Marks(key=5, boxes=(), adding=True, serial=1)
     see._marks_live = marks
-    see._last_look = (None, (), [], 1, 0.0, (0, 0), SIZE, True)
+    see._last_look = (None, (), st.Seen(), 1, 0.0, (0, 0), SIZE, True)
     see._edit_redraw = lambda: None
     see._edit_takes = True  # (marks handed: the window takes the mouse)
     see._press = {"adding": True, "start": (10, 10), "now": (40, 40), "moved": True, "marks": marks}
@@ -200,7 +200,7 @@ def test_a_press_of_delete_is_handed_to_the_tk_thread_and_gives_a_box_held_up(ke
     assert see.take_keys() == []  # (not Insert's)
     marks = st.Marks(key=5, boxes=((10, 10, 60, 60),), serial=1)
     see._marks_live = marks
-    see._last_look = (None, (), [], 1, 0.0, (0, 0), SIZE, True)
+    see._last_look = (None, (), st.Seen(), 1, 0.0, (0, 0), SIZE, True)
     see._edit_redraw = lambda: None
     see._edit_takes = True
     see._press = {"index": 0, "grip": "move", "start": (20, 20), "now": (40, 40), "moved": True, "marks": marks}

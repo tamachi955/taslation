@@ -38,8 +38,9 @@ where no window lies over it - and the viewer the keys alone.
   there is taken at once, `take_language`), the lettering's switch, the indicators' switch (kept in the settings
   file: ``see_through_indicators``), Reader mode (with TASlation's window hidden; unchecked, the page's regions are
   edited on the overlay, `see_edit`), Add area (a text area drawn on the page, editing or in Reader mode:
-  `see_edit.toggle_adding`; pressed while one is to be added; "(Insert)" while that key adds one), Set area...,
-  Settings..., Menu (`see_menu`: what the hidden root's controls offer that still means something here), Quit -,
+  `see_edit.toggle_adding`; pressed while one is to be added; "(Insert)" while that key adds one), Settings...,
+  Menu (`see_menu`: what the hidden root's controls offer that still means something here, Set area... among it),
+  Quit -,
   RIGHT the indicators, a column as high as the steady band (`panes.render_column`) by one rule: what changes
   above, what lasts below (`right_rows`). From the top: the bubble last under the pointer (`bubble_rows`: Copy the
   Japanese, Copy the translation and Ask again, then its Japanese and its translation; kept once the pointer has
@@ -108,6 +109,7 @@ import re
 import threading
 import time
 import tkinter as tk
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -144,10 +146,10 @@ REST_S = 0.3  # a frame not at rest (`note_frame`) is the page at rest once it h
 RELEASE_S = 1.0  # ... and one the button was held over, once so long has passed since its release with no other picture
 # (`rest_tick`: the viewer had not answered it yet; the live view's RELEASE_ANSWER_MS)
 CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`read_under_bars`)
-COMPARE_INFO = "taslation.see_compare"  # (the picture's info) what the patches of a page read from it are compared
-# by beyond their own place (`compare_within`); kept when the bars' mark (PAINTED_INFO) goes
-EDGE_PX = 2  # a patch's margin keeps so far inside the page box and the capture area (`compare_within`)
-# (CUT_PX, EDGE_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
+SIGN_INFO = "taslation.see_sign"  # (the picture's info) what the sign of the page read from it is made of
+# (`stamp_sign`); kept when the bars' mark (PAINTED_INFO) goes
+STRIPS_KEPT = 16  # (`note_strips`) the strips along the capture area's edges kept, per viewer, size and area
+# (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
 UNSHOWN_EVERY_S = 1.0  # the page on show's translated regions whose lettering shows not looked at more often
 UNSHOWN_SETTLE_S = 0.5  # ... and only once the viewer's frame looked at has been its newest so long
 UNSHOWN_LOGGED = 3  # lines a page gives the log of them at the most (`unshown_tick`)
@@ -1194,7 +1196,6 @@ def left_rows(app: Any) -> list[pn.Row]:
             pn.Row("lettering", _("Lettering"), "toggle", on=bool(over is None or over.on)),
             pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
             *edit,
-            pn.Row("area", _("Set area...")),
             pn.Row("settings", _("Settings...")),
             pn.Row("menu", _("Menu")),
             pn.Row("quit", _("Quit"))]
@@ -1843,7 +1844,6 @@ PANE_ACTIONS: dict[str, Any] = {
     "language": _language_list,  # (every target language listed beside the pane: `see_menu.languages_at_pane`)
     "lettering": toggle,
     "indicators": _flip_indicators,
-    "area": _dialog("set_area"),
     "settings": _dialog("open_settings"),
     "menu": _menu,
     "edit": lambda app: _edit(app),  # (Reader mode: the Reader role, or editing on the overlay, `see_edit`)
@@ -1872,21 +1872,22 @@ class Patcher:
     def __init__(self, over: Any, run: bool = True) -> None:
         self.over = over
         self._lock = threading.Lock()
-        self._waiting: dict[int, tuple[Any, ...]] = {}  # frame key -> (frame, lettered, final, margin, gap), in order
+        self._waiting: dict[int, tuple[Any, ...]] = {}  # frame key -> (frame, lettered, final, gap), in order
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._pixels: list[tuple[Image.Image, np.ndarray]] = []  # (frame, its RGB pixels), the patch thread's own
+        # (frame, its RGB pixels, its page's sign), the patch thread's own
+        self._pixels: list[tuple[Image.Image, np.ndarray, st.PageSign]] = []
         self.made = 0
         self._thread: threading.Thread | None = None
         if run:
             self._thread = threading.Thread(target=self._run, name="taslation-patches", daemon=True)
             self._thread.start()
 
-    def put(self, original: Image.Image, lettered: Image.Image, final: bool, margin: int, gap: int) -> None:
+    def put(self, original: Image.Image, lettered: Image.Image, final: bool, gap: int) -> None:
         with self._lock:
             key = id(original)
             self._waiting.pop(key, None)
-            self._waiting[key] = (original, lettered, final, margin, gap)
+            self._waiting[key] = (original, lettered, final, gap)
         self._wake.set()
 
     def close(self) -> None:
@@ -1912,37 +1913,24 @@ class Patcher:
             except Exception:  # noqa: BLE001 - that state of the page shows no patches; the next one is made
                 log.debug("see-through mode: the patches of a page could not be made", exc_info=True)
 
-    def _frame_pixels(self, original: Image.Image) -> np.ndarray:
-        for image, pixels in self._pixels:
+    def _frame_pixels(self, original: Image.Image) -> tuple[np.ndarray, st.PageSign]:
+        for image, pixels, sign in self._pixels:
             if image is original:
-                return pixels
+                return pixels, sign
         pixels = _rgb(original)
-        self._pixels = [(original, pixels), *self._pixels[:MEMO_KEPT - 1]]
-        return pixels
+        sign = sign_of(original, pixels)
+        self._pixels = [(original, pixels, sign), *self._pixels[:MEMO_KEPT - 1]]
+        return pixels, sign
 
-    def _make(self, key: int, original: Image.Image, lettered: Image.Image, final: bool, margin: int,
-              gap: int) -> None:
-        within, off_rows = compared_by(original)
-        patches = st.make_patches(self._frame_pixels(original), _rgb(lettered), margin=margin, gap=gap,
-                                  within=within, off_rows=off_rows)
-        self.over.present(key, original.size, patches, final)
+    def _make(self, key: int, original: Image.Image, lettered: Image.Image, final: bool, gap: int) -> None:
+        pixels, sign = self._frame_pixels(original)
+        patches = st.make_patches(pixels, _rgb(lettered), gap=gap)
+        self.over.present(key, original.size, patches, final, sign)
         self.made += 1
 
 
 def _meets_box(a: Any, b: Any) -> bool:
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
-
-
-def _differs_where(where: dict[str, Any], limit: float) -> str:
-    """The part of a patch's compared pixels that keeps it hidden (`seethrough.where_differs`): "box" when its own
-    place is another, else the margin's side with the largest share of other pixels ("top", ...); "size" for a frame
-    that does not hold the place."""
-    if "size" in where:
-        return "size"
-    if where.get("box", (0.0, 0))[0] > limit:
-        return "box"
-    sides = [(v[0], k) for k, v in where.items() if k != "box"]
-    return max(sides)[1] if sides else "box"
 
 
 def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
@@ -1953,11 +1941,12 @@ def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
     for, takes the look as it is).
 
     Each region not shown: (its index among the page's regions, the kind, facts): "no patch" (its lettering changed
-    no pixel there), "covered" (a window over the viewer), "hover" (the pointer rests on it), "original" (the editor
-    shows its original), "left out" (editing: its box takes nothing), "hidden:WHY" (the lettering hidden: off, away,
-    no viewer...), "no match" (no patch of the page matches the frame), or "differs:PART" - its pixels compared are
-    other than when it was read (`_differs_where`: "box", "top", "bottom", "left", "right", "size"), with the share
-    and the limit."""
+    no pixel there), "covered" (a window over the viewer), "bars" (a bar of the viewer's over its rows, the rows given),
+    "hover" (the pointer rests on it), "original" (the editor shows its original), "left out" (editing: its box takes
+    nothing), "hidden:WHY" (the lettering hidden: off, away, no viewer...), "no match" (the viewer's frame is not its
+    page: another page, the page moving; the nearest set's distance and the limit given), or "not drawn" (none of
+    its patches is on the layer, for none of those reasons). Whether a region shows is read back from what the window
+    drew ("drawn"), not worked out here."""
     over = getattr(app, "_see_through", None)
     result = getattr(app, "last_result", None)
     original = getattr(result, "original", None)
@@ -1983,12 +1972,13 @@ def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
         out = [(i, f"hidden:{hidden}", {}) for i, _r in regions]
     elif why.get("key") is None:
         known = key in why.get("sets", ())
-        out = [(i, "no match", {"set_known": int(known)}) for i, _r in regions]
+        looked = dict(why.get("looked", ()))
+        facts = {"set_known": int(known), "distance": looked.get(key), "limit": why.get("limit", st.PAGE_TOL)}
+        out = [(i, "no match", dict(facts)) for i, _r in regions]
     else:
         boxes, drawn = why.get("boxes", ()), set(why.get("drawn", ()))
-        covered, held, bare = set(why.get("covered", ())), set(why.get("held", ())), set(why.get("bare", ()))
-        valid, where, shares = set(why.get("valid", ())), why.get("where", {}), why.get("shares", ())
-        limit = float(why.get("share_limit", st.CHANGED_SHARE))
+        covered, bare = set(why.get("covered", ())), set(why.get("bare", ()))
+        barred, bars = set(why.get("barred", ())), tuple(why.get("bars", ()))
         left_out_boxes = {tuple(b) for k, b in enumerate(why.get("region_boxes", ())) if k in set(why.get(
             "left_out", ()))}
         for i, r in regions:
@@ -2002,29 +1992,27 @@ def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
             facts: dict[str, Any] = {"patches": len(own)}
             if any(k in covered for k in own):
                 kind = "covered"
-            elif why.get("hover") in own:
+            elif any(k in barred for k in own):
+                kind = "bars"
+                facts["rows"] = bars
+            elif why.get("hover") in own or any(k in set(why.get("original", ())) for k in own):
                 kind = "hover"
             elif any(k in bare for k in own):
                 kind = "original"
-            elif all(k in valid for k in own) and bbox in left_out_boxes:
+            elif bbox in left_out_boxes:
                 kind = "left out"
             else:
-                bad = [k for k in own if k not in valid]
-                worst = max(bad or own, key=lambda k: shares[k] if k < len(shares) else 0.0)
-                part = _differs_where(where.get(worst, {}), limit)
-                kind = f"differs:{part}"
-                facts.update(share=shares[worst] if worst < len(shares) else None, limit=limit,
-                             where={k: v[0] for k, v in where.get(worst, {}).items()},
-                             box=tuple(boxes[worst]), near=tuple(why.get("near", ())[worst]) if worst < len(
-                                 why.get("near", ())) else None, held=int(worst in held))
+                kind = "not drawn"
             out.append((i, kind, facts))
     from collections import Counter
 
-    within, off_rows = (getattr(original, "info", {}).get(COMPARE_INFO) or (None, ()))
+    sign = sign_facts(original)
     return {"key": key, "regions": len(regions), "not_shown": out, "kinds": dict(Counter(k for _i, k, _f in out)),
             "editing": bool(why.get("editing")), "final": bool(why.get("final", True)),
-            "boxes": [(i, tuple(int(v) for v in r.bbox)) for i, r in regions], "within": within,
-            "off_rows": tuple(off_rows), "size": tuple(original.size)}
+            "boxes": [(i, tuple(int(v) for v in r.bbox)) for i, r in regions],
+            "area": sign[0] if sign else None, "page": sign[1] if sign else None,
+            "cut": tuple(sign[2]) if sign else (), "distance": why.get("distance"), "limit": why.get("limit"),
+            "size": tuple(original.size)}
 
 
 def unshown_tick(app: Any, now: float | None = None) -> None:
@@ -2076,42 +2064,54 @@ def unshown_tick(app: Any, now: float | None = None) -> None:
             logged.pop(old, None)
 
 
-def compared_by(original: Any) -> tuple[Any, tuple[tuple[int, int], ...]]:
-    """(within, off_rows) of `seethrough.compare_box` for the patches of a page read from the frame *original*: what
-    `compare_within` stamped on it at its capture; (None, ()) for a frame that has none (a test's, an older one)."""
-    given = getattr(original, "info", {}).get(COMPARE_INFO)
-    if not given:
-        return None, ()
-    within, off_rows = given
-    return within, tuple(off_rows)
+def sign_facts(original: Any) -> tuple[Any, Any, tuple[tuple[int, int], ...], Any] | None:
+    """(area, page columns, cut rows, the area's pixels every ROW_STEP-th) that `stamp_sign` stamped on the frame
+    *original* at its capture; None for a frame that has none (a test's, a tool's)."""
+    given = getattr(original, "info", {}).get(SIGN_INFO)
+    return tuple(given) if given else None  # type: ignore[return-value]
 
 
-def compare_within(app: Any, image: Image.Image, facts: Any) -> None:
-    """(each frame captured in see-through mode, `LiveViewMixin._capture_frame`) What the patches of a page read from
-    *image* (the frame as it is read: `reading_frame`'s) are compared by beyond their own place, stamped on it
-    (COMPARE_INFO, which its copies carry): the capture area and the page box found in it (`frame_look`; none found:
-    the area alone), each EDGE_PX inside its edges, and the rows painted over in it (PAINTED_INFO) with CUT_PX about
-    them. A margin outside those took in pixels that change while the page does not - the viewer's ground and the
-    browser's band beside a page's edge, the page's border row, the painted rows once the bars had gone (the page is
-    there then) -, and the lettering of a bubble touching the page's edge stayed hidden."""
+def sign_of(original: Image.Image, pixels: np.ndarray) -> st.PageSign:
+    """The sign of the page read from the frame *original* (`seethrough.page_sign`; *pixels* its RGB): made of what
+    `stamp_sign` stamped on it - the capture area, the page box's columns, the rows painted over and the area's
+    pixels as captured (bars that stayed on show are a bar only once they go) -, or of the frame alone."""
+    given = sign_facts(original)
+    if given is None:
+        return st.page_sign(pixels, (0, 0, original.width, original.height))
+    area, page, cut, rows = given
+    sign = st.page_sign(pixels, area, page, cut)
+    if rows is not None and getattr(rows, "shape", None) == sign.rows.shape:
+        sign = replace(sign, rows=rows)
+    return sign
+
+
+def stamp_sign(app: Any, image: Image.Image, facts: Any) -> None:
+    """(each frame captured in see-through mode, `LiveViewMixin._capture_frame`) What the sign of a page read from
+    *image* (the frame as it is read: `reading_frame`'s) is made of, stamped on it (SIGN_INFO, which its copies carry):
+    the capture area less its strips (`seethrough.Look.strips`), the page box's columns found in it (`frame_look`;
+    None: none), the rows painted over in it
+    (PAINTED_INFO) with CUT_PX about them, and the area's pixels every `seethrough.ROW_STEP`-th as captured (BGR) -
+    so that bars that stayed while it was read, there on the frame read, are a bar only once they go. Before, the
+    patches were each compared by their own pixels and a margin about them, kept within the area and the page box."""
     try:
         _rgb_area, area = area_rgb(app, image, facts)
         found = frame_look(app, image, facts)
-        edge = px(app, EDGE_PX)
-        box = area
-        if found.box is not None:
-            page = found.box
-            box = (max(area[0], page[0]), max(area[1], page[1]), min(area[2], page[2]), min(area[3], page[3]))
-            if box[2] <= box[0] or box[3] <= box[1]:
-                box = area
-        within = (box[0] + edge, box[1] + edge, box[2] - edge, box[3] - edge)
-        if within[2] <= within[0] or within[3] <= within[1]:
-            within = box
+        page = None if found.box is None else (int(found.box[0]), int(found.box[2]))
+        top, bottom = area[1], area[3]
+        for a, b in found.strips:  # (what lies beyond the area along its edge: not the page's, as it is not read)
+            if a <= top < b:
+                top = b
+            if a < bottom <= b:
+                bottom = a
+        if bottom > top:
+            area = (area[0], top, area[2], bottom)
         cut = px(app, CUT_PX)
         rows = tuple((max(0, int(a) - cut), int(b) + cut) for a, b in getattr(image, "info", {}).get(PAINTED_INFO, ()))
-        image.info[COMPARE_INFO] = (tuple(int(v) for v in within), rows)
-    except Exception:  # noqa: BLE001 - (no stamp: the patches are compared as before, the box grown alone)
-        log.debug("see-through mode: what the patches are compared by could not be stamped", exc_info=True)
+        step = st.ROW_STEP
+        sample = np.ascontiguousarray(facts.rgb()[area[1]:area[3]:step, area[0]:area[2]:step, 2::-1])
+        image.info[SIGN_INFO] = (tuple(int(v) for v in area), page, rows, sample)
+    except Exception:  # noqa: BLE001 - (no stamp: the sign is made of the frame read alone)
+        log.debug("see-through mode: what the page's sign is made of could not be stamped", exc_info=True)
 
 
 def pairs(app: Any) -> list[tuple[Image.Image, Image.Image, bool, tuple[Any, ...]]]:
@@ -2147,15 +2147,14 @@ def present(app: Any) -> None:
             continue
         if original.size != lettered.size:
             continue
-        margin, gap = px(app, st.MARGIN), px(app, st.GROUP_PX)
+        gap = px(app, st.GROUP_PX)
         if patcher is not None:
             patcher.put(original, lettered.copy() if fill is not None and lettered is fill.page else lettered, final,
-                        margin, gap)
+                        gap)
         else:
-            within, off_rows = compared_by(original)
-            over.present(id(original), original.size, st.make_patches(_rgb(original), _rgb(lettered), margin=margin,
-                                                                      gap=gap, within=within, off_rows=off_rows),
-                         final)
+            pixels = _rgb(original)
+            over.present(id(original), original.size, st.make_patches(pixels, _rgb(lettered), gap=gap), final,
+                         sign_of(original, pixels))
         memo[:] = [(original, state), *[(img, s) for img, s in memo if img is not original]][:MEMO_KEPT]
 
 
@@ -2196,11 +2195,12 @@ def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
             before = None  # (another size than the rest's: no half of its spread here)
         if before is not None:
             before = (before[0] - box[0], before[1] - box[1], before[2] - box[0], before[3] - box[1])
-        found = st.look(rgb, before, step=px(app, st.LOOK_STEP))
+        found = st.look(rgb, before, step=px(app, st.LOOK_STEP), strip=px(app, st.STRIP_PX))
         page = None if found.box is None else (found.box[0] + box[0], found.box[1] + box[1],
                                                  found.box[2] + box[0], found.box[3] + box[1])
         rows = tuple((a + box[1], b + box[1]) for a, b in found.bands)
-        return st.Look(page, rows, found.kind, found.ground)
+        strips = tuple((a + box[1], b + box[1]) for a, b in found.strips)
+        return st.Look(page, rows, found.kind, found.ground, strips)
 
     return facts.get(("see_look",), make)
 
@@ -2690,7 +2690,7 @@ def painted_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
     """The look of the frame `reading_frame` made of *image* (its bars painted over): *image*'s, with no bars - so
     that the frame read is never one to wait out, and its steady part is *image*'s (`thumb`)."""
     found = frame_look(app, image, facts)
-    return st.Look(found.box, (), found.kind, found.ground)
+    return st.Look(found.box, (), found.kind, found.ground, found.strips)
 
 
 def thumb(app: Any, image: Image.Image, facts: Any) -> np.ndarray:
@@ -2712,3 +2712,61 @@ def page_box(app: Any, image: Image.Image, facts: Any) -> tuple[int, int, int, i
     if found.kind is not None:
         return None
     return found.box
+
+
+def _strip_key(app: Any, size: Any, area: Any) -> tuple[Any, ...]:
+    win = getattr(app, "selected", None)
+    return int(getattr(win, "hwnd", 0) or 0), tuple(size), tuple(int(v) for v in area)
+
+
+def note_strips(app: Any, image: Image.Image, facts: Any) -> None:
+    """(each frame captured in see-through mode, before its capture area is applied: `LiveViewMixin._find_page`) The
+    strips along the capture area's top and bottom edges in *image* (`seethrough.Look.strips`: rows of what lies
+    beyond the area, a browser's own bar under an area set 3 px over its foot), kept per viewer, frame size and area
+    once seen - they are the same on every frame - for `strip_margins`. A frame to wait out tells nothing."""
+    found = frame_look(app, image, facts)
+    if found.kind is not None or not found.strips:
+        return
+    kept = app.__dict__.get("_see_strips")
+    if kept is None:
+        kept = app.__dict__["_see_strips"] = {}
+    key = _strip_key(app, image.size, _area_of(app, image))
+    if kept.get(key) == found.strips:
+        return
+    kept.pop(key, None)
+    kept[key] = found.strips
+    while len(kept) > STRIPS_KEPT:
+        kept.pop(next(iter(kept)))
+    log.info("see-through: a strip of %s along the capture area's edge (rows %s) is read as beyond the area, not "
+             "as the viewer's bars", "row" if len(found.strips) == 1 else "rows",
+             ", ".join(f"{a}-{b}" for a, b in found.strips))
+
+
+def strip_margins(app: Any, margins: Any, size: Any) -> tuple[int, int, int, int]:
+    """*margins* (the capture area read) without the strips along the area's edges seen in frames of *size*
+    (`note_strips`): the rows of a browser's own bar 3 px inside an area set by hand are left out of what is read, as
+    they were when they were painted over as bars - the page units, their fingerprints and so the cache's pages are
+    those of the page alone -, and a bubble cut by the area's top is cut where the bar ends. *margins* as they are
+    where none was seen (or *size* is None)."""
+    margins = tuple(int(m) for m in margins)
+    kept = getattr(app, "_see_strips", None)
+    if not kept or size is None or not on(app):
+        return margins  # type: ignore[return-value]
+    from . import area
+
+    win = getattr(app, "selected", None)
+    hwnd = int(getattr(win, "hwnd", 0) or 0)
+    left, top, right, bottom = margins
+    width, height = int(size[0]), int(size[1])
+    for (key_hwnd, key_size, box), strips in kept.items():
+        if key_hwnd != hwnd or tuple(key_size) != (width, height):
+            continue
+        read = area.margins_to_box((left, top, right, bottom), (width, height))
+        if not (box[1] <= read[1] and read[3] <= box[3]):
+            continue
+        for a, b in strips:  # (a strip's rows, frame pixels: the reading area's edge within them goes past them)
+            if a <= top < b:
+                top = int(b)
+            if a < height - bottom <= b:
+                bottom = height - int(a)
+    return left, top, right, bottom

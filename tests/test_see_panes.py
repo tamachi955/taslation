@@ -29,8 +29,8 @@ BAND = (142, 832)  # the steady band: the capture area less its top 15 % and bot
 def controls():
     return [pn.Row("translate", "Translate", square="again"), pn.Row("auto", "Auto", "toggle", on=True),
             pn.Row("language", "English", "list"), pn.Row("lettering", "Lettering", "toggle", on=True),
-            pn.Row("indicators", "Indicators", "toggle", on=True), pn.Row("area", "Set area..."),
-            pn.Row("settings", "Settings..."), pn.Row("menu", "Menu"), pn.Row("quit", "Quit")]
+            pn.Row("indicators", "Indicators", "toggle", on=True), pn.Row("settings", "Settings..."),
+            pn.Row("menu", "Menu"), pn.Row("quit", "Quit")]
 
 
 def words():
@@ -819,14 +819,13 @@ def test_a_language_clicked_in_the_list_is_taken_at_once_and_the_one_in_force_ch
 def test_the_left_pane_ends_with_menu_and_quit_and_offers_no_way_to_taslations_window(tmp_path):
     app = fake_app(tmp_path)
     names = [r.name for r in ui.left_rows(app)]
-    assert names[-4:] == ["area", "settings", "menu", "quit"] and "window" not in names
+    assert names[-3:] == ["settings", "menu", "quit"] and "window" not in names
+    assert "area" not in names and "area" not in ui.PANE_ACTIONS  # (Set area... is in the Menu: `see_menu.build`)
     assert "window" not in ui.PANE_ACTIONS and not hasattr(ui, "window_up") and not hasattr(ui, "aside")
     opened = []
-    app.set_area = lambda: opened.append(("area", app._see_asked))
     app.open_settings = lambda: opened.append(("settings", app._see_asked))
-    ui.PANE_ACTIONS["area"](app)
     ui.PANE_ACTIONS["settings"](app)
-    assert [n for n, _t in opened] == ["area", "settings"] and all(t > 0 for _n, t in opened)  # (asked for)
+    assert [n for n, _t in opened] == ["settings"] and all(t > 0 for _n, t in opened)  # (asked for)
 
 
 def test_the_pane_windows_are_layered_topmost_and_never_activated_the_right_one_click_through():
@@ -1144,7 +1143,7 @@ def test_the_patch_under_the_pointer_is_left_out_and_back_once_it_has_gone_the_o
     origin = (500, 300)
     chosen = FakeSet([(100, 100, 200, 160), (300, 100, 380, 160), (100, 400, 200, 460)])
     over, drawn = watching(monkeypatch, (origin[0] + 150, origin[1] + 130))
-    look = (chosen, (0, 1, 2), [0.0] * 3, 1, 0.0, origin, (900, 800), True)
+    look = (chosen, (0, 1, 2), st.Seen(), 1, 0.0, origin, (900, 800), True)
     over._show_look(*look)
     assert drawn[-1] == ("show", (1, 2)) and over.counts["hovers"] == 1
     over._pointer = (origin[0] + 207, origin[1] + 130)  # (off its edge, within the farther margin: still out)
@@ -1158,7 +1157,7 @@ def test_the_patch_under_the_pointer_is_left_out_and_back_once_it_has_gone_the_o
     assert over._shown[1] == (0, 1, 2)
     # a patch alone under the pointer: nothing shows while it is there
     over._pointer = (origin[0] + 150, origin[1] + 130)
-    over._show_look(FakeSet([(100, 100, 200, 160)]), (0,), [0.0], 1, 0.0, origin, (900, 800), True)
+    over._show_look(FakeSet([(100, 100, 200, 160)]), (0,), st.Seen(), 1, 0.0, origin, (900, 800), True)
     assert drawn[-1] == ("hide", "hover")
 
 
@@ -1168,7 +1167,7 @@ def test_over_a_pane_or_a_window_above_the_viewer_the_pointer_leaves_the_patches
     point = (origin[0] + 150, origin[1] + 130)
     over, drawn = watching(monkeypatch, point)
     over._pane_shown["left"] = (1, (point[0] - 20, point[1] - 20), (60, 60))  # (a pane over that place)
-    look = (chosen, (0, 1), [0.0] * 2, 1, 0.0, origin, (900, 800), True)
+    look = (chosen, (0, 1), st.Seen(), 1, 0.0, origin, (900, 800), True)
     over._show_look(*look)
     assert drawn[-1] == ("show", (0, 1))
     over._pane_shown["left"] = None

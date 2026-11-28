@@ -166,7 +166,7 @@ ORIGIN, SIZE = (500, 300), (900, 800)
 
 
 def look(see, chosen, shown):
-    see._last_look = (chosen, shown, [0.0] * len(chosen.patches), 1, 0.0, ORIGIN, SIZE, True)
+    see._last_look = (chosen, shown, st.Seen(), 1, 0.0, ORIGIN, SIZE, True)
     see._show_look(*see._last_look)
 
 
@@ -329,31 +329,31 @@ def test_a_page_with_no_patch_has_its_marks_while_no_set_is_chosen(over):
     assert over._patchless is None and over._marks_for(None) is None
 
 
-def test_a_box_with_no_patch_takes_nothing_while_the_viewer_has_other_pixels_round_it(over):
-    page = np.zeros((SIZE[1], SIZE[0], 3), np.uint8)
-    page[90:170, 290:390] = (30, 120, 200)  # (RGB: what lies round B in the frame read)
-    original = Image.fromarray(page)
-    app = SimpleNamespace()
-    probe = see_edit._probe(app, original, B, SIZE, 96)
-    assert probe.near == st.grow(B, st.MARGIN, SIZE) and see_edit._probe(app, original, B, SIZE, 96) is probe
-    view = np.zeros((SIZE[1], SIZE[0], 4), np.uint8)
-    view[..., :3] = page[:, :, ::-1]  # (the viewer's frame: BGRA)
-    assert st.changed_share(probe, view) == 0.0
-    marks = st.Marks(key=5, boxes=(A, B), probes=(None, probe), serial=1)
-    chosen = FakeSet([A])  # (B has no patch: nothing lettered in it)
+def test_a_box_under_a_bar_takes_nothing_and_a_lettered_box_with_nothing_on_show_is_outlined_dashed(over):
+    marks = st.Marks(key=5, boxes=(A, B), serial=1, lettered=(True, True))
+    chosen = FakeSet([A])  # (B has no patch: its lettering changed no pixel there)
     over.set_edit(marks)
     over._edit_take(True, [chosen])
-    assert over._failed_probes(chosen, view) == frozenset()
-    barred = view.copy()
-    barred[80:140] = (255, 255, 255, 255)  # (the viewer's bar laid over B)
-    assert over._failed_probes(chosen, barred) == frozenset({B})
-    over._probes_failed = over._failed_probes(chosen, barred)
     look(over, chosen, (0,))
-    assert over._left_out == frozenset({1})  # (B takes nothing: a click there is the viewer's)
-    over._probes_failed = over._failed_probes(chosen, view)
-    over.set_edit(st.Marks(key=5, boxes=(A, B), probes=(None, probe), serial=2))
+    assert over._left_out == frozenset() and over._why["unshown"] == (1,)  # (B: translated, not on the screen)
+    assert over.drawn[-1][1][7] == frozenset({1})  # (drawn dashed, never as a box translated over the Japanese)
+    over._last_look = (chosen, (), st.Seen(0.0, ((0, 120),)), 1, 0.0, ORIGIN, SIZE, True)  # a bar over rows 0-120
+    over._show_look(*over._last_look)
+    assert over._left_out == frozenset({0, 1})  # (under it: a press there is the bar's, no outline, no mark)
+    assert (0, 0, SIZE[0], 120) in over.drawn[-1][1][6] and over.drawn[-1][1][7] == frozenset()
+    over.set_edit(st.Marks(key=5, boxes=(A, B), serial=2, lettered=(True, False)))
     look(over, chosen, (0,))
-    assert over._left_out == frozenset()
+    assert over._why["unshown"] == ()  # (B nothing lettered: no mark)
+
+
+def test_a_dashed_outline_lets_the_page_show_between_its_dashes():
+    out = np.zeros((300, 500, 4), np.uint8)
+    colours = ((132, 220, 61), (71, 179, 255))
+    st.edit_compose(out, st.Marks(key=1, boxes=(A, B), colours=colours), None, None, 96, unshown=frozenset({1}))
+    dash = st.scaled(st.DASH_PX, 96)
+    assert tuple(out[100, 300]) == (*colours[1], 255) and tuple(out[100, 300 + dash]) == (0, 0, 0, st.EDIT_ALPHA)
+    assert tuple(out[100, 300 + 2 * dash]) == (*colours[1], 255)
+    assert all(tuple(out[100, x]) == (*colours[0], 255) for x in range(100, 200))  # (the other: its line)
 
 
 def press(over, x, y, shift=False):

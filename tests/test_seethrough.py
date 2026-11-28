@@ -1,7 +1,8 @@
-"""See-through mode's pure parts (`taslation.seethrough`): the patches and the rule that a patch shows only over the
-pixels it was made from, the window's picture, and what tells another page from bars over it and from a frame to
-wait out. Synthetic frames only."""
+"""See-through mode's pure parts (`taslation.seethrough`): the patches and the rule that a page's patches show whole
+while the viewer's frame is that page (its sign), but under a bar of the viewer's; the window's picture, and what
+tells another page from bars over it, a strip along the area's edge and a frame to wait out. Synthetic frames only."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -22,6 +23,39 @@ def page(seed=1, ground=0, box=(100, 0, 300, 300)):
     art = rng.integers(60, 250, (bottom - top, right - left, 1), dtype=np.uint8).repeat(3, axis=2)
     frame[top:bottom, left:right] = art
     return frame
+
+
+def art(seed=1, ground=0, box=(100, 0, 300, 300)):
+    """A frame: a ground of one grey level, a 'page' of flat grey blocks 40 px a side in *box* (as a page's picture,
+    drawn soft it stays near itself)."""
+    import cv2
+
+    rng = np.random.default_rng(seed)
+    frame = np.full((H, W, 3), ground, np.uint8)
+    left, top, right, bottom = box
+    coarse = rng.integers(60, 250, ((bottom - top) // 40 + 1, (right - left) // 40 + 1), dtype=np.uint8)
+    big = cv2.resize(coarse, (right - left, bottom - top), interpolation=cv2.INTER_NEAREST)
+    frame[top:bottom, left:right] = big[..., None].repeat(3, axis=2)
+    return frame
+
+
+def soft(frame):
+    """The frame drawn from a picture half its size (a viewer's first, soft picture of a page)."""
+    import cv2
+
+    small = cv2.resize(frame, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
+    return cv2.resize(small, (W, H), interpolation=cv2.INTER_LINEAR)
+
+
+def sign_of(frame, page=(100, 300), area=None, cut=()):
+    return st.page_sign(frame, area or (0, 0, W, H), page, cut)
+
+
+def put(store, key, frame, boxes, **kw):
+    """The set of the page *frame* lettered in *boxes*, with its sign, put into *store*."""
+    patches = st.make_patches(frame, lettered(frame, boxes))
+    store.put(key, (W, H), patches, sign=sign_of(frame, **kw))
+    return patches
 
 
 def lettered(frame, boxes):
@@ -48,7 +82,7 @@ def test_a_patch_per_bubble_opaque_where_the_page_was_lettered_only():
     p = patches[0]
     assert p.bgra.shape == (40, 50, 4) and p.bgra[..., 3].min() == 255  # (all of the box was lettered here)
     assert tuple(p.bgra[5, 10, :3]) == (0, 0, 0) and tuple(p.bgra[0, 0, :3]) == (255, 255, 255)
-    assert p.near == (114, 14, 176, 66) and p.source.shape == (26, 31, 3)
+    assert not hasattr(p, "near")  # (no pixels of the frame kept with it: the page's sign decides)
 
 
 def test_letters_close_together_are_one_patch_and_a_stray_pixel_none():
@@ -61,7 +95,7 @@ def test_letters_close_together_are_one_patch_and_a_stray_pixel_none():
 
 
 def test_the_pixel_sizes_go_with_the_viewers_dpi():
-    # 100 %, 125 %, 150 %, 200 %: the group's 9 px, the margin's 6, the look's step of 4 and the cut's 3
+    # 100 %, 125 %, 150 %, 200 %: the group's 9 px, the margin by a bar's 6, the look's step of 4 and the cut's 3
     assert [st.scaled(st.GROUP_PX, d) for d in (96, 120, 144, 192)] == [9, 11, 14, 18]
     assert [st.scaled(st.MARGIN, d) for d in (96, 120, 144, 192)] == [6, 8, 9, 12]
     assert [st.scaled(st.LOOK_STEP, d) for d in (96, 120, 144, 192)] == [4, 5, 6, 8]
@@ -72,8 +106,8 @@ def test_the_pixel_sizes_go_with_the_viewers_dpi():
     done[50:60, 150:160] = 255 - done[50:60, 150:160]
     done[50:60, 172:182] = 255 - done[50:60, 172:182]  # 12 px apart: two patches at 100 %, one bubble at 150 %
     assert len(st.make_patches(frame, done)) == 2
-    one, = st.make_patches(frame, done, margin=st.scaled(st.MARGIN, 144), gap=st.scaled(st.GROUP_PX, 144))
-    assert one.box == (150, 50, 182, 60) and one.near == (141, 41, 191, 69)
+    one, = st.make_patches(frame, done, gap=st.scaled(st.GROUP_PX, 144))
+    assert one.box == (150, 50, 182, 60)
 
 
 def test_the_window_side_takes_the_sizes_at_the_viewers_dpi(monkeypatch):
@@ -85,11 +119,11 @@ def test_the_window_side_takes_the_sizes_at_the_viewers_dpi(monkeypatch):
     app._see_dpi = 144
     steps = []
     real = st.look
-    monkeypatch.setattr(ui.st, "look", lambda rgb, before=None, step=st.LOOK_STEP: steps.append(step) or
-                        real(rgb, before, step))
+    monkeypatch.setattr(ui.st, "look", lambda rgb, before=None, step=st.LOOK_STEP, strip=st.STRIP_PX:
+                        steps.append((step, strip)) or real(rgb, before, step, strip))
     image = Image.fromarray(page(ground=0))
     ui.frame_look(app, image, Facts(image))
-    assert steps == [6] and ui.px(app, ui.CUT_PX) == 5
+    assert steps == [(6, 12)] and ui.px(app, ui.CUT_PX) == 5
     app._see_dpi = 96
     assert ui.px(app, ui.CUT_PX) == ui.CUT_PX
     assert ui.window.viewer_dpi(0) == st.BASE_DPI  # (no viewer: as at 100 %)
@@ -100,52 +134,100 @@ def test_the_window_side_takes_the_sizes_at_the_viewers_dpi(monkeypatch):
         assert 96 <= ui.window.viewer_dpi(desktop) <= 480  # (the monitor's own; this test changes no setting)
 
 
-def test_a_patch_shows_over_its_own_pixels_and_goes_when_they_change():
-    frame = page()
-    patch = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60)]))[0]
-    assert st.changed_share(patch, bgra(frame)) == 0.0 and st.patch_matches(patch, bgra(frame))
-    turned = page(seed=2)
-    assert not st.patch_matches(patch, bgra(turned))  # another page under it
-    barred = frame.copy()
-    barred[0:30] = 40  # a bar over its top
-    assert not st.patch_matches(patch, bgra(barred))
-    elsewhere = frame.copy()
-    elsewhere[200:300] = 0  # a change far from it
-    assert st.patch_matches(patch, bgra(elsewhere))
-    margin = frame.copy()
-    margin[62:65, 130:140] = 255 - margin[62:65, 130:140]  # within MARGIN below it
-    assert not st.patch_matches(patch, bgra(margin))
-    assert st.changed_share(patch, bgra(frame[:50])) == 1.0  # (a frame that does not hold its place)
-
-
-def test_a_few_pixels_off_keep_it_and_a_soft_picture_does_not():
-    frame = page()
-    patch = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60)]))[0]
-    noisy = frame.astype(np.int16) + 20  # every pixel off by less than PIXEL_TOL
-    assert st.patch_matches(patch, bgra(np.clip(noisy, 0, 255).astype(np.uint8)))
-    import cv2
-
-    soft = cv2.GaussianBlur(frame, (9, 9), 3)  # the page drawn soft: another picture under the patch
-    assert st.changed_share(patch, bgra(soft)) > st.CHANGED_SHARE
-
-
-def test_the_newest_set_that_matches_shows_the_patches_that_match():
+def test_a_set_shows_whole_while_its_page_is_on_show_soft_or_sharp_and_goes_with_it():
+    frame = art()
     store = st.SetStore()
-    old, new = page(1), page(2)
-    a = st.make_patches(old, lettered(old, [(120, 20, 170, 60)]))
-    b = st.make_patches(new, lettered(new, [(120, 20, 170, 60), (200, 200, 260, 240)]))
-    store.put(1, (W, H), a)
-    store.put(2, (W, H), b)
+    put(store, 1, frame, [(120, 20, 170, 60), (220, 200, 280, 240)])
+    chosen, shown, seen = st.visible(store.sets, bgra(frame))
+    assert chosen.key == 1 and shown == (0, 1) and seen.distance == 0.0 and seen.bars == ()
+    assert st.page_distance(store.sets[0].sign, bgra(soft(frame))) <= st.PAGE_TOL
+    assert st.visible(store.sets, bgra(soft(frame)))[1] == (0, 1)  # the same page drawn soft: shown whole
+    noisy = np.clip(frame.astype(np.int16) + np.random.default_rng(5).integers(-12, 13, frame.shape), 0, 255)
+    assert st.visible(store.sets, bgra(noisy.astype(np.uint8)))[1] == (0, 1)  # (pixels a little off everywhere)
+    # another page, the page 2 px aside (moving), a jump's black: the set goes, every patch at once
+    for other in (art(seed=2), np.roll(frame, 2, axis=1), np.zeros_like(frame)):
+        chosen, shown, seen = st.visible(store.sets, bgra(other))
+        assert chosen is None and shown == () and seen.looked[0][0] == 1 and seen.looked[0][1] > st.PAGE_TOL
+    assert st.visible(store.sets, bgra(frame[:200]))[0] is None  # (another size: none)
+    assert st.page_distance(store.sets[0].sign, bgra(frame[:200])) == 255.0
+    store.put(2, (W, H), ())  # (a set with no sign: never shown)
+    assert st.visible(store.sets, bgra(frame))[0].key == 1
+
+
+def test_the_newest_set_whose_page_is_on_show_is_chosen_a_set_with_no_patches_too():
+    store = st.SetStore()
+    old, new = art(1), art(2)
+    put(store, 1, old, [(120, 20, 170, 60)])
+    put(store, 2, new, [(120, 20, 170, 60), (200, 200, 260, 240)])
     chosen, shown, _ = st.visible(store.sets, bgra(new))
     assert chosen.key == 2 and shown == (0, 1)
     chosen, shown, _ = st.visible(store.sets, bgra(old))  # turned back: the old page's patches at once
     assert chosen.key == 1 and shown == (0,)
     half = new.copy()
-    half[180:] = 0
-    chosen, shown, _ = st.visible(store.sets, bgra(half))
-    assert chosen.key == 2 and shown == (0,)
-    assert st.visible(store.sets, bgra(page(3)))[0] is None
-    assert st.visible(store.sets, bgra(new[:200]))[0] is None  # (another size: none)
+    half[180:] = 0  # (one half of the page another: the page is another page until read again)
+    assert st.visible(store.sets, bgra(half))[0] is None
+    store.put(3, (W, H), (), sign=sign_of(new))  # the page read again, nothing lettered: its marks go by it
+    chosen, shown, _ = st.visible(store.sets, bgra(new))
+    assert chosen.key == 3 and shown == ()
+
+
+def test_a_patch_at_the_area_s_edge_shows_whole_whatever_lies_beyond_it():
+    # the owner's case: a bubble at the very top of the page (its box from row 41, the page from row 40), the rows
+    # above it the browser's own band, whose last rows - inside the capture area - are drawn a shade apart later: no
+    # margin of the patch's is compared, and a line along the area's edge is no bar
+    frame = art(box=(100, 40, 300, 300))
+    frame[:40] = 60
+    store = st.SetStore()
+    put(store, 1, frame, [(120, 41, 170, 80), (101, 280, 140, 300)], area=(0, 37, W, H))
+    later = frame.copy()
+    later[36:40] = 160
+    chosen, shown, seen = st.visible(store.sets, bgra(later))
+    assert shown == (0, 1) and seen.bars == ()
+    assert st.bar_rows(store.sets[0].sign, bgra(later), least=0) == ((37, 41),)  # (a run of one row: no bar)
+
+
+def test_a_bar_over_the_page_hides_the_patches_it_lies_over_or_near_and_no_others():
+    frame = art()
+    store = st.SetStore()
+    put(store, 1, frame, [(120, 10, 170, 25), (180, 34, 200, 38), (230, 50, 280, 70), (220, 200, 280, 240)])
+    barred = frame.copy()
+    barred[:30] = 40  # a bar over the top
+    chosen, shown, seen = st.visible(store.sets, bgra(barred))
+    assert chosen.key == 1 and seen.distance == 0.0 and seen.bars == ((0, 32),)
+    assert shown == (2, 3)  # (under it, and MARGIN px below it: hidden; the others shown)
+    barred[272:] = 230  # and one over the bottom
+    assert st.visible(store.sets, bgra(barred))[2].bars == ((0, 32), (272, 300))
+    ground = frame.copy()
+    ground[:30, :100] = ground[:30, 300:] = 200  # (a bar over the ground beside the page, the page's columns as
+    assert st.bar_rows(store.sets[0].sign, bgra(ground)) == ((0, 32),)  # they were: a bar all the same)
+    middle = frame.copy()
+    middle[120:160, 100:300] = 30  # (rows across the page far from its edges: no bar; the page another)
+    assert st.bar_rows(store.sets[0].sign, bgra(middle)) == () and st.visible(store.sets, bgra(middle))[0] is None
+
+
+def test_rows_painted_over_in_the_frame_read_keep_out_of_its_steady_part():
+    frame = art()
+    painted = frame.copy()
+    painted[:80] = 0
+    sign = st.page_sign(painted, (0, 0, W, H), (100, 300), cut=((0, 83),))
+    assert sign.steady == (100, 83, 300, 264)  # (the steady part's top was inside the painted rows: below them)
+    assert st.page_distance(sign, bgra(frame)) == 0.0  # the bars gone, the page as it was
+
+
+def test_a_page_read_under_bars_shows_while_they_stay_and_its_patch_by_them_goes_once_they_go():
+    frame = art()
+    barred = frame.copy()
+    barred[:40] = 200  # bars that stayed: the page read with their rows painted in the ground's colour
+    painted = barred.copy()
+    painted[:40] = 0
+    done = lettered(painted, [(120, 43, 170, 80), (220, 200, 280, 240)])  # (3 px below them, and one far)
+    sign = st.page_sign(painted, (0, 0, W, H), (100, 300), cut=((0, 43),))
+    sign = replace(sign, rows=sign_of(barred).rows)  # (the area as captured: `ui.seethrough.stamp_sign`)
+    store = st.SetStore()
+    store.put(1, (W, H), st.make_patches(painted, done), sign=sign)
+    assert st.visible(store.sets, bgra(barred))[1] == (0, 1)  # the bars still there: all shown
+    chosen, shown, seen = st.visible(store.sets, bgra(frame))  # gone: the one by them waits for the page read again
+    assert chosen.key == 1 and shown == (1,) and seen.bars == ((0, 40),)
 
 
 def test_a_set_put_again_replaces_its_own_and_only_so_many_are_kept():
@@ -227,9 +309,24 @@ def test_one_look_finds_it_all_on_every_fourth_pixel_and_bars_are_painted_over()
     frame[:40] = 70
     found = st.look(frame)
     assert found.box == (100, 0, 300, 300) and found.bands == ((0, 40),) and found.kind is None
-    assert found.ground == (255, 255, 255)
+    assert found.ground == (255, 255, 255) and found.strips == ()
     clean = st.masked(frame, found.bands, found.ground)
     assert clean[:40].min() == 255 and np.array_equal(clean[40:], frame[40:])
+
+
+@pytest.mark.parametrize("ground", [0, 255])
+def test_a_strip_along_the_area_s_edge_is_no_band_and_the_page_is_looked_for_between_the_strips(ground):
+    # a browser's own bar 3 px inside an area set by hand (its foot), and 7 rows of something at the area's foot
+    frame = page(ground=ground, box=(100, 0, 300, 300))
+    frame[:3] = (222, 225, 230)
+    frame[293:] = (90, 90, 90)
+    found = st.look(frame)
+    assert found.bands == () and found.strips == ((0, 3), (293, 300)) and found.kind is None  # (to the row)
+    assert found.box == (100, 4, 300, 296)  # (the page between them, to within the look's step)
+    frame[:40] = 70  # a bar of the viewer's there: a band, no strip
+    found = st.look(frame)
+    assert found.bands == ((0, 40),) and found.strips == ((293, 300),)
+    assert st.look(frame, strip=0).bands == ((0, 40), (296, 300))  # (with no strips allowed: bands, as before)
 
 
 def test_see_through_mode_is_no_setting_but_the_programs_one_mode():
@@ -540,91 +637,36 @@ def test_after_the_bars_the_page_is_read_again_only_when_bubbles_were_left_out_a
     assert not ui.after_bars(app_with((1, 1), busy=True), plain) and len(calls) == 3  # (a job runs: later)
 
 
-# ------------------------------------------------------------------ a patch at the page's edge: the page's pixels alone
-def test_a_patch_s_margin_keeps_to_the_page_s_own_pixels_never_inside_its_box():
-    size = (W, H)
-    assert st.compare_box((120, 20, 170, 60), 6, size) == (114, 14, 176, 66)  # (as before: grown, within the frame)
-    # the capture area and the page box at rest (`ui.seethrough.compare_within`): the margin stops at them
-    assert st.compare_box((120, 2, 170, 60), 6, size, within=(102, 4, 298, 296)) == (114, 2, 176, 66)
-    assert st.compare_box((100, 100, 140, 296), 6, size, within=(102, 4, 298, 296)) == (100, 94, 146, 296)
-    # rows painted over in the frame read, wholly above or below the box: left out; a band across the box is left
-    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((0, 47),)) == (114, 47, 176, 96)
-    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((93, 120),)) == (114, 44, 176, 93)
-    assert st.compare_box((120, 50, 170, 90), 6, size, off_rows=((40, 60),)) == (114, 44, 176, 96)
-
-
-def test_a_bubble_touching_the_page_s_top_shows_though_the_browser_s_band_over_the_page_changes():
-    # the owner's case: a bubble at the very top of the page (its box from row 41, the page from row 40), the rows above
-    # the page the browser's own band - one shade in the frame read, another later (the page itself as it was)
-    frame = page(box=(100, 40, 300, 300))
-    frame[:40] = 60
-    done = lettered(frame, [(120, 41, 170, 80)])
-    later = frame.copy()
-    later[36:40] = 160  # (the band's last rows: a line drawn otherwise)
-    old = st.make_patches(frame, done)[0]
-    assert not st.patch_matches(old, bgra(later))  # the margin took the band in: hidden while the page was there
-    where = st.where_differs(old, bgra(later))
-    assert where["top"][0] > 0.3 and where["box"][0] == 0.0 and where["left"][0] == 0.0
-    new = st.make_patches(frame, done, within=(102, 42, 298, 298))[0]
-    assert new.near[1] == 41 and new.box == old.box
-    assert st.patch_matches(new, bgra(later))  # ... the page's own pixels alone: shown
-    turned = page(seed=2, box=(100, 40, 300, 300))
-    assert not st.patch_matches(new, bgra(turned))  # (another page under it still hides it)
-
-
-def test_a_bubble_just_below_rows_painted_over_shows_once_the_bars_have_gone():
-    frame = page()
-    painted = frame.copy()
-    painted[0:30] = 0  # (read with a bar's rows painted in the ground's colour)
-    done = lettered(painted, [(120, 33, 170, 70)])  # (3 px below them: not cut, its margin in them)
-    old = st.make_patches(painted, done)[0]
-    assert not st.patch_matches(old, bgra(frame))  # once the bars had gone, never shown again
-    new = st.make_patches(painted, done, off_rows=((0, 30 + 3),))[0]
-    assert new.near[1] == 33 and st.patch_matches(new, bgra(frame))
-    assert not st.patch_matches(new, bgra(page(seed=2)))
-
-
-def test_where_a_patch_s_pixels_differ_is_told_by_part():
-    frame = page()
-    patch = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60)]))[0]
-    assert set(st.where_differs(patch, bgra(frame))) == {"box", "top", "bottom", "left", "right"}
-    assert all(v[0] == 0.0 for v in st.where_differs(patch, bgra(frame)).values())
-    right = frame.copy()
-    right[20:60, 172:176] = 255 - right[20:60, 172:176]
-    got = st.where_differs(patch, bgra(right))
-    assert got["right"][0] > 0.5 and got["box"][0] == got["top"][0] == got["bottom"][0] == got["left"][0] == 0.0
-    assert st.where_differs(patch, bgra(frame[:50])) == {"size": (1.0, 0)}
-    edge = st.make_patches(frame, lettered(frame, [(0, 0, 40, 30)]))[0]  # (at the frame's corner: no top, no left)
-    assert set(st.where_differs(edge, bgra(frame))) == {"box", "bottom", "right"}
-
-
-def test_the_frame_read_is_stamped_with_the_page_s_own_pixels_and_its_patches_keep_to_them(monkeypatch):
+# ------------------------------------------------------------------ the frame read: what its page's sign is made of
+def test_the_frame_read_is_stamped_with_what_its_page_s_sign_is_made_of(monkeypatch):
     from PIL import Image
 
     from taslation.ui import seethrough as ui
 
-    app = SimpleNamespace(_see_dpi=144)  # (a viewer at 150 %: EDGE_PX 2 -> 3, CUT_PX 3 -> 5)
+    app = SimpleNamespace(_see_dpi=144)  # (a viewer at 150 %: CUT_PX 3 -> 5)
     monkeypatch.setattr(ui, "area_rgb", lambda app, image, facts: (None, (0, 40, W, H)))
-    monkeypatch.setattr(ui, "frame_look", lambda app, image, facts: st.Look((100, 30, 300, 300), (), None, (0, 0, 0)))
-    image = Image.new("RGB", (W, H))
-    image.info[ui.PAINTED_INFO] = ((40, 60),)
-    ui.compare_within(app, image, None)
-    assert ui.compared_by(image) == ((103, 43, 297, 297), ((35, 65),))
-    assert ui.compared_by(image.copy()) == ui.compared_by(image)  # (the frame read's copies carry it: the result's)
+    monkeypatch.setattr(ui, "frame_look", lambda app, image, facts: st.Look((100, 30, 300, 300), (), None,
+                                                                            (0, 0, 0), ((40, 44),)))
+    captured = art(box=(100, 44, 300, 300))
+    image = Image.fromarray(captured)
+    image.info[ui.PAINTED_INFO] = ((60, 80),)
+    ui.stamp_sign(app, image, Facts(image))
+    area, page_cols, cut_rows, rows = ui.sign_facts(image)
+    assert area == (0, 44, W, H) and page_cols == (100, 300) and cut_rows == ((55, 85),)  # (the strip left out)
+    assert rows.shape == (len(range(44, H, 4)), W // 4, 3)
+    assert ui.sign_facts(image.copy())[:3] == (area, page_cols, cut_rows)  # (the frame read's copies carry it)
     image.info.pop(ui.PAINTED_INFO)  # (`after_bars` takes the bars' mark: the stamp stays)
-    assert ui.compared_by(image)[1] == ((35, 65),)
-    assert ui.compared_by(Image.new("RGB", (W, H))) == (None, ())  # (a frame with none: as before)
-    monkeypatch.setattr(ui, "frame_look", lambda app, image, facts: st.Look(None, (), None, None))
-    plain = Image.new("RGB", (W, H))
-    ui.compare_within(app, plain, None)
-    assert ui.compared_by(plain) == ((3, 43, W - 3, H - 3), ())  # (no page box found: the capture area alone)
-    # the patch thread makes the patches of a page by it
-    frame, made = page(box=(100, 40, 300, 300)), []
-    shown = Image.fromarray(frame)
-    shown.info[ui.COMPARE_INFO] = ((102, 42, 298, 298), ())
-    over = SimpleNamespace(present=lambda key, size, patches, final: made.append(patches))
-    ui.Patcher(over, run=False)._make(1, shown, Image.fromarray(lettered(frame, [(120, 41, 170, 80)])), True, 6, 9)
-    assert made[0][0].near == (114, 41, 176, 86)
+    assert ui.sign_facts(image)[2] == ((55, 85),)
+    assert ui.sign_facts(Image.new("RGB", (W, H))) is None  # (a frame with none: the sign of its pixels alone)
+    # the patch thread makes the patches of a page and its sign
+    made = []
+    over = SimpleNamespace(present=lambda key, size, patches, final, sign: made.append((patches, sign)))
+    ui.Patcher(over, run=False)._make(1, image, Image.fromarray(lettered(captured, [(120, 45, 170, 80)])), True, 9)
+    patches, sign = made[0]
+    assert patches[0].box == (120, 45, 170, 80) and sign.area == (0, 44, W, H) and sign.page == (100, 300)
+    assert st.page_distance(sign, bgra(captured)) == 0.0 and st.bar_rows(sign, bgra(captured)) == ()
+    plain = Image.fromarray(captured)
+    assert ui.sign_of(plain, captured).area == (0, 0, W, H)  # (no stamp: the whole frame)
 
 
 def _unshown_app(why, regions, on_show=True):
@@ -646,29 +688,32 @@ def test_the_lettered_regions_not_shown_are_told_with_why_numbers_and_kinds_only
     regions = [_region((120, 41, 170, 80)), _region((200, 100, 250, 140)), _region((10, 10, 20, 20)),
                _region((260, 200, 290, 240)), _region((300, 250, 330, 280), status="untranslated")]
     why = {"boxes": ((120, 41, 170, 80), (200, 100, 250, 140), (260, 200, 290, 240)),
-           "near": ((114, 35, 176, 86), (194, 94, 256, 146), (254, 194, 296, 246)),
-           "valid": (1, 2), "covered": (2,), "drawn": (1,), "hover": None, "shares": (0.0192, 0.0, 0.0),
-           "share_limit": 0.01, "where": {0: {"box": (0.0, 300), "top": (0.3333, 30), "left": (0.0, 20)}},
-           "frame_at": 0.0, "final": True}
+           "valid": (1, 2), "barred": (0,), "bars": ((0, 44),), "covered": (2,), "drawn": (1,), "hover": None,
+           "distance": 0.4, "limit": st.PAGE_TOL, "frame_at": 0.0, "final": True}
     app, original = _unshown_app(why, regions)
     found = ui.unshown(app)
     assert found["regions"] == 4  # (the one not translated is no lettered region)
     kinds = {i: kind for i, kind, _facts in found["not_shown"]}
-    assert kinds == {0: "differs:top", 2: "no patch", 3: "covered"}
+    assert kinds == {0: "bars", 2: "no patch", 3: "covered"}
     facts = next(f for i, _k, f in found["not_shown"] if i == 0)
-    assert facts["share"] == 0.0192 and facts["limit"] == 0.01 and facts["where"]["top"] == 0.3333
-    assert facts["box"] == (120, 41, 170, 80) and facts["near"] == (114, 35, 176, 86)
-    assert found["kinds"] == {"differs:top": 1, "no patch": 1, "covered": 1}
+    assert facts["rows"] == ((0, 44),) and facts["patches"] == 1
+    assert found["kinds"] == {"bars": 1, "no patch": 1, "covered": 1} and found["distance"] == 0.4
     words = repr(found)
     assert "Line." not in words  # (no text of the page)
-    # the pointer resting on one, the original shown in the editor, the lettering hidden, no set matching
-    assert ui.unshown(_unshown_app({**why, "valid": (0, 1, 2), "covered": (), "hover": 0}, regions[:1])[0]
-                      )["kinds"] == {"hover": 1}
-    assert ui.unshown(_unshown_app({**why, "valid": (0, 1, 2), "covered": (), "bare": (0,), "editing": True},
-                                   regions[:1])[0])["kinds"] == {"original": 1}
+    # the pointer resting on one, the original shown in the editor, none drawn for none of those, the lettering
+    # hidden, no set's page on show
+    shown_all = {**why, "valid": (0, 1, 2), "barred": (), "covered": ()}
+    assert ui.unshown(_unshown_app({**shown_all, "hover": 0}, regions[:1])[0])["kinds"] == {"hover": 1}
+    assert ui.unshown(_unshown_app({**shown_all, "bare": (0,), "editing": True}, regions[:1])[0]
+                      )["kinds"] == {"original": 1}
+    assert ui.unshown(_unshown_app({**shown_all, "drawn": ()}, regions[:1])[0])["kinds"] == {"not drawn": 1}
     assert ui.unshown(_unshown_app({"key": None, "hidden": "off"}, regions[:2])[0])["kinds"] == {"hidden:off": 2}
-    assert ui.unshown(_unshown_app({"key": None, "sets": (), "frame_at": 0.0}, regions[:2])[0]
-                      )["kinds"] == {"no match": 2}
+    app, original = _unshown_app({"key": None, "sets": (), "frame_at": 0.0}, regions[:2])
+    app._see_through.why_not_shown = lambda: {"key": None, "sets": (id(original),), "frame_at": 0.0,
+                                              "looked": ((id(original), 9.5),), "limit": st.PAGE_TOL}
+    found = ui.unshown(app)
+    assert found["kinds"] == {"no match": 2}
+    assert found["not_shown"][0][2] == {"set_known": 1, "distance": 9.5, "limit": st.PAGE_TOL}
     # not the page on show, another page's set chosen, a frame the viewer has just drawn: nothing told
     assert ui.unshown(_unshown_app(why, regions, on_show=False)[0]) is None
     assert ui.unshown(_unshown_app({**why, "key": 1}, regions)[0]) is None
@@ -683,18 +728,18 @@ def test_a_page_gives_the_log_one_line_of_its_regions_not_shown_and_the_tools_th
     from taslation.ui import seethrough as ui
 
     regions = [_region((120, 41, 170, 80))]
-    why = {"boxes": ((120, 41, 170, 80),), "near": ((114, 35, 176, 86),), "valid": (), "covered": (), "drawn": (),
-           "shares": (0.02,), "where": {0: {"top": (0.5, 10)}}, "frame_at": 0.0}
+    why = {"boxes": ((120, 41, 170, 80),), "valid": (), "barred": (0,), "bars": ((0, 44),), "covered": (),
+           "drawn": (), "frame_at": 0.0}
     app, original = _unshown_app(why, regions)
     caplog.set_level(logging.INFO, logger=ui.log.name)
     for k in range(5):
         ui.unshown_tick(app, now=100.0 + k * ui.UNSHOWN_EVERY_S)
     ui.unshown_tick(app, now=104.5)  # (sooner than UNSHOWN_EVERY_S: no look)
     entry = app._see_unshown[id(original)]
-    assert entry["looks"] == 5 and entry["kinds_seen"] == {"differs:top": 5}
+    assert entry["looks"] == 5 and entry["kinds_seen"] == {"bars": 5}
     lines = [r.getMessage() for r in caplog.records if "lettered regions not shown" in r.getMessage()]
     assert lines == [f"see-through: page {id(original) & 0xFFFF:04x}: 1 of 1 lettered regions not shown "
-                     "(differs:top 1)"]
+                     "(bars 1)"]
     app._see_through.why_not_shown = lambda: {"key": id(original), **why, "drawn": (0,)}
     ui.unshown_tick(app, now=110.0)
     said = [r for r in caplog.records if "lettered regions not shown" in r.getMessage()]
@@ -702,18 +747,19 @@ def test_a_page_gives_the_log_one_line_of_its_regions_not_shown_and_the_tools_th
     assert "0 of 1 lettered regions not shown (none)" in caplog.records[-1].getMessage()
 
 
-def test_the_window_keeps_where_each_patch_of_the_set_it_chose_differs():
+def test_the_window_keeps_the_page_s_distance_and_the_bars_over_the_set_it_chose():
     from taslation.capture import seethrough as window
 
-    frame = page()
-    patches = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60), (220, 200, 280, 240)]))
-    chosen = st.PatchSet(key=7, size=(W, H), patches=patches, serial=3, final=True)
+    frame = art()
+    patches = st.make_patches(frame, lettered(frame, [(120, 10, 170, 25), (220, 200, 280, 240)]))
+    chosen = st.PatchSet(key=7, size=(W, H), patches=patches, serial=3, final=True, sign=sign_of(frame))
     later = frame.copy()
-    later[62:66, 120:170] = 255 - later[62:66, 120:170]  # (just below the first)
-    view = bgra(later)
-    _set, valid, shares = st.visible([chosen], view)
-    facts = window.SeeThrough._facts_of(chosen, valid, valid, shares, [chosen], view, (W, H), 5.0)
-    assert facts["key"] == 7 and facts["valid"] == (1,) and facts["boxes"][0] == (120, 20, 170, 60)
-    assert set(facts["where"]) == {0} and facts["where"][0]["bottom"][0] > 0.3 and facts["where"][0]["box"][0] == 0.0
-    assert window.SeeThrough._facts_of(None, (), (), [], [chosen], view, (W, H), 5.0) == {"key": None, "sets": (7,),
-                                                                                         "at": 5.0}
+    later[:30] = 40  # (a bar over the first)
+    _set, valid, seen = st.visible([chosen], bgra(later))
+    facts = window.SeeThrough._facts_of(chosen, valid, valid, seen, [chosen], (W, H), 5.0)
+    assert facts["key"] == 7 and facts["valid"] == (1,) and facts["barred"] == (0,) and facts["bars"] == ((0, 32),)
+    assert facts["boxes"][0] == (120, 10, 170, 25) and facts["distance"] == 0.0 and facts["limit"] == st.PAGE_TOL
+    seen = st.visible([chosen], bgra(art(seed=2)))[2]
+    none = window.SeeThrough._facts_of(None, (), (), seen, [chosen], (W, H), 5.0)
+    assert none["key"] is None and none["sets"] == (7,) and none["looked"][0][0] == 7
+    assert none["looked"][0][1] > st.PAGE_TOL and none["at"] == 5.0

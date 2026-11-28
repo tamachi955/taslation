@@ -48,20 +48,21 @@ taking every click and key itself.
   viewer keeps the keyboard, and gets the keys alone), the page drawn at alpha EDIT_ALPHA wherever nothing else is,
   whatever page the viewer shows (one with no marks: `seethrough.GROUND`); the viewer's title bar and frame stay its
   own, and so do the windows over the viewer (alpha 0 there: `edit_compose`'s holes). The wheel, the middle and side
-  buttons reach nothing. Every box is outlined in its colour and numbered, the one under the pointer in the stronger
-  outline, the one chosen alone in it with its corner handles too; the patches of the box under the pointer give way
-  to the original once it has rested there the hover delay, as in Reader mode (`_edit_out`: not while a press is
-  held, nor for the box in the editor). A press takes hold of a box (the capture besides, which a window not in
-  front has only over its own pixels); a drag moves the box (those chosen with it), a drag on a corner resizes it, a
-  click on a box's number plate types its place in the reading order (a drag from it moves the box), a drag on the
-  empty ground draws a rectangle, a click there is kept as no more than that, a right click gives a press up (and a
-  region to add: an "add" with no box), and the release is kept for the Tk thread (`take_edits`: a click, a double
-  click - the second press on the same box within the system's double-click time and reach, `double_click`: the class
-  has no CS_DBLCLKS -, a plate, a move, a resize, a rectangle drawn - "draw", or "add" for Add area -, a click on the
-  ground), which acts on it. In Reader mode, marks of no box while a region is to be added (`Marks.adding`) have
-  the whole page take the mouse for that rectangle alone. The box in the editor and one being dragged keep their
-  patches whatever the frame says; the one whose original is shown has none. A press the window holds is no press
-  on the viewer (`pressing`: frames go on being taken). The thread then waits for its messages too
+  buttons reach nothing. Every box is outlined in its colour and numbered (dashed: one translated with none of its
+  patches on show, `_unshown_boxes`; none under a bar of the viewer's, whose rows are holes then), the one under the
+  pointer in the stronger outline, the one chosen alone in it with its corner handles too; the patches of the box
+  under the pointer give way to the original once it has rested there the hover delay, as in Reader mode
+  (`_edit_out`: not while a press is held, nor for the box in the editor). A press takes hold of a box (the capture
+  besides, which a window not in front has only over its own pixels); a drag moves the box (those chosen with it), a
+  drag on a corner resizes it, a click on a box's number plate types its place in the reading order (a drag from it
+  moves the box), a drag on the empty ground draws a rectangle, a click there is kept as no more than that, a right
+  click gives a press up (and a region to add: an "add" with no box), and the release is kept for the Tk thread
+  (`take_edits`: a click, a double click - the second press on the same box within the system's double-click time and
+  reach, `double_click`: the class has no CS_DBLCLKS -, a plate, a move, a resize, a rectangle drawn - "draw", or "add"
+  for Add area -, a click on the ground), which acts on it. In Reader mode, marks of no box while a region is to be
+  added (`Marks.adding`) have the whole page take the mouse for that rectangle alone. The box in the editor and one
+  being dragged keep their patches whatever the frame says; the one whose original is shown has none. A press the window
+  holds is no press on the viewer (`pressing`: frames go on being taken). The thread then waits for its messages too
   (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its own window), so a drag follows the pointer at once. It
   sends, posts and presses nothing to another window. Since a click on the page never reaches the viewer then, a
   press (a button, the wheel) on the lettering's window or on a side pane while the viewer is not the window in
@@ -85,7 +86,8 @@ taking every click and key itself.
   one, an open menu too. (A menu over the viewer is a window above it as well: the patches and the panes it meets are
   left out meanwhile, `cover_rects`.)
 
-What it shows is decided by one rule (`taslation.seethrough`): a patch belongs to the pixels it was made from."""
+What it shows is decided by one rule (`taslation.seethrough`): the patches of a reading belong to the page they were
+made from, and show whole while the frame on show is that page (`visible`), but where a bar of the viewer's lies."""
 
 from __future__ import annotations
 
@@ -166,7 +168,6 @@ SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it to
 PANE_REST_S = 0.3  # the side panes come back once the viewer's window has kept its place and size so long (`_rect_tick`)
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
-WHERE_KEPT = 64  # (`why_not_shown`) the patches of the set chosen whose differing pixels a look places, at the most
 REPORT_FPS_S = 5.0  # (`report_facts`) the viewer's frames per second are counted over so many seconds
 START_S = 2.0  # how long `start` waits for the window to be made
 
@@ -753,7 +754,7 @@ class SeeThrough:
         self._frame_since: tuple[int, float] = (-1, 0.0)  # (the frame count the last full look had, since when)
         self._right_takes = False  # the right pane takes clicks now (the pointer on one of its plates)
         self._dpi = st.BASE_DPI  # the viewer's (`viewer_dpi`), at each change of its place or size
-        self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, shares, frame, ms)
+        self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, `Seen`, frame, ms)
         # Editing (`set_edit`): the marks from the Tk thread; the window thread's own: whether the lettering's window
         # takes the mouse, the marks the last draw laid on the page (None: none on show), the boxes left out of them
         # (covered, or their page's pixels not there), the press held, the presses for the Tk thread, the boxes of the
@@ -765,7 +766,6 @@ class SeeThrough:
         self._marks_live: st.Marks | None = None
         self._left_out: frozenset[int] = frozenset()
         self._patchless: int | None = None  # the key of the marks' page while its set has no patch
-        self._probes_failed: frozenset[st.Box] = frozenset()  # boxes with no patch not over their page (last look)
         self._press: dict[str, Any] | None = None
         self._edits: deque[dict[str, Any]] = deque(maxlen=EDITS_KEPT)
         self._edit_serial = 0
@@ -841,11 +841,12 @@ class SeeThrough:
         self._note("away", on=int(bool(away)))
         self._poke()
 
-    def present(self, key: int, size: tuple[int, int], patches: tuple[st.Patch, ...], final: bool = False) -> None:
-        """The patches of the page read from the frame *key* (of *size*) as lettered now: they replace the set of that
-        key, and become the newest."""
+    def present(self, key: int, size: tuple[int, int], patches: tuple[st.Patch, ...], final: bool = False,
+                sign: st.PageSign | None = None) -> None:
+        """The patches of the page read from the frame *key* (of *size*) as lettered now, with the sign of that page
+        (`seethrough.page_sign`; None: never shown): they replace the set of that key, and become the newest."""
         with self._lock:
-            s = self._store.put(key, size, patches, final)
+            s = self._store.put(key, size, patches, final, sign)
             self._changed += 1
         self._note("present", key=key, set=s.serial, patches=len(patches), final=int(final))
         self._poke()
@@ -883,12 +884,14 @@ class SeeThrough:
 
     def why_not_shown(self) -> dict[str, Any]:
         """What the last look and drawing made of the patches (numbers only, for the report and the log: `ui.seethrough.
-        unshown`): "key" the set chosen (None: none matched - "sets" the keys of those of the frame's size), "boxes" its
-        patches' boxes, "valid" those whose pixels match (`seethrough.patch_matches`), "where" for each other one where
-        its compared pixels differ (`seethrough.where_differs`), "covered" those a window over the viewer meets,
-        "drawn" those on show, "hover" the one left out under the pointer (editing: "original", those of the box under
-        the pointer left out), "held" those kept whatever the frame says (the region in the editor, one being
-        pressed), "bare" those of the region whose original is shown, "editing",
+        unshown`): "key" the set chosen, its page on show (None: none's - "sets" the keys of those of the frame's
+        size), "looked" each set of the frame's size looked at with its page's distance (`seethrough.page_distance`)
+        and "limit" (PAGE_TOL), "distance" the chosen one's, "boxes" its patches' boxes, "bars" the rows of a bar of
+        the viewer's over the page (`seethrough.bar_rows`) and "barred" the patches under them, "valid" the others,
+        "covered" those a window over the viewer meets, "drawn" those on show, "hover" the one left out under the
+        pointer (editing: "original", those of the box under the pointer left out), "held" those kept whatever the
+        frame says (the region in the editor, one being pressed), "bare" those of the region whose original is shown,
+        "unshown" (editing) the boxes lettered whose lettering does not show, "editing",
         "hidden" (why nothing shows: off, away, no viewer...), "at" (monotonic s), "frame_at" (since when the viewer's
         frame looked at was its newest: a frame at rest so long). Empty before the first look."""
         return self._why
@@ -1297,7 +1300,8 @@ class SeeThrough:
             self.counts["frames"] += 1
         started = time.perf_counter()
         view = frame.bgra[box[1]:box[3], box[0]:box[2]]
-        chosen, shown, shares = st.visible(sets, view)
+        chosen, shown, seen = st.visible(sets, view, st.scaled(st.BAR_REACH, self._dpi),
+                                         st.scaled(st.MARGIN, self._dpi), least=st.scaled(st.STRIP_PX, self._dpi))
         compare_ms = (time.perf_counter() - started) * 1000
         self.counts["compare_ms"] += compare_ms
         valid = shown
@@ -1305,55 +1309,55 @@ class SeeThrough:
             shown = tuple(i for i in shown if not st.covered(chosen.patches[i].box, origin, self._covers))
         if self._frame_since[0] != frame.seq:
             self._frame_since = (frame.seq, now)
-        self._look_facts = {**self._facts_of(chosen, valid, shown, shares, sets, view, size, now),
+        self._look_facts = {**self._facts_of(chosen, valid, shown, seen, sets, size, now),
                             "frame_at": self._frame_since[1]}
-        self._probes_failed = self._failed_probes(chosen, view)
-        self._last_look = (chosen, shown, shares, frame.seq, compare_ms, origin, size, bool(sets))
+        self._last_look = (chosen, shown, seen, frame.seq, compare_ms, origin, size, bool(sets))
         self._show_look(*self._last_look)
 
     @staticmethod
-    def _facts_of(chosen: st.PatchSet | None, valid: tuple[int, ...], shown: tuple[int, ...], shares: list[float],
-                  sets: list[st.PatchSet], view: Any, size: tuple[int, int], now: float) -> dict[str, Any]:
-        """(a full look) The facts `why_not_shown` gives of the set *chosen*: where the pixels of each patch whose
-        pixels do not match differ (WHERE_KEPT patches at the most: a look of a page that matches has few)."""
+    def _facts_of(chosen: st.PatchSet | None, valid: tuple[int, ...], shown: tuple[int, ...], seen: st.Seen,
+                  sets: list[st.PatchSet], size: tuple[int, int], now: float) -> dict[str, Any]:
+        """(a full look) The facts `why_not_shown` gives of the set *chosen*: its page's distance and the limit, the
+        bars' rows and the patches under them, those covered; with none chosen, the sets of the frame's size and
+        their pages' distances."""
+        looked = {"looked": seen.looked, "limit": st.PAGE_TOL}
         if chosen is None:
-            return {"key": None, "sets": tuple(s.key for s in sets if s.size == size), "at": now}
-        where = {}
-        for i, patch in enumerate(chosen.patches):
-            if i not in valid and len(where) < WHERE_KEPT:
-                where[i] = st.where_differs(patch, view)
+            return {"key": None, "sets": tuple(s.key for s in sets if s.size == size), "at": now, **looked}
         return {"key": chosen.key, "serial": chosen.serial, "final": chosen.final,
-                "boxes": tuple(p.box for p in chosen.patches), "near": tuple(p.near for p in chosen.patches),
-                "valid": valid, "covered": tuple(i for i in valid if i not in shown),
-                "shares": tuple(round(v, 4) for v in shares), "share_limit": st.CHANGED_SHARE, "where": where,
-                "at": now}
+                "boxes": tuple(p.box for p in chosen.patches), "valid": valid,
+                "covered": tuple(i for i in valid if i not in shown), "distance": seen.distance, "bars": seen.bars,
+                "barred": tuple(i for i in range(len(chosen.patches)) if i not in valid), "at": now, **looked}
 
     def _drew(self, drawn: tuple[int, ...], **more: Any) -> None:
         """What the drawing after the last full look left out (`why_not_shown`)."""
         self._why = {**self._look_facts, "drawn": tuple(drawn), "hidden": "", **more}
 
-    def _show_look(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
+    def _show_look(self, chosen: st.PatchSet | None, shown: tuple[int, ...], seen: st.Seen, seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], any_sets: bool) -> None:
-        """What a look found shown (*shown* of the set *chosen*, none covered), less the patch under the pointer - or,
+        """What a look found shown (*shown* of the set *chosen*, none covered nor under a bar), less the patch under
+        the pointer - or,
         while editing, with the page's marks on it (`_show_edit`); while editing on a page with no marks (not translated yet,
         another one), over the whole page taking the mouse (`_show_ground`)."""
         self._look_key = chosen.key if chosen is not None else None
         marks = self._marks_for(chosen)
         if marks is not None:
-            self._show_edit(chosen, shown, shares, seq, compare_ms, origin, size, marks)
+            self._show_edit(chosen, shown, seen, seq, compare_ms, origin, size, marks)
             return
         self._marks_live = None
         self._left_out = frozenset()
         self._edit_rested(None)
         ground = self._edit_takes  # (editing: the whole page takes the mouse though none of its regions is edited)
         if chosen is None or not shown:
-            why = "covered" if chosen is not None else ("no match" if any_sets else "no patches")
+            if chosen is None:
+                why = "no match" if any_sets else "no patches"
+            else:
+                why = "bars" if seen.bars and chosen.patches else ("covered" if chosen.patches else "no patches")
             self._unhover()
             self._drew((), editing=False, hover=None)
             if ground:
-                self._show_ground(chosen, (), shares, seq, compare_ms, origin, size)
+                self._show_ground(chosen, (), seen, seq, compare_ms, origin, size)
                 return
-            self._hide(why, seq, compare_ms, shares)
+            self._hide(why, seq, compare_ms, seen)
             return
         under = self._under_pointer(chosen, shown, origin)
         if under is not None:
@@ -1361,21 +1365,26 @@ class SeeThrough:
         self._drew(shown, editing=False, hover=under)
         if under is not None:
             if not shown and not ground:
-                self._hide("hover", seq, compare_ms, shares)
+                self._hide("hover", seq, compare_ms, seen)
                 return
         if ground:
-            self._show_ground(chosen, shown, shares, seq, compare_ms, origin, size)
+            self._show_ground(chosen, shown, seen, seq, compare_ms, origin, size)
             return
         state = (chosen.serial, shown, origin, size)
         if state == self._shown:
             return
-        self._draw(chosen, shown, origin, size, seq, compare_ms, shares)
+        self._draw(chosen, shown, origin, size, seq, compare_ms, seen)
 
-    def _holes(self, origin: tuple[int, int]) -> tuple[st.Box, ...]:
-        """The windows over the viewer (`cover_rects`) in the frame's pixels: left at alpha 0 while editing, their own."""
-        return tuple((c[0] - origin[0], c[1] - origin[1], c[2] - origin[0], c[3] - origin[1]) for c in self._covers)
+    def _holes(self, origin: tuple[int, int], size: tuple[int, int] | None = None,
+               bars: tuple[tuple[int, int], ...] = ()) -> tuple[st.Box, ...]:
+        """The windows over the viewer (`cover_rects`) in the frame's pixels, and the rows of a bar of the viewer's
+        over the page (*bars*, across the frame of *size*): left at alpha 0 while editing, theirs."""
+        own = tuple((c[0] - origin[0], c[1] - origin[1], c[2] - origin[0], c[3] - origin[1]) for c in self._covers)
+        if size is None or not bars:
+            return own
+        return own + tuple((0, int(a), int(size[0]), int(b)) for a, b in bars)
 
-    def _show_ground(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
+    def _show_ground(self, chosen: st.PatchSet | None, shown: tuple[int, ...], seen: st.Seen, seq: int,
                      compare_ms: float, origin: tuple[int, int], size: tuple[int, int]) -> None:
         """A look while editing on a page with no marks of its own (`seethrough.GROUND`): the patches *shown* (the one under
         the pointer gives way as ever), the whole page taking the mouse but the windows over the viewer, and the
@@ -1383,13 +1392,13 @@ class SeeThrough:
         press = self._press
         drawing = (st.drawn_box(press["start"], press["now"], size)
                    if press is not None and press.get("draw") and press["moved"] else None)
-        holes = self._holes(origin)
+        holes = self._holes(origin, size, seen.bars)
         key = ("ground", drawing, holes)
         self._edit_dirty = False
         state = (chosen.serial if chosen is not None else -1, shown, origin, size, key)
         if state == self._shown:
             return
-        self._draw(chosen, shown, origin, size, seq, compare_ms, shares,
+        self._draw(chosen, shown, origin, size, seq, compare_ms, seen,
                    (st.GROUND, None, None, frozenset(), drawing, (), holes), key)
 
     # ---------------------------------------------------------------- the Insert and Delete keys (the window's thread)
@@ -1489,21 +1498,6 @@ class SeeThrough:
             return marks if chosen.key == marks.key else None
         return marks if self._patchless == marks.key else None
 
-    def _failed_probes(self, chosen: st.PatchSet | None, view: Any) -> frozenset[st.Box]:
-        """(a full look) The boxes of the editing marks with no patch of their own whose pixels round them the viewer's
-        frame *view* has not (`Marks.probes`): bars over them, another page. They take nothing (`_show_edit`)."""
-        marks = self._marks_for(chosen)
-        if marks is None or not marks.probes:
-            return frozenset()
-        patches = chosen.patches if chosen is not None else ()
-        out = set()
-        for box, probe in zip(marks.boxes, marks.probes):
-            if probe is None or any(_meets(p.box, box) for p in patches):
-                continue
-            if st.changed_share(probe, view) > st.CHANGED_SHARE:
-                out.add(box)
-        return frozenset(out)
-
     def _edit_point(self, origin: tuple[int, int]) -> tuple[int, int] | None:
         """The pointer in the frame's pixels; None when it is not over the viewer's page (a side pane, a window over
         the viewer) or not known."""
@@ -1512,19 +1506,19 @@ class SeeThrough:
             return None
         return point[0] - origin[0], point[1] - origin[1]
 
-    def _show_edit(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
+    def _show_edit(self, chosen: st.PatchSet | None, shown: tuple[int, ...], seen: st.Seen, seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], marks: st.Marks) -> None:
         """A look while editing: the patches the frame has (*shown*), and also those of the region in the editor and of a
         region being dragged whatever the frame says, less those of the region whose original is shown (*bare*); the
         box under the pointer is outlined more strongly, the right pane is told of that region (`hovered`), and its
         patches give way to the original once the pointer has rested on it the hover delay (`_edit_rested`; not while
         a press is held, nor for the region in the editor, whose patches show its changes). The boxes a window over
-        the viewer meets, those whose patches the frame has none of, and those with no patch whose pixels round them
-        it has not (`_failed_probes`), take nothing."""
+        the viewer meets, and those whose patches are all under a bar of the viewer's or covered, take nothing (a bar's
+        rows are left to the viewer: `_holes`); a box lettered whose lettering does not show (none of its patches
+        drawn, or none made) is outlined dashed (`seethrough.edit_compose`'s *unshown*), not as one translated."""
         patches = chosen.patches if chosen is not None else ()
         press = self._press if self._press is not None and self._press["marks"] is marks else None
         meets = _meets
-        failed = getattr(self, "_probes_failed", frozenset())
 
         held = {marks.held} if marks.held is not None else set()
         if press is not None and "index" in press:
@@ -1538,12 +1532,14 @@ class SeeThrough:
         if bare is not None:
             keep = {i for i in keep if not meets(patches[i].box, bare)}
         left_out = set()
+        bars = seen.bars
+        margin = st.scaled(st.MARGIN, self._dpi)
         for i, box in enumerate(marks.boxes):
-            if st.covered(box, origin, self._covers):
+            if st.covered(box, origin, self._covers) or (i not in held and st.under_rows(box, bars, margin)):
                 left_out.add(i)
             elif i not in held:
                 own = [k for k, p in enumerate(patches) if meets(p.box, box)]
-                if (own and not any(k in shown for k in own)) or (not own and box in failed):
+                if own and not any(k in shown for k in own):
                     left_out.add(i)
         left_out_set = frozenset(left_out)
         self._marks_live, self._left_out = marks, left_out_set
@@ -1574,19 +1570,34 @@ class SeeThrough:
         out = out if self._edit_rested(out) else None
         original = tuple(i for i in sorted(keep) if out is not None and meets(patches[i].box, out))
         indices = tuple(i for i in sorted(keep) if i not in original)
+        unshown = frozenset(self._unshown_boxes(marks, patches, indices, left_out_set, (out, bare)))
         self._drew(indices, editing=True, hover=None, original=original,
                    held=tuple(i for i, p in enumerate(patches) if any(meets(p.box, b) for b in held_boxes)),
                    bare=tuple(i for i, p in enumerate(patches) if bare is not None and meets(p.box, bare)),
-                   left_out=tuple(sorted(left_out)), region_boxes=marks.boxes)
-        holes = self._holes(origin)
-        edit = (marks, hover, moved, left_out_set, drawing, ghosts, holes)
+                   left_out=tuple(sorted(left_out)), region_boxes=marks.boxes, unshown=tuple(sorted(unshown)))
+        holes = self._holes(origin, size, bars)
+        edit = (marks, hover, moved, left_out_set, drawing, ghosts, holes, unshown)
         key = (marks.serial, hover, None if moved is None else tuple(sorted(moved.items())), left_out_set, drawing,
-               ghosts, holes)
+               ghosts, holes, unshown)
         self._edit_dirty = False
         state = (chosen.serial if chosen is not None else -1, indices, origin, size, key)
         if state == self._shown:
             return
-        self._draw(chosen, indices, origin, size, seq, compare_ms, shares, edit, key)
+        self._draw(chosen, indices, origin, size, seq, compare_ms, seen, edit, key)
+
+    @staticmethod
+    def _unshown_boxes(marks: st.Marks, patches: tuple[st.Patch, ...], drawn: tuple[int, ...],
+                       left_out: frozenset[int], given_way: tuple[st.Box | None, st.Box | None]) -> list[int]:
+        """(editing) The boxes of *marks* whose region is lettered (`Marks.lettered`) but none of whose patches is
+        among those *drawn* - none made (the lettering changed no pixel there), or none shown -, but the boxes left
+        out and those whose original is shown on purpose (*given_way*: under the pointer at rest, the one bare)."""
+        out = []
+        for i, box in enumerate(marks.boxes):
+            if i >= len(marks.lettered) or not marks.lettered[i] or i in left_out or box in given_way:
+                continue
+            if not any(k in drawn for k, p in enumerate(patches) if _meets(p.box, box)):
+                out.append(i)
+        return out
 
     def _edit_rested(self, box: st.Box | None) -> bool:
         """(editing, `_show_edit`) Whether the patches of *box* - the box under the pointer, None for none - give way
@@ -2077,7 +2088,7 @@ class SeeThrough:
             self._pane_hide(side, why)
 
     def _draw(self, chosen: st.PatchSet | None, shown: tuple[int, ...], origin: tuple[int, int],
-              size: tuple[int, int], seq: int, compare_ms: float, shares: list[float],
+              size: tuple[int, int], seq: int, compare_ms: float, seen: st.Seen,
               edit: tuple[Any, ...] | None = None, edit_key: Any = None) -> None:
         """The patches *shown* of the set *chosen* drawn over the viewer's client area at *origin* (*size*) - while editing
         with the marks on them (*edit*: `edit_compose`'s, *edit_key* what they are: a picture of the same is only
@@ -2091,10 +2102,11 @@ class SeeThrough:
         if not same_picture:
             st.compose(size, [chosen.patches[i] for i in shown] if chosen is not None else [], pixels)
             if edit is not None:
-                marks, hover, moved, left_out, drawing, ghosts, holes = edit
+                marks, hover, moved, left_out, drawing, ghosts, holes = edit[:7]
                 if ghosts != marks.ghosts:
                     marks = replace(marks, ghosts=ghosts)
-                st.edit_compose(pixels, marks, hover, moved, self._dpi, left_out, drawing, holes)
+                st.edit_compose(pixels, marks, hover, moved, self._dpi, left_out, drawing, holes,
+                                edit[7] if len(edit) > 7 else frozenset())
         ok = _layered(self.hwnd, dc, origin, size)
         if before is None:
             _user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
@@ -2107,10 +2119,9 @@ class SeeThrough:
                    shown=len(shown), edit=int(edit is not None),
                    of=len(chosen.patches) if chosen is not None else 0, ok=int(bool(ok)), moved=int(same_picture),
                    x=origin[0], y=origin[1], w=size[0], h=size[1], compare_ms=round(compare_ms, 2),
-                   draw_ms=round(draw_ms, 2), worst=round(max(shares[i] for i in shown), 4) if shown else None,
-                   least_hidden=round(min((v for i, v in enumerate(shares) if i not in shown), default=-1), 4))
+                   draw_ms=round(draw_ms, 2), distance=seen.distance, bars=len(seen.bars))
 
-    def _hide(self, why: str, seq: int | None = None, compare_ms: float = 0.0, shares: list[float] | None = None
+    def _hide(self, why: str, seq: int | None = None, compare_ms: float = 0.0, seen: st.Seen | None = None
               ) -> None:
         if self._shown is None:
             return
@@ -2120,4 +2131,4 @@ class SeeThrough:
         self._note("hide", why=why, seq=seq, new=int(seq is not None and self._new_frame),
                    arrived=self._arrived.get(seq) if seq is not None else None,
                    compare_ms=round(compare_ms, 2),
-                   least=round(min(shares), 4) if shares else None)
+                   nearest=min((d for _k, d in seen.looked), default=None) if seen is not None else None)

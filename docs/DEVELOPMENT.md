@@ -539,16 +539,15 @@ rows' languages.
   runners only (the group g-see-edit), its region editor taking the keys from whatever window is in front.
   In every run the page on show's lettered regions whose patch did not show are counted once a second
   (`run.see_through.unshown`, from `ui.seethrough.unshown_tick`): per page the looks, the regions' boxes, the kinds
-  summed over the looks - "differs:top" (the pixels compared above it are other than when it was read), "covered",
-  "no patch", "no match", ... -, those of the last look with the share against the limit and where they differ, the
-  box its margin keeps within and the rows painted over; "hover" and "original" are the pointer's and the editor's
-  doing, `pages_with_unmeant` counts the pages where any other kind was seen (must be 0). `--pages A.png,B.png` shows
+  summed over the looks - "no match" (the frame on show is not the page read: its distance over the limit), "bars" (a
+  bar of the viewer's over it or by it), "covered", "no patch", ... -, those of the last look with the page's distance
+  against the limit and the rows of the bars; "hover" and "original" are the pointer's and the editor's doing,
+  `pages_with_unmeant` counts the pages where any other kind was seen (must be 0). `--pages A.png,B.png` shows
   made-up pages of the developer's instead (`tools/make_sample_page.py --layout edges`: bubbles cut by the page's
-  four edges, their text 5 px from it), `--see-margin-as-before` the patches' margins as before they kept to the
-  page's own pixels (the stamp is made and reported, not used: the same run with the rule before), and
-  `--standin-option band_line_ms=700` (a profile's) has the band's line just over the page drawn in another shade
-  every 700 ms, the page as it is. With `--standin-profile dark` and scenario `f2` on the edge pages, the bubble
-  touching the page's top was "differs:top" on 4 pages before and every region shown after.
+  four edges, their text 5 px from it), and `--standin-option band_line_ms=700` (a profile's) has the band's line
+  just over the page drawn in another shade every 700 ms, the page as it is. With `--standin-profile dark` and
+  scenario `f2` on the edge pages, the bubble touching the page's top was "differs:top" on 4 pages when each patch
+  was compared by its own margin, and every region shown after.
   `--see-add` measures adding text areas in place of both (`add`; editing with `--see-edit`, Reader mode without; best with
   scenario `g`, one page held long): once a page is done and on show, the left pane's Add area and the Insert key
   (its WM_HOTKEY POSTED to the lettering's own window: no key of the system's is pressed), each followed by a
@@ -571,8 +570,8 @@ rows' languages.
   timed in `pipeline` as `make_patches_ms` -, the panes' rows, sizes and pictures, the hidden window's redisplay and its canvas' picture, which
   draw nothing on the screen - each call's ms, and the per cent of a processor each took at rest, while a job
   ran and while following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
-  see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
-  frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
+  see-through window's notes, why it hid what it showed and the page's distance it decided by at each new frame
+  (`distances`: those of the frames shown and the nearest of the frames hidden; `seethrough.PAGE_TOL` lies between
   them). The side panes (`taslation/panes.py`, at the capture area's two outer edges or nearer the page, 300 px at
   the most from the widest page seen at the frame's size) are watched once a second (`panes`): shown or hidden with
   a single page or a spread, the most px each shared with the page box (0 expected), their gaps to it (`gaps_px`:
