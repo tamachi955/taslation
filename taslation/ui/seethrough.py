@@ -1947,9 +1947,11 @@ def _meets_box(a: Any, b: Any) -> bool:
 def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
     """The page on show's regions lettered or erased (`pipeline.erases`) whose patch does not show now, and why, from
     the see-through window's last look (`SeeThrough.why_not_shown`): numbers and kinds only, no text. None while the
-    page on show is not the last translated page (one filling in, another page in the viewer) or nothing is known;
-    with *settled*, also while the viewer's frame has been its newest for less than UNSHOWN_SETTLE_S (a report, asked
-    for, takes the look as it is).
+    page on show is not the last translated page (one filling in, another page in the viewer) or nothing is known -
+    its newest patches not handed to the window yet (the patch thread makes them), or the window's last look made
+    before they came (`SeeThrough.presented`: a page finished looked at with no set of its own yet is no lettering
+    gone); with *settled*, also while the viewer's frame has been its newest for less than UNSHOWN_SETTLE_S (a report,
+    asked for, takes the look as it is).
 
     Each region not shown: (its index among the page's regions, the kind, facts): "no patch" (its lettering changed
     no pixel there), "covered" (a window over the viewer), "bars" (a bar of the viewer's over its rows, the rows given),
@@ -1974,6 +1976,11 @@ def unshown(app: Any, settled: bool = True) -> dict[str, Any] | None:
         return None
     if settled and not why.get("hidden") and time.monotonic() - float(why.get("frame_at", 0.0)) < UNSHOWN_SETTLE_S:
         return None  # (a frame the viewer may be drawing over: a turn's first frames)
+    presented = getattr(over, "presented", None)
+    if not why.get("hidden") and callable(presented):
+        came = presented(key)
+        if came is None or int(why.get("store", -1)) < came:
+            return None  # (the page's newest patches not handed over yet, or the window's look came before them)
     from ..pipeline import erases
 
     regions = [(i, r) for i, r in enumerate(result.regions) if erases(r)]

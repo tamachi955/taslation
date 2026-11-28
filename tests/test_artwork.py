@@ -462,6 +462,138 @@ def test_a_column_a_model_bubbles_shape_went_round_is_erased_and_its_room_reache
     assert (r.mask[230 - r.y0:350 - r.y0, 224 - r.x0:244 - r.x0] > 0).all()
 
 
+def test_where_the_reading_gave_its_characters_ink_joined_to_the_outline_outside_them_stays():
+    """The same column with the reading's character boxes: the glyphs joined to the outline that lie in one of them
+    go (`JOINED_CHAR`), one the reading found no character at stays - a stretch of a thin outline, a tail's tip at
+    the text box's edge lay outside them all, and was erased."""
+    for found in (range(10), [k for k in range(10) if k != 3]):
+        page, boxes, ring = column_by_outline()
+        r = region("bubble", (148, 36, 253, 565), tier=1, from_model=True, glyph=24.0)
+        r.text_box = (165, 226, 250, 360)
+        shape = np.zeros((r.height, r.width), np.uint8)
+        cv2.ellipse(shape, (200 - r.x0, 300 - r.y0), (46, 256), 0, 0, 360, 255, -1)
+        shape[:, 218 - r.x0:] = 0
+        r.mask = shape
+        r.char_boxes = [boxes[k] for k in found]
+        Pipeline._paper_erase(page, r)
+        left = ink_left(page, boxes[:5])
+        assert (page[200:400, :, 0][ring] < 100).all()
+        if len(found) == 10:
+            assert left == [0] * 5
+        else:
+            assert left[3] > 100 and left[1] == 0
+
+
+def bubble_on_dark_tone():
+    """A tall white bubble with a thick outline on a dark tone (seven pixels of ten a grey the outline's pieces join
+    up with, no ink: only the rest light), its classical shape inside the outline, its text box reaching the
+    outline's curved ends."""
+    rng = np.random.default_rng(3)
+    page = np.where(rng.random((260, 200)) < 0.7, 150, 230).astype(np.uint8)[..., None].repeat(3, axis=2)
+    cv2.ellipse(page, (100, 130), (55, 95), 0, 0, 360, (255, 255, 255), -1)
+    cv2.ellipse(page, (100, 130), (55, 95), 0, 0, 360, (0, 0, 0), 4)
+    ring = np.zeros((260, 200), np.uint8)
+    cv2.ellipse(ring, (100, 130), (55, 95), 0, 0, 360, 255, 2)
+    r = region("bubble", (35, 25, 165, 235), tier=0, from_model=True, glyph=18.0)
+    r.text_box = (50, 50, 150, 210)
+    shape = np.zeros((r.height, r.width), np.uint8)
+    cv2.ellipse(shape, (100 - r.x0, 130 - r.y0), (51, 91), 0, 0, 360, 255, -1)
+    r.mask = shape
+    return page, r, ring > 0
+
+
+def test_a_model_bubbles_outline_on_a_dark_tone_is_no_lettering_joined_to_it():
+    """The outline's curved ends inside the text box, cut from what of it runs straight on, have the bubble's paper
+    on one side and the tone on the other: the tone's light alone left the paper most of the ring round them, and
+    they were taken for glyphs joined to the outline - the erase wiped the outline there and the room grew over it.
+    The ring holds the tone's dark too, and a sliver of the outline's inner edge along its straight run (that run much
+    of what is round it) is no glyph either: the outline stays, and so does the room."""
+    page, r, ring = bubble_on_dark_tone()
+    shape = r.mask.copy()
+    left = Pipeline._left_out(page, r)
+    assert left is None or not (left & ring[r.y0:r.y1, r.x0:r.x1]).any()
+    Pipeline._paper_erase(page, r)
+    assert (page[:, :, 0][ring] < 100).all()
+    assert (r.mask == shape).all()
+
+
+def test_a_tails_tip_by_the_foot_of_a_model_bubbles_text_box_is_no_lettering_joined_to_the_outline():
+    """A tail's tip drawn into the bubble from its outline, the model's text box ending a pixel or two into it: it has
+    the bubble's paper all round it, as a glyph joined to the outline has, but the text box holds hardly any of it
+    (`JOINED_HELD`) - it stays, and the room does not grow over it."""
+    page = flat(255, (260, 200))
+    cv2.rectangle(page, (45, 40), (155, 220), (0, 0, 0), 3)
+    tip = np.array([(47, 183), (47, 199), (66, 191)], np.int32)
+    cv2.fillPoly(page, [tip], (0, 0, 0))
+    r = region("bubble", (35, 25, 165, 235), tier=0, from_model=True, glyph=17.0)
+    r.text_box = (60, 50, 140, 185)
+    shape = np.zeros((r.height, r.width), np.uint8)
+    shape[44 - r.y0:217 - r.y0, 49 - r.x0:152 - r.x0] = 255
+    shape[page[r.y0:r.y1, r.x0:r.x1, 0] < 200] = 0
+    r.mask = shape.copy()
+    inked = page[:, :, 0] < 100
+    drawn = np.zeros(inked.shape, bool)
+    cv2.fillPoly(drawn.view(np.uint8), [tip], 1)
+    left = Pipeline._left_out(page, r)
+    assert left is None or not (left & drawn[r.y0:r.y1, r.x0:r.x1]).any()
+    Pipeline._paper_erase(page, r)
+    assert (page[:, :, 0][drawn & inked] < 100).all()
+    assert (r.mask == shape).all()
+
+
+def test_a_stretch_of_a_thin_outline_whose_gap_lets_the_page_in_is_no_glyph_joined_to_it():
+    """A thin outline with a gap of a pixel or two (its anti-aliasing, a page shown small) has the bubble's paper on
+    both sides of its stretches: the one from the gap to the corner, too short to run straight on as the outline does
+    elsewhere, was taken for a glyph joined to the outline and erased. It is longer than a glyph and a half
+    (`JOINED_LONGEST`): it stays."""
+    page = flat(255, (260, 200))
+    cv2.rectangle(page, (45, 40), (155, 220), (0, 0, 0), 1)
+    page[180:182, 155] = 255  # (the gap in the right side: the page beyond lets in)
+    r = region("bubble", (35, 25, 185, 235), tier=0, from_model=True, glyph=17.0)
+    r.text_box = (60, 50, 172, 210)
+    shape = np.zeros((r.height, r.width), np.uint8)
+    shape[44 - r.y0:217 - r.y0, 49 - r.x0:152 - r.x0] = 255
+    r.mask = shape.copy()
+    stretch = np.zeros(page.shape[:2], bool)
+    stretch[182:220, 155] = True
+    left = Pipeline._left_out(page, r)
+    assert left is None or not (left & stretch[r.y0:r.y1, r.x0:r.x1]).any()
+    Pipeline._paper_erase(page, r)
+    assert (page[:, :, 0][stretch] < 100).all()
+
+
+def test_a_room_grown_over_a_column_stops_short_of_a_line_by_the_box_edge():
+    """The room a model bubble's translation is set in, grown over the column its shape left out (`_room_with`), is
+    closed with nothing beyond the region's box: a closing at the box's edge took that edge for the room's and filled
+    in up to it - over a panel's border lying there, which the next erase of the region wiped."""
+    from taslation import pipeline
+
+    mask = np.zeros((120, 80), np.uint8)
+    mask[10:110, 8:73] = 255  # (the shape up to a panel's border at columns 74 to 76, the box's edge at 80)
+    extra = np.zeros((120, 80), bool)
+    extra[40:60, 2:6] = True  # (the column taken)
+    room = pipeline._room_with(mask, extra, 20.0)
+    assert room[40:60, 2:73].all()  # (the gap between the shape and the column closed)
+    assert not room[:, 73:].any()
+
+
+def test_a_room_grown_to_a_piece_taken_beyond_the_outline_stops_at_the_outline():
+    """A piece of the drawing just past the outline that the shape's erase took as lettering (`Pipeline._left_out`):
+    the room grows over the bubble's own paper alone (`_room_with` with `_own_ground` of the erased page), not over
+    the outline to it - the next erase of the region painted the outline there."""
+    from taslation import pipeline
+
+    linked = np.zeros((120, 120), np.uint8)
+    cv2.circle(linked, (60, 60), 45, 1, 3)
+    mask = np.zeros((120, 120), np.uint8)
+    cv2.circle(mask, (60, 60), 42, 255, -1)
+    extra = np.zeros((120, 120), bool)
+    extra[8:13, 58:64] = True  # (beyond the outline's top, rows 14 to 16)
+    room = pipeline._room_with(mask, extra, 20.0, pipeline._own_ground(linked > 0, mask))
+    assert (room[mask > 0] > 0).all()
+    assert not room[:17, 50:70].any()
+
+
 def test_paper_open_to_the_page_past_the_wider_window_is_no_closed_paper():
     """Paper that runs on past the wider window too (out to the page's white ground) is no closed paper."""
     page, box = joined_bubbles()

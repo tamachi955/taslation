@@ -19,7 +19,8 @@ region is measured:
   and ``line_cut`` those of them that break a line (`_cut`: not a stroke joined to the outline that the line goes on
   past, a neighbour's column by an outline the two share);
 * ``ink_on_line`` / ``ink_out`` / ``ink_other``: lettering pixels on such a line, outside the bubble's interior (a
-  closed light area round the text), and on another region's interior or lettering;
+  closed light area round the text, closed over the lettering's pieces alone: no glyph joined to the outline), and on
+  another region's interior or lettering;
 * ``over_px`` / ``draft_over_px``: pixels of a region's lettering that a neighbour's erase or lettering drawn after it
   took away on the finished page, and that its own last patch showed as finished while a patch sent after it shows
   them otherwise on the page filling in (`Drafts`: the patches pasted in turn, as a window pastes them);
@@ -30,7 +31,7 @@ region is measured:
   room a bubble's lettering took beyond its own across (``frame``: "turned", the line turned 90 degrees, whose lines,
   size and ink are measured as drawn and whose room is judged narrow in the turned frame; "overrun", over the
   outline), counted per set and scale by ``merge``;
-* the text box against the lettering it holds (``box_cover``, ``box_excess``);
+* the text box against the lettering it holds (``box_cover``, ``box_excess``: the box of its pieces alone);
 * regions with no bubble whose readers disagree (``false_likely``), regions far from every gold or made-up text,
   untranslated regions and gold texts with no region;
 * the sound words (``sound``, the kind ``sfx``: `taslation.soundwords`): found, their reading set right, left as
@@ -77,9 +78,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 9  # (9: a neighbour over a region's lettering, lettering left by a line or a shared outline, an outline cut
-#              only where broken, joined pairs in layouts 18 and 19, the codes' levels and the summary by them; 8: sound
-#              words)
+VERSION = 10  # (10: the lettering's box - BOX_SMALL, BOX_BIG - and the closed interior round it - INK_OUT, GHOST, the
+#               residue's zone, BOX_BIG - by its pieces alone, the glyphs joined to a line left out, as before 9; 9: a
+#               neighbour over a region's lettering, lettering left by a line or a shared outline, an outline cut only
+#               where broken, joined pairs in layouts 18 and 19, the codes' levels and the summary by them; 8: sound
+#               words)
 SMALL_HEIGHT = 1000  # px: a spread fitted into a browser window about this high shows a page about 700 x 1000
 # the degraded scales, as a viewer may hand a page over: "jpeg" compressed at JPEG_QUALITY, then fitted into
 # SMALL_HEIGHT by a cubic (a factor that is no whole number); "blur" the same, softened by a gaussian of BLUR_SIGMA px.
@@ -1108,14 +1111,17 @@ def _glyph(r: Any, h: int) -> float:
     return float(min(max(8.0, min(tb[2] - tb[0], tb[3] - tb[1])), 0.035 * h))
 
 
-def _pieces(dark: Any, tbg: Box, g: float, win: Box, others: Sequence[Box] = ()) -> tuple[Any, Any]:
+def _pieces(dark: Any, tbg: Box, g: float, win: Box, others: Sequence[Box] = (),
+            joined: bool = True) -> tuple[Any, Any]:
     """The original's dark pieces in *win*, as two masks (page-sized): lettering (mostly inside the grown text box
     *tbg*, no longer than it) and lines (longer than LINE_GLYPHS glyphs, mostly outside it). Of a line, the parts
     inside the text box off what of it runs straight on (`LINE_RUN` glyphs one way: the outline's sides, a tail) that
     are no longer than `GLYPH_PART` glyphs are lettering: a glyph of a column set by the outline, joined to it (taken
     for the outline, its erase was counted as the outline cut and what of it was left as no lettering left); such
     parts inside the grown text boxes of the other regions (*others*: a neighbour's column by the outline the two
-    share) are neither the region's lettering nor a line."""
+    share) are neither the region's lettering nor a line. *joined* False: the lettering alone, those parts left with
+    the line (BOX_SMALL: a stretch of a curved outline among them, inside the grown text box, carried the lettering's
+    box out to the grown box's edge)."""
     import numpy as np
     import cv2
 
@@ -1141,7 +1147,7 @@ def _pieces(dark: Any, tbg: Box, g: float, win: Box, others: Sequence[Box] = ())
         elif max(bw, bh) > LINE_GLYPHS * g:
             lines[i] = True
     lp_sub, ln_sub = letters[labels], lines[labels]
-    if (ln_sub & (inside | theirs)).any():
+    if joined and (ln_sub & (inside | theirs)).any():
         run = max(5, int(round(LINE_RUN * g))) | 1
         core = np.zeros(sub.shape, bool)
         for angle in range(0, 180, LINE_STEP):  # (a thin curved outline holds a straight run only near its own slope)
@@ -1408,9 +1414,13 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
         inkmask = (O > 255 - INK_DARK) if dark_ground else dark
         others = [_grow(tuple(int(v) for v in q.text_box), g / 3, w, h) for q in holders if q is not r]
         letters, lines_ = _pieces(inkmask, tbg, g, win, others)
+        # (the lettering's pieces alone, not the glyphs joined to a line: its closed interior and its box go by them -
+        # a stretch of a curved outline among those, inside the grown text box, opened the interior to what lies past
+        # the outline and carried the box out to the grown box's edge)
+        alone = _pieces(inkmask, tbg, g, win, others, joined=False)[0]
         # (lettering on a fill - a black ground, a gradient's dark end - is no lettering on a line)
         thin = _long_pieces(lines_ & ~_solid(inkmask, g, win), win, LINE_GLYPHS * g)
-        inter = _interior(255 - O if dark_ground else O, letters, tb, win)
+        inter = _interior(255 - O if dark_ground else O, alone, tb, win)
         if before is not None:
             mb = _page_mask((h, w), before[0], before[1])
             row["paper"] = list(paper) if paper else None
@@ -1454,7 +1464,8 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             # on the original (the paper a LaMa fill reports is what it painted, dark where it painted the bubble dark)
             lama = row["inpainted"]
             o_letters, o_lines = _pieces(dark, tbg, g, win, others) if dark_ground and lama else (letters, lines_)
-            o_inter = _interior(O, o_letters, tb, win) if dark_ground and lama else inter
+            o_inter = (_interior(O, _pieces(dark, tbg, g, win, others, joined=False)[0], tb, win)
+                       if dark_ground and lama else inter)
             if o_inter is not None and ((light and not dark_ground) or lama):
                 k = max(5, int(g / 2) | 1)
                 core = cv2.erode(_filled(o_inter, win).astype(np.uint8),
@@ -1491,8 +1502,8 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
                     codes.append("ART_CUT")
             elif m["line_cut"] >= LINE_LOST_PX and light:
                 codes.append("LINE_CUT")
-            if letters.any():
-                ys, xs = np.nonzero(letters & (mb | _box_mask((h, w), tbg)))
+            if alone.any():
+                ys, xs = np.nonzero(alone & (mb | _box_mask((h, w), tbg)))
                 if xs.size:
                     ib = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
                     m["ink_box"] = list(ib)

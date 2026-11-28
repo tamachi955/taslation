@@ -168,6 +168,7 @@ SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it to
 PANE_REST_S = 0.3  # the side panes come back once the viewer's window has kept its place and size so long (`_rect_tick`)
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
+PRESENTED_KEPT = 64  # pages whose newest set's serial is kept (`presented`)
 REPORT_FPS_S = 5.0  # (`report_facts`) the viewer's frames per second are counted over so many seconds
 START_S = 2.0  # how long `start` waits for the window to be made
 
@@ -732,6 +733,7 @@ class SeeThrough:
         self._on = True
         self._lock = threading.Lock()
         self._store = st.SetStore()
+        self._presented: dict[int, int] = {}  # frame key -> the serial of its newest set handed over (`presented`)
         self._changed = 0  # bumped by every change from the Tk thread
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -879,9 +881,19 @@ class SeeThrough:
         (`seethrough.page_sign`; None: never shown): they replace the set of that key, and become the newest."""
         with self._lock:
             s = self._store.put(key, size, patches, final, sign)
+            self._presented.pop(key, None)
+            self._presented[key] = s.serial
+            for old in list(self._presented)[:-PRESENTED_KEPT]:
+                self._presented.pop(old, None)
             self._changed += 1
         self._note("present", key=key, set=s.serial, patches=len(patches), final=int(final))
         self._poke()
+
+    def presented(self, key: int) -> int | None:
+        """The serial of the newest set handed over for the page read from the frame *key* (`present`), held still or
+        let go of since; None: none was. A look whose "store" (`why_not_shown`) is older looked before it came."""
+        with self._lock:
+            return self._presented.get(key)
 
     def forget(self, key: int) -> None:
         with self._lock:
@@ -925,7 +937,8 @@ class SeeThrough:
         frame says (the region in the editor, one being pressed), "bare" those of the region whose original is shown,
         "unshown" (editing) the boxes lettered whose lettering does not show, "editing",
         "hidden" (why nothing shows: off, away, no viewer...), "at" (monotonic s), "frame_at" (since when the viewer's
-        frame looked at was its newest: a frame at rest so long). Empty before the first look."""
+        frame looked at was its newest: a frame at rest so long), "store" (the newest set's serial the look had: a set
+        handed over later, `presented`, it never saw). Empty before the first look."""
         return self._why
 
     def report_facts(self, key: int | None = None, within_s: float = REPORT_FPS_S) -> dict[str, Any]:
@@ -1259,7 +1272,7 @@ class SeeThrough:
         with self._lock:
             viewer, away, changed = self._viewer, self._away, self._changed
             on = self._on and not away  # (another tab on show: nothing lettered, the mouse not taken, `set_away`)
-            sets = list(self._store.sets)
+            sets, store = list(self._store.sets), self._store.serial
             panes = dict(self._pane_want)
             marks, ground = self._marks, self._ground
         self.counts["looks"] += 1
@@ -1340,7 +1353,7 @@ class SeeThrough:
         if self._frame_since[0] != frame.seq:
             self._frame_since = (frame.seq, now)
         self._look_facts = {**self._facts_of(chosen, valid, shown, seen, sets, size, now),
-                            "frame_at": self._frame_since[1]}
+                            "frame_at": self._frame_since[1], "store": store}
         self._last_look = (chosen, shown, seen, frame.seq, compare_ms, origin, size, bool(sets))
         self._show_look(*self._last_look)
 

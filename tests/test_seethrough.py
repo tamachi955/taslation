@@ -722,6 +722,65 @@ def test_the_lettered_regions_not_shown_are_told_with_why_numbers_and_kinds_only
     assert ui.unshown(_unshown_app({**why, "frame_at": _time.monotonic()}, regions)[0]) is None
 
 
+def stepping(monkeypatch, frame):
+    """A see-through window over a viewer (window 5) whose frame is *frame* (RGB, W x H, at the screen's top left),
+    its looks (`SeeThrough._step`) made in the test: what it drew or hid noted."""
+    from taslation.capture import seethrough as window
+    from taslation.capture import wgc
+    from taslation.capture import windows as cw
+
+    monkeypatch.setattr(window, "_user32", SimpleNamespace(IsWindow=lambda h: 1, IsIconic=lambda h: 0,
+                                                           IsWindowVisible=lambda h: 1, ShowWindow=lambda h, c: 1))
+    monkeypatch.setattr(cw, "_is_cloaked", lambda h: False)
+    monkeypatch.setattr(cw, "_client_box", lambda h: (0, 0, W, H))
+    monkeypatch.setattr(cw, "_frame_bounds", lambda h: (0, 0, W, H))
+    monkeypatch.setattr(window.wgc, "peek", lambda h: wgc.Frame(bgra(frame), 1))
+    for name, value in (("cursor_pos", lambda: None), ("button_down", lambda: False),
+                        ("cover_rects", lambda *a: []), ("viewer_dpi", lambda h: st.BASE_DPI)):
+        monkeypatch.setattr(window, name, value)
+    over = window.SeeThrough()
+    drawn = []
+    for name in ("_key_tick", "_edit_take", "_hook_moves", "_pane_presses", "_place_panes", "_right_plates",
+                 "_edit_held"):
+        setattr(over, name, lambda *a, **k: None)
+    over._rect_tick = lambda *a: True
+    over._sizing_tick = lambda *a: False
+    over._draw = lambda chosen, shown, origin, size, *a: (
+        drawn.append(("show", chosen.key, shown)), setattr(over, "_shown", (chosen.serial, shown, origin, size)))
+    over._hide = lambda why, *a, **k: (drawn.append(("hide", why)), setattr(over, "_shown", None))
+    over.follow(5)
+    return over, drawn
+
+
+def test_a_page_finished_before_the_window_looked_at_its_patches_is_no_lettering_gone(monkeypatch):
+    """The page's result came (the Tk thread) before its patches reached the see-through window (the patch thread
+    makes them) or before the window looked again: its last look, which had no set of that page, says nothing of
+    it - it was told "no match", the lettering gone from a page at rest, as the look after found it shown. A set let
+    go of while its page is on show is told."""
+    from PIL import Image
+
+    from taslation.ui import seethrough as ui
+
+    frame = art()
+    original = Image.fromarray(frame)
+    key = id(original)
+    result = SimpleNamespace(original=original, regions=[_region((120, 41, 170, 80))])
+    over, drawn = stepping(monkeypatch, frame)
+    app = SimpleNamespace(_see_through=over, last_result=result, _result_on_show=lambda: True)
+    over.present(1, (W, H), (), sign=sign_of(art(seed=2)))  # (the page before's set: another page)
+    over._step()
+    assert over.why_not_shown()["key"] is None and ui.unshown(app, settled=False) is None  # (none of its own yet)
+    over.present(key, (W, H), st.make_patches(frame, lettered(frame, [(120, 41, 170, 80)])), True, sign_of(frame))
+    assert ui.unshown(app, settled=False) is None  # (handed over after the window's last look: it never saw them)
+    over._step()
+    assert drawn[-1] == ("show", key, (0,)) and ui.unshown(app, settled=False)["kinds"] == {}
+    for other in range(2, 2 + st.SETS_KEPT):  # (three pages after it: its set let go of while it is on show)
+        over.present(other, (W, H), (), sign=sign_of(art(seed=other + 1)))
+    over._step()
+    found = ui.unshown(app, settled=False)
+    assert found["kinds"] == {"no match": 1} and found["not_shown"][0][2]["set_known"] == 0
+
+
 def test_a_page_gives_the_log_one_line_of_its_regions_not_shown_and_the_tools_their_kinds(monkeypatch, caplog):
     import logging
 

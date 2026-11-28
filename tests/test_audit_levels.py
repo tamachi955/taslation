@@ -64,6 +64,10 @@ def test_a_glyph_joined_to_the_outline_inside_the_text_box_is_lettering_and_the_
     side[:, :150] = False
     assert lines[side].mean() > 0.9  # (the outline's right side, straight on: a line)
     assert letters[(outline > 0) & ~glyph].mean() < 0.05  # (no stretch of the outline taken for lettering)
+    # the lettering's box (BOX_SMALL, BOX_BIG) goes by the pieces alone, as up to the audit's version 8: the parts of
+    # a line inside the grown text box - a stretch of a curved outline among them - carried it out to that box's edge
+    alone, _lines = audit_render._pieces(page, (110, 60, 160, 240), 22.0, (0, 0, 200, 300), joined=False)
+    assert alone[150, 125] and not alone[glyph].any() and not alone[outline > 0].any()
 
 
 def test_a_glyph_of_the_neighbours_column_by_a_shared_outline_is_neither_lettering_nor_a_line():

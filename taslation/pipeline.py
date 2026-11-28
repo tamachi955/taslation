@@ -190,8 +190,18 @@ WHOLE_GLYPH = 0.5  # ... and the rest of a dark piece it holds part of that lies
 WHOLE_SIZE = 2.0  # ... and is no longer than this many glyphs (`Pipeline._whole_glyphs`; a strand of hair is longer)
 HOLE_LINES = 2.5  # glyphs: a dark piece longer than this in a plain box's bubble is its outline (`Pipeline._off_lines`)
 HOLE_RUN = 1.2  # ... and of it, within a character's box, what runs straight on this many glyphs (no glyph's stroke)
-RING_OWN = 0.75  # of the light pixels round ink joined to a line: the bubble's own paper makes it lettering
-#                  (`_left_out`)
+RING_OWN = 0.75  # of the pixels round ink joined to a line (dark or light, but the line's straight run): the bubble's
+#                  own paper and its other lettering make it lettering (`_left_out`) ...
+LINE_SIDE = 0.35  # ... unless more than this share of them is that straight run (a sliver of the line along it: a
+#                   glyph joined to the outline had at most 0.26 of it, the outline's inner edge 0.48)
+JOINED_HELD = 0.25  # ... and at least this share of it lies in the model's text box (a glyph its edge cut had 0.46
+#                     of it there, a tail's tip by its foot 0.04),
+JOINED_LONGEST = 1.5  # ... it is no longer than this many glyphs (the made-up column's glyphs 1.0, stretches of an
+#                       outline whose gap let the page in 2.1 and 2.3) ...
+JOINED_STROKE = 0.4  # ... and no stroke of it is wider than this much of a glyph (the widest disc in it: the made-up
+#                      column's glyphs 0.24, a tail's tip or root at the outline 0.43 to 0.48);
+JOINED_CHAR = 0.5  # ... and where the reading gave its characters' boxes, this share of it lies in one of them (a
+#                    quarter glyph grown: a curved stretch of a thin outline, a tail's tip, lay outside them all)
 ROOM_JOIN = 0.35  # of a glyph: the closing that joins what `_left_out` took to a bubble's room (`_room_with`)
 LOOSE_KINDS = ("text", "text-dark")  # lettering with nothing round it (a closed block is "text-on-page", "text-on-dark")
 ON_ART_KINDS = ("text", "text-dark", "text-on-page", "text-on-dark")  # lettering set on the page's ground
@@ -5481,9 +5491,13 @@ class Pipeline:
             extra = Pipeline._left_out(image, region, dark_threshold, dark)
             bg = erase_region(image, region, mode, white_threshold, dark_threshold, dark)
             if extra is not None:  # in the bubble's own paper colour (the outline guard would take a big glyph for a line)
-                image[region.y0:region.y1, region.x0:region.x1][extra] = bg
+                crop = image[region.y0:region.y1, region.x0:region.x1]
+                crop[extra] = bg
                 analysis.acted(region, "left_out")
-                region.mask = _room_with(region.mask, extra, region.glyph or 20.0 * pagescale.of(region))
+                gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
+                linked = (gray > 255 - dark_threshold - LINK_LEVELS) if dark else (gray < dark_threshold + LINK_LEVELS)
+                region.mask = _room_with(region.mask, extra, region.glyph or 20.0 * pagescale.of(region),
+                                         _own_ground(linked, region.mask))
             return bg
         q = copy.copy(region)
         q.kind = "text-dark" if dark else "text"  # lettering on the page: its strokes and the ground right round them
@@ -5594,10 +5608,14 @@ class Pipeline:
         most `GLYPH_REACH_ERASE` glyphs long, also when it is joined `LINK_LEVELS` past the dark threshold: a thin
         outline broken by its anti-aliasing) that the model's text box holds, off the box's edge (`EDGE_KEEP` px: an
         outline); None when there is none. Ink joined to a line there - the outline, one shared with a bubble joined
-        to it - is cut from what of the line runs straight on (`_line_runs`) and taken where the paper round it is the
-        bubble's own (`RING_OWN`, its own counters left out of that ring: a glyph of a column set by the outline,
-        whose classical shape went round it, not a stretch of the outline with the page or the neighbour's paper
-        beyond it); the line stays. A piece taken takes its counters with it (`_counters`)."""
+        to it - is cut from what of the line runs straight on (`_line_runs`) and taken where what is round it, dark or
+        light, is the bubble's own paper or its other lettering (`RING_OWN`, its own counters and that straight run
+        left out of that ring: a glyph of a column set by the outline, whose classical shape went round it, not a
+        stretch of the outline with the page, a tone or the neighbour's paper beyond it) and that run is not much of
+        what is round it (`LINE_SIDE`: not a sliver of the line along it), when the text box holds enough of it (and
+        a character's box of the reading's, where it gave them), it is about a glyph long and its strokes are thin
+        (`JOINED_HELD`, `JOINED_CHAR`, `JOINED_LONGEST`, `JOINED_STROKE`: not a tail's tip or root, nor a stretch of
+        the outline); the line stays. A piece taken takes its counters with it (`_counters`)."""
         crop = image[region.y0:region.y1, region.x0:region.x1]
         gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
         ink = (gray > 255 - dark_threshold) if dark else (gray < dark_threshold)
@@ -5625,20 +5643,46 @@ class Pipeline:
                                                                         connectivity=8)
         line = np.zeros(nl, bool)
         line[1:] = np.maximum(joined_stats[1:, 2], joined_stats[1:, 3]) > longest
+        xs, ys, bws, bhs, areas = (stats[:, k] for k in range(5))
+        maybe = ((areas >= least) & (np.maximum(bws, bhs) <= longest) & (xs >= edge) & (ys >= edge)
+                 & (xs + bws <= w - edge) & (ys + bhs <= h - edge) & (xs + bws > tx0) & (xs < tx1) & (ys + bhs > ty0)
+                 & (ys < ty1))
+        maybe[0] = False
+        letters = maybe[labels]  # (the pieces that may be lettering: glyph-sized, in the text box, off its edge)
         out = np.zeros(gray.shape, bool)
         paper: np.ndarray | None = None
-        for i in range(1, n):
-            x, y, bw, bh, area = (int(v) for v in stats[i])
-            if (area < least or max(bw, bh) > longest or x < edge or y < edge or x + bw > w - edge
-                    or y + bh > h - edge or x + bw <= tx0 or x >= tx1 or y + bh <= ty0 or y >= ty1):
-                continue
+        chars: np.ndarray | None = None  # (where the reading found characters, if it gave their boxes)
+        if region.char_boxes:
+            chars = np.zeros(gray.shape, bool)
+            pad = max(2, int(glyph / 4))
+            for cx0, cy0, cx1, cy1 in region.char_boxes:
+                chars[max(0, cy0 - pad - region.y0):max(0, cy1 + pad - region.y0),
+                      max(0, cx0 - pad - region.x0):max(0, cx1 + pad - region.x0)] = True
+        for i in np.nonzero(maybe)[0]:
+            x, y, bw, bh = (int(v) for v in stats[i, :4])
             piece = labels == i
             counters = _counters(piece, (x, y, bw, bh))  # (a glyph's own: painted with it, no paper of anyone's)
             if line[joined[piece]].any():
+                # (a glyph of a column the model's text box holds: in it - where the reading found characters, in
+                # one of theirs -, about a glyph long, of thin strokes; not a tail's tip or root, solid, nor a stretch
+                # of the outline)
+                area = int(areas[i])
+                held = int(piece[max(0, ty0):max(0, ty1), max(0, tx0):max(0, tx1)].sum())
+                stroke = cv2.distanceTransform(np.pad(piece[y:y + bh, x:x + bw], 1).astype(np.uint8), cv2.DIST_L2, 3)
+                if (held < JOINED_HELD * area or max(bw, bh) > JOINED_LONGEST * glyph
+                        or 2 * float(stroke.max()) > JOINED_STROKE * glyph
+                        or (chars is not None and int((piece & chars).sum()) < JOINED_CHAR * area)):
+                    continue
                 if paper is None:
                     paper = _own_ground(linked, mask)
-                ring = (cv2.dilate(piece.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~linked & ~counters
-                if not ring.any() or int((ring & paper).sum()) < RING_OWN * int(ring.sum()):
+                # (all round it but the line it was cut from, dark or light: the bubble's paper and its other
+                # lettering are its own; a stretch of the outline has the page, a tone or the neighbour's paper beyond
+                # it - a tone is dark, and its light alone left the paper most of the ring -, and a sliver of the line
+                # along what of it runs straight on has that line for much of what is round it)
+                around = (cv2.dilate(piece.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~piece & ~counters
+                ring = around & ~cut
+                if (not ring.any() or int((ring & (paper | (letters & ~piece))).sum()) < RING_OWN * int(ring.sum())
+                        or int((around & cut).sum()) > LINE_SIDE * int(around.sum())):
                     continue
             out |= piece | counters
         if not out.any():
@@ -6395,17 +6439,26 @@ def _line_runs(linked: np.ndarray, glyph: float, longer: float | None = None,
     return piece, straight
 
 
-def _room_with(mask: np.ndarray, extra: np.ndarray, glyph: float) -> np.ndarray:
+def _room_with(mask: np.ndarray, extra: np.ndarray, glyph: float, own: np.ndarray | None = None) -> np.ndarray:
     """*mask* (uint8, a model bubble's classical shape) with the lettering its shape left out and its erase took
     (*extra*, bool: a column set by the outline), closed over by `ROOM_JOIN` of a glyph and its holes filled: the room
     its translation is set in reaches the outline there too, as the rest of the bubble's does (it was set beside the
-    column's place, squeezed)."""
-    if mask.shape != extra.shape:
+    column's place, squeezed). With *own* (bool: the bubble's own paper on the erased page, `_own_ground`) it grows
+    over that paper alone: not over the outline to a piece taken beyond it, which the next erase of the region
+    wiped."""
+    if mask.shape != extra.shape or (own is not None and own.shape != mask.shape):
         return mask
     grown = ((mask > 0) | extra).astype(np.uint8) * 255
     size = 2 * max(1, int(ROOM_JOIN * glyph)) + 1
-    closed = cv2.morphologyEx(grown, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
-    return np.where((mask > 0) | (fill_holes(closed) > 0) | extra, np.uint8(255), np.uint8(0))
+    # (closed with nothing beyond the box: a closing at its edge took that edge for the room's and filled in up to it,
+    # over the outline or a panel's border lying there)
+    closed = cv2.morphologyEx(cv2.copyMakeBorder(grown, size, size, size, size, cv2.BORDER_CONSTANT, value=0),
+                              cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    closed = np.ascontiguousarray(closed[size:-size, size:-size])
+    grew = (fill_holes(closed) > 0) | extra
+    if own is not None:
+        grew &= own
+    return np.where((mask > 0) | grew, np.uint8(255), np.uint8(0))
 
 
 def _counters(piece: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
@@ -6421,7 +6474,10 @@ def _counters(piece: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
 
 def _own_ground(linked: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """The light pixels (off *linked*) four-connected to those of *mask* (the region's own interior) without crossing
-    the ink: the bubble's own paper, whatever its classical shape went round (`Pipeline._left_out`)."""
+    the ink: the bubble's own paper, whatever its classical shape went round (`Pipeline._left_out`). (Not past the ink
+    grown by a pixel: the paper of a glyph a pixel or two from the outline or from its neighbours was cut off from
+    the bubble's, and the glyph left as the outline's; a gap a thin outline's anti-aliasing leaves lets the page beyond
+    in, and the stretch of the outline it holds is too long for a glyph, `JOINED_LONGEST`.)"""
     light = ~linked
     _n, labels = cv2.connectedComponents(light.astype(np.uint8), connectivity=4)
     seeds = np.unique(labels[light & (mask > 0)])

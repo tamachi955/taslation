@@ -782,7 +782,8 @@ rows' languages.
   released only once it is over (`SeeWatch.scene_pending`), so best with scenario `g`; `--see-edit` runs on the
   runners only (the group g-see-edit), its region editor taking the keys from whatever window is in front.
   In every run the page on show's lettered regions whose patch did not show are counted once a second
-  (`run.see_through.unshown`, from `ui.seethrough.unshown_tick`): per page the looks, the regions' boxes, the kinds
+  (`run.see_through.unshown`, from `ui.seethrough.unshown_tick`; not by a look the window made before the page's
+  newest patches reached it, `SeeThrough.presented`): per page the looks, the regions' boxes, the kinds
   summed over the looks - "no match" (the frame on show is not the page read: its distance over the limit), "bars" (a
   bar of the viewer's over it or by it), "covered", "no patch", ... -, those of the last look with the page's distance
   against the limit and the rows of the bars; "hover" and "original" are the pointer's and the editor's doing,
