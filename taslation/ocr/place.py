@@ -123,7 +123,16 @@ SHORT_VALUES = ("ask", "processor")  # ``gpu_short``: what a start that is short
 # this process's dedicated GPU memory as Windows counts it (CUDA context and library kernels included) and torch's
 # reserved memory, each model alone, over the dataset's 214 pages, the 101 frames of the dev snapshots (1920x1032) and
 # frames of 1904x1072, 2560x1440 and 3840x2160 (two pages scaled to the frame's height). The figures are those peaks
-# and a fifth more, rounded up to 10 MiB, for the inputs not measured.
+# and a fifth more, rounded up to 10 MiB, for the inputs not measured (LaMa's; the layout model has one input size).
+# Measured again on 2026-11-28 as the card's used memory (NVML) rose with each load, the same card, torch 2.14.1: the
+# context 70-77 MiB, the readers 311-418 (596-614 with their graphs), LaMa's weights 133-189 and a window 318-330 more
+# at 658x512 to 815x512 (624 at the 768x768 px LaMa is scaled to at most on the GPU), the layout model 328-340: each
+# at most its figure here but LaMa at a window larger than any met on a screen up to 1440 px. The figures are each
+# part's own peak, added up as if all came at once - and they can: LaMa at 768x768, the layout model and the readers
+# on three threads at once took 1,976 MiB of this process on the card (1,830 counted, LaMa's window past its figure).
+# A page as the pipeline reads it took 1,153-1,397 (made-up spreads at 1920x1032, LaMa's windows at most 512x512),
+# the translator 2,056-2,065 beside it: 1,304-1,508 MiB of the card left at the page's peak where the judgement of
+# before, the same parts counted, found 690-762 left. So the sum stays the bound, the rounding alone taken off.
 # The readers are counted at their measured peak with nothing added: their inputs are bounded (charspot's 256 cells
 # of 16 px, nar's 324 patches of 14 px), so the largest crop's is the peak. Torch's reserved memory for them, measured
 # again on 2026-11-22 over 509 crops of the dataset's pages for charspot and 206 for nar (each reader's own crops, as
@@ -155,21 +164,25 @@ LAMA_SCREEN_PX = 1440
 # the layout model: its weights (175 MiB), blocks and kernels, 356 in all, the same on every frame (each page unit is
 # scaled to 640 px square: 123 MiB while it runs, on every input measured; 346 reserved again on 2026-11-22 through
 # whole pages, two-page frames of 1920x1032; with the readers 668 there and on 2560x1440, below the two figures'
-# sum, 742: the allocator's blocks are shared)
-LAYOUT_MIB = 430
+# sum, 742: the allocator's blocks are shared; 328 and 340 MiB of the card's used memory as NVML says it on
+# 2026-11-28, loaded and run on a two-page frame, the readers and LaMa loaded before it, five runs adding nothing). Its
+# one input size was measured: the largest, 356, rounded up to 10 MiB, nothing added for inputs not measured.
+LAYOUT_MIB = 360
 # The translation models whole in video memory, at the context the app asks for (PLaMo its own 8192, the chat model
 # ``ollama_num_ctx``'s default), by the server's KV cache type (``OLLAMA_KV_CACHE_TYPE``; `DEFAULT_KV` where it is set
 # nowhere) and whether its cache of the windowed layers is full-size (``LLAMA_ARG_SWA_FULL``: `taslation.ollama_start`):
-# what loading one with the app's options added to the card's used memory, rounded up to the next 100 MiB, and
-# /api/ps's size then, rounded up (Ollama 0.40.16, three loads each, the same to 1 MiB, 2026-11-20). PLaMo: 1933 MiB
-# (/api/ps 1823.9) with q8_0, 2065 (1955.5) with q8_0 and the full window, 2009 (1881.4) with f16, 2229 (2101.4) with
-# f16 and the full window. Qwen3.5 4B: 3939 (3203) with q8_0 either way: it has no windowed layers. The runner takes it
-# all at the load, KV cache included, and it does not grow, so it is counted as measured:
+# what loading one with the app's options added to the card's used memory, rounded up to 10 MiB, and /api/ps's size
+# then, rounded up (Ollama 0.40.16, three loads each, the same to 1 MiB, 2026-11-20). PLaMo: 1933 MiB (/api/ps 1823.9)
+# with q8_0, 2065 (1955.5) with q8_0 and the full window, 2009 (1881.4) with f16, 2229 (2101.4) with f16 and the full
+# window. Qwen3.5 4B: 3939 (3203) with q8_0 either way: it has no windowed layers. Measured again on 2026-11-28 with
+# q8_0 and the full window, a server of the measurement's own: 2056, 2060 and 2060 MiB added in three loads, /api/ps
+# 1955, a page's requests adding nothing. The runner takes it all at the load, KV cache included, and it does not grow,
+# so it is counted as measured (it was rounded up to the next 100 MiB before: up to 99 MiB more than any load took):
 # (Ollama name, num_ctx) -> {(KV cache type, full window): (MiB added, /api/ps MiB)}
 KNOWN_TRANSLATORS: dict[tuple[str, int], dict[tuple[str, bool], tuple[int, int]]] = {
-    ("taslation-plamo3-translate-2b", 8192): {("q8_0", False): (2000, 1824), ("q8_0", True): (2100, 1956),
-                                               ("f16", False): (2100, 1882), ("f16", True): (2300, 2102)},
-    ("qwen3.5:4b", 16384): {("q8_0", False): (4000, 3203), ("q8_0", True): (4000, 3203)},
+    ("taslation-plamo3-translate-2b", 8192): {("q8_0", False): (1940, 1824), ("q8_0", True): (2070, 1956),
+                                               ("f16", False): (2010, 1882), ("f16", True): (2230, 2102)},
+    ("qwen3.5:4b", 16384): {("q8_0", False): (3940, 3203), ("q8_0", True): (3940, 3203)},
 }
 DEFAULT_KV = "f16"  # Ollama's KV cache type where OLLAMA_KV_CACHE_TYPE is set nowhere
 RUNNER_SHARE = 1.25  # what the runner adds to /api/ps's size, at most (measured 1.06 and 1.23), for another model

@@ -372,6 +372,38 @@ the System page says so), as any failure on the GPU does.
 `DeviceModels.run` decides at the start of each read; `PLAIN_BESIDE` False brings back the rule before (every copy
 without graphs on the processor through a request) for a measurement.
 
+### The start's judgement of the GPU's memory against measurement
+
+The judgement (`taslation/ocr/place.py`) adds up each part's own peak as if all came at once, leaves the margin
+(`MARGIN_MIB`, 710: the driver's part and the most other programs were seen to rise at once) and leaves out the
+readers' CUDA graphs first, without asking, where the sum does not fit. Measured on the GTX 1660 Ti (6 GB, 6,144 MiB)
+on 2026-11-28 as the card's used memory (NVML, every 10 ms) rose with each load, the window's start order, a server of
+the measurement's own with q8_0 and the full window, then pages of made-up two-page spreads at 1920 x 1032 read and
+translated as the window reads them (MiB):
+
+| Part | Counted before | Counted now | Measured |
+|---|---|---|---|
+| translator (PLaMo, /api/ps 1,955) | 2,100 | 2,070 | 2,056-2,065 |
+| CUDA context | 100 | 100 | 70-77 |
+| readers | 420 | 420 | 311-418 |
+| readers' graphs | 270 | 270 | 178-239 (261-268 on 2026-11-27) |
+| LaMa | 680 | 680 | weights 133-189, a window 318-330 at 658x512 to 815x512, 624 at 768 x 768 |
+| layout model (one input size) | 430 | 360 | 328-340 |
+| this process, the parts at once | 1,900 | 1,830 | 1,976 (LaMa at 768 x 768, the layout model, the readers on three threads) |
+| this process, a page as the pipeline reads it | - | - | 1,153-1,397 |
+| ours (translator and this process) | 4,000 | 3,900 | 3,247-3,453 at a page's peak |
+
+A page took 450-650 MiB less than the sum counts now, but the parts can come at once and then reach it (past it with
+LaMa's window at its cap, which no screen up to 1,440 px gave), so the sum stays the bound; only the rounding went:
+the translator's to the next 100 MiB (up to 99 more than any load took) and the fifth added to the layout model's
+peak for inputs not measured (it has one input size), 100 MiB in all. On the owner's starts (other programs holding
+1,356, 1,563 and 1,688 MiB: the graphs kept, dropped, dropped) the graphs are kept now where other programs hold up
+to 1,534 MiB (1,434 before) and the box comes past 1,804 (1,704); with a screen taller than 1,440 px 1,244 and 1,514
+(1,144 and 1,414); the starts at 1,563 and 1,688 still go without them, and their readers now stay on the GPU
+through the translator's requests (above). The figure `gpu_free_mb` on a page's line is torch's
+`mem_get_info`, which on Windows counts this process alone (a fixed part of some 940 MiB and what this process holds:
+4,000-4,170 there while the card had 1.3-1.5 GB free), not the card's.
+
 The watch decides a frame whose rows of the client
 area hold the very bytes of the frame compared last, with the same sets, box and DPI, as that frame was decided,
 by a memcmp (`seethrough.same_rows`, `SeeThrough._decide`): a change of any byte there is compared at the frame that

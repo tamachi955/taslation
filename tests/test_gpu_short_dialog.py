@@ -25,7 +25,7 @@ from taslation.ui.dialogs import gpu_short
 
 pytestmark = pytest.mark.usefixtures("gpu_dialog_allowed")
 
-PLAMO_WINDOW = 2100
+PLAMO_WINDOW = place.KNOWN_TRANSLATORS[("taslation-plamo3-translate-2b", 8192)][("q8_0", True)][0]
 
 
 def _needs(fixed=()) -> list[Need]:
@@ -218,9 +218,9 @@ def test_enough_asks_nothing_and_everything_goes_on_the_gpu(tmp_path, card):
 
 
 def test_short_asks_once_and_start_on_the_processor_sends_only_what_does_not_fit(tmp_path, card):
-    card.facts = [GpuFacts(total=6144, used=2000)]  # (short by 296 MiB)
+    card.facts = [GpuFacts(total=6144, used=2000)]  # (short by 196 MiB)
     w = Window(_settings(tmp_path), replies=[("processor", False)])
-    assert w.judge() is True and w.asked == [(296, (READERS,))]
+    assert w.judge() is True and w.asked == [(196, (READERS,))]
     plan = place.session()
     assert plan.why == place.PROCESSOR and plan.cpu == (READERS,) and "gpu_short_kept" not in w.posted
     assert not (tmp_path / "taslation.toml").exists()  # (nothing kept: the next start asks again)
@@ -229,14 +229,14 @@ def test_short_asks_once_and_start_on_the_processor_sends_only_what_does_not_fit
 def test_check_again_judges_anew_on_the_facts_of_that_moment(tmp_path, card):
     card.facts = [GpuFacts(total=6144, used=2700), GpuFacts(total=6144, used=1500)]  # (the person closed something)
     w = Window(_settings(tmp_path), replies=[("again", False)])
-    assert w.judge() is True and w.asked == [(996, (READERS, LAMA))]
+    assert w.judge() is True and w.asked == [(896, (READERS, LAMA))]
     assert place.session().why == place.ROOM and place.session().cpu == ()
 
 
 def test_check_again_while_still_short_asks_again(tmp_path, card):
     card.facts = [GpuFacts(total=6144, used=2700), GpuFacts(total=6144, used=2000)]
     w = Window(_settings(tmp_path), replies=[("again", False), ("processor", False)])
-    assert w.judge() is True and w.asked == [(996, (READERS, LAMA)), (296, (READERS,))]
+    assert w.judge() is True and w.asked == [(896, (READERS, LAMA)), (196, (READERS,))]
     assert place.session().cpu == (READERS,)
 
 
@@ -285,7 +285,7 @@ def test_do_not_ask_again_keeps_the_choice_and_the_next_start_asks_nothing(tmp_p
     again = Window(Settings.from_toml(tmp_path / "taslation.toml"))
     again.settings.state_dir, again.settings.models_dir = s.state_dir, s.models_dir
     assert again.judge() is True and not again.asked  # (silent: what does not fit on the processor)
-    assert place.session().cpu == (READERS,) and devices.plan_text().startswith("At the start the GPU's memory was short by 300 MB")
+    assert place.session().cpu == (READERS,) and devices.plan_text().startswith("At the start the GPU's memory was short by 200 MB")
 
 
 def test_a_setting_that_forces_a_part_onto_the_gpu_never_asks(tmp_path, card):
@@ -294,8 +294,8 @@ def test_a_setting_that_forces_a_part_onto_the_gpu_never_asks(tmp_path, card):
     w = Window(_settings(tmp_path, ocr_runs_on="gpu"))
     assert w.judge() is True and not w.asked
     plan = place.session()
-    assert plan.why == place.SHORT and plan.short == 296 and plan.cpu == () and READERS in plan.gpu
-    assert devices.plan_text() == devices.PLAN_FIXED.format(mb=300)  # (the System page says by how much)
+    assert plan.why == place.SHORT and plan.short == 196 and plan.cpu == () and READERS in plan.gpu
+    assert devices.plan_text() == devices.PLAN_FIXED.format(mb=200)  # (the System page says by how much)
     assert place.readers_placement(w.settings, cuda=True) == place.Placement("gpu", place.SET)
 
 

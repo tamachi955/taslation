@@ -80,57 +80,73 @@ def test_the_margin_is_the_driver_s_part_and_how_far_other_programs_rose_at_once
     assert round(MARGIN_MIB * place.MiB / 1e8) * 100 == 700 and "with about 700 MB left over" in manual
 
 
-def test_the_default_6_gb_card_is_enough_up_to_1704_mib_of_other_programs():
+def test_the_default_6_gb_card_is_enough_up_to_1804_mib_of_other_programs():
     """The machine the figures were measured on: PLaMo with the window cache, both readers, LaMa and the layout model
-    need 3630 MiB and the context 100; with the 710 MiB margin that leaves room for 1704 MiB of other programs. One MiB
-    more is short by 1; a screen taller than 1440 px (LaMa's larger windows) moves the mark to 1414; a server without
-    the window cache to 1804."""
-    assert short_by(_card(1704), _needs()) == 0 and short_by(_card(1705), _needs()) == 1
-    assert short_by(_card(2000), _needs()) == 296
+    need 3530 MiB and the context 100; with the 710 MiB margin that leaves room for 1804 MiB of other programs (1704
+    before the translator was counted to 10 MiB of its measured load and the layout model at its one input's peak). One
+    MiB more is short by 1; a screen taller than 1440 px (LaMa's larger windows) moves the mark to 1514; a server
+    without the window cache to 1934."""
+    assert short_by(_card(1804), _needs()) == 0 and short_by(_card(1805), _needs()) == 1
+    assert short_by(_card(2000), _needs()) == 196
     tall = _needs(lama=LAMA_TALL_MIB)
-    assert short_by(_card(1414), tall) == 0 and short_by(_card(1415), tall) == 1
+    assert short_by(_card(1514), tall) == 0 and short_by(_card(1515), tall) == 1
     plain = _needs(translator=PLAMO)
-    assert short_by(_card(1804), plain) == 0 and short_by(_card(1805), plain) == 1
-    assert short_by(_card(1704, total=8192), _needs()) == 0 and short_by(_card(3752, total=8192), _needs()) == 0
+    assert short_by(_card(1934), plain) == 0 and short_by(_card(1935), plain) == 1
+    assert short_by(_card(1804, total=8192), _needs()) == 0 and short_by(_card(3852, total=8192), _needs()) == 0
+
+
+def test_the_page_models_are_counted_at_their_measured_peaks():
+    """What the page models' figures stand on (the module's comments; the translation models': the test of PLaMo's
+    table below): the layout model, whose input is always one size (640 px square), at its measured peak rounded up
+    to 10 MiB, nothing added for inputs not measured; LaMa a fifth past the largest window met."""
+    from taslation.detect import layout
+
+    assert layout.SIZE == 640 and 356 <= LAYOUT_MIB < 366
+    assert LAMA_MIB >= round(564 * 1.2)  # (552-564 MiB at the largest windows met on screens up to 1440 px)
 
 
 def test_the_readers_cuda_graphs_are_left_off_unasked_where_the_room_is_short_with_them():
-    """On the default 6 GB card the graphs have room up to 1434 MiB of other programs (1704 less their 270); with more,
+    """On the default 6 GB card the graphs have room up to 1534 MiB of other programs (1804 less their 270); with more,
     the readers stay on the GPU without them, nothing asked, the rest judged as without graphs: still enough up to
-    1704, short beyond as ever (and asked about, short by what it lacks without them)."""
+    1804, short beyond as ever (and asked about, short by what it lacks without them). Starts on the 6 GB card the
+    figures were measured on, by the other programs' memory they found (1356, 1563 and 1688 MiB in three starts of
+    the program, 1382 and 1454 in two measuring runs): kept in the first and the measuring runs' (before: the first and
+    1382 only), left off at 1563 and 1688."""
     with_graphs = _needs(graphs=READERS_GRAPHS_MIB)
     assert READERS_GRAPHS_MIB == 270
-    room = judge(_card(1434), with_graphs)
+    room = judge(_card(1534), with_graphs)
     assert room.graphs and room.why == place.ROOM and room.left == MARGIN_MIB and READERS in room.gpu
-    bare = judge(_card(1435), with_graphs)
+    bare = judge(_card(1535), with_graphs)
     assert not bare.graphs and bare.why == place.ROOM and not bare.asks and READERS in bare.gpu
-    assert bare.short == 0 and bare.left == MARGIN_MIB + 1704 - 1435
-    assert judge(_card(1704), with_graphs) == Plan((TRANSLATOR, READERS, LAMA, LAYOUT), (), 0, MARGIN_MIB, place.ROOM,
+    assert bare.short == 0 and bare.left == MARGIN_MIB + 1804 - 1535
+    assert judge(_card(1804), with_graphs) == Plan((TRANSLATOR, READERS, LAMA, LAYOUT), (), 0, MARGIN_MIB, place.ROOM,
                                                    place.TO_PROCESSOR, graphs=False)
-    short = judge(_card(1705), with_graphs)
+    short = judge(_card(1805), with_graphs)
     assert short.asks and short.short == 1 and not short.graphs
-    assert judge(_card(1705), _needs()).graphs  # (no graphs counted, none left off: a plan's default)
+    assert judge(_card(1805), _needs()).graphs  # (no graphs counted, none left off: a plan's default)
+    kept = [judge(_card(others), with_graphs).graphs for others in (1356, 1382, 1454, 1563, 1688)]
+    assert kept == [True, True, True, False, False]  # (the 21:06, two of today's, 21:12 and 22:02 starts' others)
 
 
 def test_where_parts_go_to_the_processor_the_graphs_stay_if_the_rest_has_room_for_them():
-    moved = judge(_card(1705), _needs(graphs=READERS_GRAPHS_MIB), "processor")
+    moved = judge(_card(1805), _needs(graphs=READERS_GRAPHS_MIB), "processor")
     assert moved.cpu == (READERS,) and not moved.graphs  # (the readers on the processor: no graphs there)
-    fixed = judge(_card(1705), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
+    fixed = judge(_card(1805), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
     assert fixed.cpu == (LAMA,) and READERS in fixed.gpu and fixed.graphs  # (LaMa's room holds them)
-    assert fixed.left == left_at_peak(_card(1705), _needs(lama=0, graphs=READERS_GRAPHS_MIB))
-    tight = judge(_card(1704 + LAMA_MIB), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
+    assert fixed.left == left_at_peak(_card(1805), _needs(lama=0, graphs=READERS_GRAPHS_MIB))
+    tight = judge(_card(1804 + LAMA_MIB), _needs(graphs=READERS_GRAPHS_MIB, fixed=(READERS,)), "processor")
     assert tight.cpu == (LAMA,) and not tight.graphs and tight.left == MARGIN_MIB
 
 
 def test_enough_puts_everything_on_the_gpu_and_asks_nothing():
-    plan = judge(_card(1704), _needs())
+    plan = judge(_card(1804), _needs())
     assert plan == Plan((TRANSLATOR, READERS, LAMA, LAYOUT), (), 0, MARGIN_MIB, place.ROOM, place.TO_PROCESSOR)
     assert not plan.asks
 
 
 def test_short_asks_with_everything_where_the_settings_put_it_until_answered():
     plan = judge(_card(2000), _needs())
-    assert plan.why == place.SHORT and plan.short == 296 and plan.asks and plan.cpu == ()
+    assert plan.why == place.SHORT and plan.short == 196 and plan.asks and plan.cpu == ()
     assert plan.gpu == (TRANSLATOR, READERS, LAMA, LAYOUT)
 
 
@@ -142,12 +158,12 @@ def test_the_processor_takes_only_as_many_parts_as_it_takes_least_loss_first():
                          (OCR + LAMA_MIB, (READERS, LAMA)), (OCR + LAMA_MIB + 1, (READERS, LAMA, LAYOUT)),
                          (OCR + LAMA_MIB + LAYOUT_MIB + CONTEXT_MIB, (READERS, LAMA, LAYOUT)),
                          (OCR + LAMA_MIB + LAYOUT_MIB + CONTEXT_MIB + 1, (READERS, LAMA, LAYOUT, TRANSLATOR))):
-        plan = judge(_card(1704 + short), _needs(), "processor")
+        plan = judge(_card(1804 + short), _needs(), "processor")
         assert plan.cpu == moved and plan.why == place.PROCESSOR and plan.short == short, short
         assert plan.gpu == tuple(p for p in (TRANSLATOR, READERS, LAMA, LAYOUT) if p not in moved)
         assert not plan.asks
     everything = judge(_card(6000), _needs(), "processor")  # (nothing fits: all of it on the processor)
-    assert everything.cpu == place.TO_PROCESSOR and everything.gpu == () and everything.short == 6000 - 1704
+    assert everything.cpu == place.TO_PROCESSOR and everything.gpu == () and everything.short == 6000 - 1804
 
 
 def test_a_part_a_setting_fixes_is_counted_and_never_sent_to_the_processor():
@@ -155,14 +171,14 @@ def test_a_part_a_setting_fixes_is_counted_and_never_sent_to_the_processor():
     ``gpu_short`` "processor" the other parts go to the processor as ever."""
     for fixed in ((READERS,), (TRANSLATOR,)):  # (``ocr_runs_on`` "gpu"; a number of layers in ``ollama_num_gpu``)
         asked = judge(_card(2000), _needs(fixed=fixed))
-        assert asked.why == place.SHORT and asked.short == 296 and asked.forced and not asked.asks and not asked.cpu
+        assert asked.why == place.SHORT and asked.short == 196 and asked.forced and not asked.asks and not asked.cpu
     plan = judge(_card(2000), _needs(fixed=(READERS,)), "processor")
     assert plan.cpu == (LAMA,) and READERS in plan.gpu and plan.could == (LAMA, LAYOUT, TRANSLATOR)
     assert not judge(_card(2000), _needs()).forced and judge(_card(2500), _needs(ocr=0)).asks  # ("cpu" forces nothing)
     every = _needs(fixed=(TRANSLATOR, READERS, LAMA, LAYOUT))
     for choice in ("ask", "processor"):
         fixed = judge(_card(2000), every, choice)  # (nothing could go: nothing asked, nothing moved)
-        assert fixed.why == place.SHORT and fixed.short == 296 and not fixed.asks and fixed.cpu == ()
+        assert fixed.why == place.SHORT and fixed.short == 196 and not fixed.asks and fixed.cpu == ()
 
 
 def test_no_nvidia_gpu_judges_and_asks_nothing(tmp_path):
@@ -175,7 +191,7 @@ def test_no_nvidia_gpu_judges_and_asks_nothing(tmp_path):
 def test_a_plan_is_made_on_the_facts_of_the_moment_and_the_needs_of_the_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(place, "needs", lambda settings, cuda=None, ask=True: _needs())
     s = _settings(tmp_path)
-    assert place.make_plan(s, facts=lambda _s: _card(1704)).why == place.ROOM
+    assert place.make_plan(s, facts=lambda _s: _card(1804)).why == place.ROOM
     assert place.make_plan(s, facts=lambda _s: _card(2000)).asks
     assert place.make_plan(s, "processor", facts=lambda _s: _card(2000)).cpu == (READERS,)
 
@@ -256,15 +272,15 @@ def test_the_facts_are_the_card_s_memory_this_process_s_and_the_model_s_now(tmp_
     ollama.size = 1956 * place.MiB
     facts = REAL_GATHER(s)
     # (the model's need on the card now: what its load was measured to add with the cache of that size, runner and all)
-    assert facts == GpuFacts(total=6144, used=4000, own=500, translator_now=2100, answered=True)
-    assert facts.others == 4000 - 500 - 2100
+    assert facts == GpuFacts(total=6144, used=4000, own=500, translator_now=PLAMO_WINDOW, answered=True)
+    assert facts.others == 4000 - 500 - PLAMO_WINDOW
     assert not ollama.loads  # (/api/ps only: nothing was loaded to find out)
 
 
 def test_with_the_model_loaded_its_runner_s_own_memory_is_counted_once(tmp_path, monkeypatch, ollama):
     """/api/ps leaves out the runner's own memory (PLaMo's load added 2065 MiB to the card's used memory, /api/ps said
     1956): counted in the need and on the card as the need's, a start with the model loaded is judged as one without
-    it, to the 100 MiB the need is rounded up to - before, those 110 MiB counted again as other programs'."""
+    it, to the 10 MiB the need is rounded up to - before, those 110 MiB counted again as other programs'."""
     monkeypatch.setattr(place, "own_mib", lambda: 0)
     s = _settings(tmp_path, ollama_url=ollama.url)
     others = 1500
@@ -276,7 +292,7 @@ def test_with_the_model_loaded_its_runner_s_own_memory_is_counted_once(tmp_path,
     loaded = REAL_GATHER(s)
     need = place.needs(s, cuda=False)
     assert need == [Need(TRANSLATOR, PLAMO_WINDOW)] and loaded.translator_now == PLAMO_WINDOW
-    assert unloaded.others == others and others - 100 < loaded.others <= others
+    assert unloaded.others == others and others - 10 < loaded.others <= others
     assert left_at_peak(loaded, need) >= left_at_peak(unloaded, need)
     ollama.share = 0.5  # (split by the server: what of the need is on the card, its share)
     on, size = int(2050500853 * 0.5) // place.MiB, 2050500853 // place.MiB
@@ -292,7 +308,7 @@ def test_other_models_ollama_holds_on_the_card_are_named_taslation_s_own_apart(t
     facts = REAL_GATHER(s)
     assert facts.loaded == (place.Loaded("qwen3.5:4b", 3203, True), place.Loaded("someones-model:7b", 900, False))
     assert facts.releasable == ("qwen3.5:4b",)  # (TASlation's own: the one PLaMo's language does not use)
-    assert facts.others == 5000 - 2100  # (the other models are other programs' memory, counted as such)
+    assert facts.others == 5000 - PLAMO_WINDOW  # (the other models are other programs' memory, counted as such)
     named = _settings(tmp_path, ollama_url=ollama.url, ollama_model=PLAMO_NAME, target_language="English")
     assert REAL_GATHER(named).releasable == ("qwen3.5:4b",)
     mine = _settings(tmp_path, ollama_url=ollama.url, ollama_model="someones-model:7b")  # (named in the settings)
@@ -313,7 +329,7 @@ def test_a_model_loaded_at_another_context_holds_what_ps_says_and_needs_what_a_l
     assert place.translator_need(s) == (PLAMO, 1500)  # (as before a load; /api/ps's figure on the card)
     assert REAL_GATHER(s).others == 3000 - 1500
     ollama.contexts[PLAMO_NAME] = 8192  # (as asked)
-    assert place.translator_need(s) == (2000, 2000)
+    assert place.translator_need(s) == (PLAMO, PLAMO)
 
 
 def test_once_released_the_card_s_used_memory_is_followed_until_it_shows_it(monkeypatch):
@@ -383,14 +399,14 @@ def test_a_known_translator_of_the_size_it_was_measured_at_needs_what_was_measur
     s = _settings(tmp_path, ollama_url=ollama.url)
     ollama.loaded.add(PLAMO_NAME)
     ollama.size = 1823 * place.MiB + 512 * 1024
-    assert place.translator_need(s) == (2000, 2000)  # (what its load was measured to add, not its size)
+    assert place.translator_need(s) == (PLAMO, PLAMO)  # (what its load was measured to add, not its size)
     ollama.loaded.clear()
-    assert place.translator_need(s) == (2000, 0)
+    assert place.translator_need(s) == (PLAMO, 0)
     ollama.loaded.add(PLAMO_NAME)
     ollama.size = 1900 * place.MiB  # (a server with another cache: what that one was measured to add)
     place.translator_need(s)
     ollama.loaded.clear()
-    assert place.translator_need(s) == (2100, 0)
+    assert place.translator_need(s) == (PLAMO_WINDOW, 0)
     ollama.loaded.add(PLAMO_NAME)
     ollama.size = 2500 * place.MiB  # (another build, larger than every cache measured: its size, the runner's share)
     place.translator_need(s)
@@ -407,12 +423,12 @@ MEASURED = {("q8_0", False): (1933, 1912550194), ("q8_0", True): (2065, 20505008
 def test_plamo_is_counted_as_measured_for_each_kv_cache_and_window_cache():
     for cache, (added, size) in MEASURED.items():
         counted, ps = place.known_translator(PLAMO_NAME, 8192, cache)
-        assert added <= counted < added + 100 and counted % 100 == 0, cache  # (rounded up to the next 100 MiB)
+        assert added <= counted < added + 10 and counted % 10 == 0, cache  # (rounded up to 10 MiB, no further)
         assert size // place.MiB < ps and ps - size / place.MiB < 1, cache  # (/api/ps's size, rounded up)
-    assert place.known_translator(PLAMO_NAME, 8192, ("q4_0", True)) == (2300, 2102)  # (a type not measured: f16's)
+    assert place.known_translator(PLAMO_NAME, 8192, ("q4_0", True)) == (2230, 2102)  # (a type not measured: f16's)
     assert place.known_translator(PLAMO_NAME, 4096, ("q8_0", False)) is None  # (another context: not measured)
     for cache in MEASURED:
-        assert place.known_translator("qwen3.5:4b", 16384, cache) == (4000, 3203)  # (no windowed layers)
+        assert place.known_translator("qwen3.5:4b", 16384, cache) == (3940, 3203)  # (no windowed layers)
 
 
 @pytest.mark.parametrize("cache", list(MEASURED))
@@ -422,7 +438,7 @@ def test_before_it_loads_plamo_needs_what_it_adds_on_the_server_it_runs_on(tmp_p
     monkeypatch.setattr(place, "server_cache", lambda settings: cache)
     s = _settings(tmp_path, ollama_url=ollama.url)
     assert place.translator_need(s) == (place.known_translator(PLAMO_NAME, 8192, cache)[0], 0)
-    assert place._translator_need(s, ("q8_0", False)) == (2000, 0, True)  # (a cache given: that one's)
+    assert place._translator_need(s, ("q8_0", False)) == (PLAMO, 0, True)  # (a cache given: that one's)
 
 
 def test_a_model_of_the_reader_s_own_is_counted_by_its_file_until_seen_loaded(tmp_path, monkeypatch, ollama):
@@ -1073,11 +1089,11 @@ def test_the_note_under_the_list_says_what_the_start_found_short_and_what_failed
     assert devices.plan_text() == ""  # (no plan)
     place.settle(judge(_card(1000), _needs()))
     assert devices.plan_text() == ""  # (enough, nothing failed)
-    place.settle(judge(_card(2700), _needs(), "processor"))  # (short by 996 MiB: the readers and LaMa go)
+    place.settle(judge(_card(2700), _needs(), "processor"))  # (short by 896 MiB: the readers and LaMa go)
     assert devices.plan_text() == devices.PLAN_SHORT.format(
-        mb=1000, parts="the OCR readers, the erase model on the art (LaMa)")
+        mb=900, parts="the OCR readers, the erase model on the art (LaMa)")
     place.settle(judge(_card(2000), _needs(fixed=(TRANSLATOR, READERS, LAMA, LAYOUT))))
-    assert devices.plan_text() == devices.PLAN_FIXED.format(mb=300)
+    assert devices.plan_text() == devices.PLAN_FIXED.format(mb=200)
     place.failed(LAYOUT, "OutOfMemoryError")
     assert devices.plan_text().splitlines()[-1] == devices.PLAN_FAILED.format(parts="the layout model")
     lines = devices.lines(_settings(tmp_path), translator=SimpleNamespace(model="m", _loaded=lambda model: None),
@@ -1085,7 +1101,7 @@ def test_the_note_under_the_list_says_what_the_start_found_short_and_what_failed
     assert lines[-2].strip() == devices.PLAN_FAILED.format(parts="the layout model")
     set_language("ja")
     try:
-        assert "300 MB" in devices.plan_text() and "VRAM" in devices.plan_text()
+        assert "200 MB" in devices.plan_text() and "VRAM" in devices.plan_text()
     finally:
         set_language("en")
     assert devices.short_mb(1) == 10 and devices.short_mb(296) == 300 and devices.short_mb(300) == 300
