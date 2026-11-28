@@ -175,7 +175,12 @@ the owner's levels, S1 to S4, the worst first (`CODE_LEVELS`: each code's level)
 erase, lettering or patch took lettering from (`OVER_OTHER`, S2) and the specks of lettering left joined to a line the
 erased page keeps or beside an outline two bubbles share (`LEFT_BY_LINE`, `LEFT_SHARED`, S3); an outline counts as cut
 only where the erase broke it (`LINE_CUT` on `line_cut`: not a glyph joined to it erased where it goes on past it); the
-made-up layouts 18 and 19 are bubbles joined in pairs.
+made-up layouts 18 and 19 are bubbles joined in pairs. From version 11 it counts lettering small in a large room
+(`ROOM_LOOSE`, S3: its box under `LOOSE_SHARE` 0.2 of the bubble as seen - the room it was set in and the closed
+interior round its text, joined over the drawing's thin lines and their holes filled, `_seen` - at a size under
+`LOOSE_SIZE` 0.6 of its cap, `room_loose`), and made-up layout 20 holds tall bubbles over hair, a tone and a
+hatching: one drawn see-through (the strands cross its paper), three semi-transparent (the drawing faint on their
+paper), two narrow white ones and one toned inside.
 
 `soundwords.RENDERINGS_TEXT` holds an English rendering and a short meaning for the 395 base forms PLaMo 3 Translate
 gets wrong as a sound effect into English, written for the program like the list (no dictionary or site copied);

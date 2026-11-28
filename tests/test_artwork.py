@@ -377,6 +377,38 @@ def test_a_model_bubbles_room_stops_at_the_outline_it_shares_with_the_bubble_ove
     assert room[300 - r.y0, 236 - r.x0]  # (the column by the outline is in it)
 
 
+def see_through_bubble():
+    """A tall bubble drawn over hair: thin strands cross its paper from outline to outline, two of them through
+    glyphs of its two columns (heavy ones: solid blocks), as a model bubble with no shape of its own."""
+    page = flat(255, (600, 500))
+    cv2.ellipse(page, (250, 300), (90, 230), 0, 0, 360, (0, 0, 0), 4)
+    glyphs = [(cx - 11, y, cx + 11, y + 22) for cx in (232, 268) for y in range(200, 400, 30)]
+    for x0, y0, x1, y1 in glyphs:
+        cv2.rectangle(page, (x0, y0), (x1 - 1, y1 - 1), (0, 0, 0), -1)
+    for y in (160, 241, 331, 440):  # (two of them through the second and the fifth rows of glyphs)
+        cv2.line(page, (100, y), (400, y + 6), (40, 40, 40), 2)
+    r = region("bubble", (160, 70, 341, 531), tier=3, from_model=True, glyph=24.0)
+    r.text_box = (221, 200, 279, 402)
+    return page, r, glyphs
+
+
+def test_a_bubble_drawn_over_hair_has_the_glyphs_a_strand_runs_through_in_its_room():
+    """A strand of hair crossing a model bubble's paper joins the glyphs it runs through to the outline: with the
+    holes of the paper closed round its lettering filled before the closing, those glyphs stayed out of its room
+    (`artwork.closed_room`) - holes the translation was set round, between them, tiny and off the centre (a font of
+    11 under a cap of 30 in a bubble whose lettering had filled 90 x 194 px). Closed over first, they are filled with
+    the rest of the lettering; the room still stops at the outline."""
+    page, r, glyphs = see_through_bubble()
+    room = artwork.closed_room(page, r)
+    assert room is not None
+    for x0, y0, x1, y1 in glyphs:  # every glyph, those the strands run through too
+        assert room[y0 - r.y0:y1 - r.y0, x0 - r.x0:x1 - r.x0].all(), (x0, y0)
+    for y in (220, 300, 360):  # (inside the outline, its inner edge at 250 -+ 86 there or nearer)
+        row = np.nonzero(room[y - r.y0])[0] + r.x0
+        edge = 86 * np.sqrt(1 - ((y - 300) / 226) ** 2)
+        assert row.min() > 250 - edge and row.max() < 250 + edge
+
+
 def test_only_the_paper_that_holds_the_lettering_is_the_bubbles_own_paper():
     """Of the light pieces the grown hole of a model bubble's characters reaches, one it reaches only past the
     characters' own boxes that lies mostly outside the bubble's box is a neighbour's paper (`artwork._own_seeds`):

@@ -111,7 +111,8 @@ ROOM_HOLD = 0.8  # of a model bubble's text box at the least: the paper closed r
 #                  bubble drawn see-through, where the translation came out tiny) ...
 ROOM_IN = 7  # ... drawn in by an ellipse this wide (px at the page's scale), as a white area's (tier 2)
 OWN_PAPER = 0.1  # of the paper in that text box: less, on a piece lying mostly outside the box, is a neighbour's paper
-ROOM_CLOSE = 0.2  # of a glyph: the room closed by a disc of this radius first (strokes of glyphs touching the outline)
+ROOM_CLOSE = 0.2  # of a glyph: the room closed by a disc of this radius first (strokes of glyphs touching the outline,
+#                   a thin line of the drawing across its paper), before its holes are filled
 TONE_FILL = True  # a hole on a ground that repeats itself (a screentone, a hatching) is painted from it (`fill_tone`)
 TONE_BAND = 24  # px of ground round the hole its repeats are measured on (`tone_shifts`) ...
 TONE_REPEAT, TONE_DIP = 0.8, 0.3  # ... where it repeats (normalised autocorrelation), after falling under this
@@ -346,10 +347,17 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
 @analysis.timed("closed_room")
 def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np.ndarray | None:
     """The room of a model bubble with no shape of its own (tier 3, whose mask is its plain box), as a mask of its
-    box: the paper closed round its lettering (`closed_interior`), its holes (the lettering) filled, within the box,
-    drawn in by `ROOM_IN` - where its translation is set, as in a white area's (tier 2), not over the outline and past
-    it where the box's corners reach. None where there is no such paper, or it holds less than `ROOM_HOLD` of the
-    text box. Pixels at the page's *scale* (`pagescale`)."""
+    box: the paper closed round its lettering (`closed_interior`), closed over by `ROOM_CLOSE` of a glyph and then its
+    holes (the lettering) filled, within the box, drawn in by `ROOM_IN` - where its translation is set, as in a white
+    area's (tier 2), not over the outline and past it where the box's corners reach. None where there is no such
+    paper, or it holds less than `ROOM_HOLD` of the text box. Pixels at the page's *scale* (`pagescale`).
+
+    The closing comes first: a thin line of a drawing seen through the bubble (hair, a hatching) that crosses its
+    paper joins the glyphs it runs through to the outline, and with the holes filled before it those glyphs stayed
+    out of the room - holes the lines were set round, between them, tiny and off its centre (a font of 11 under a cap
+    of 30 in a bubble a column of 90 x 194 px of lettering had filled); closed over first, the line no longer reaches
+    them and they are filled with the rest of the lettering. Paper the line cuts off beyond the lettering's box stays
+    out, as before: it is not the paper the lettering lies on (`closed_interior`)."""
     closed = closed_interior(image, box_of(image, region), region.dark, scale, region.bounds)
     if closed is None:
         return None
@@ -360,7 +368,13 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     inside = _own_paper(inside, region, (wx0, wy0))
     room = np.zeros((region.height, region.width), np.uint8)
     sides = sides_of((wx0, wy0, wx1, wy1), region.bounds, (image.shape[1], image.shape[0]))
-    filled = fill_holes(inside.astype(np.uint8) * 255, sides)
+    glyph = float(region.glyph or 20.0 * scale)
+    reach = max(1, int(ROOM_CLOSE * glyph))
+    # (nothing beyond the window: the paper closed round the lettering does not reach its edge, `closed_interior`)
+    paper = cv2.copyMakeBorder(inside.astype(np.uint8) * 255, reach, reach, reach, reach, cv2.BORDER_CONSTANT,
+                               value=0)
+    paper = cv2.morphologyEx(paper, cv2.MORPH_CLOSE, pagescale.disc(2 * reach + 1, 1.0))[reach:-reach, reach:-reach]
+    filled = fill_holes(np.ascontiguousarray(paper), sides)
     room[y0 - region.y0:y1 - region.y0, x0 - region.x0:x1 - region.x0] = filled[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0]
     # (the text box as far as the paper reaches: a model's box round a column by the outline took in the outline)
     ys, xs = np.nonzero(filled)
@@ -372,10 +386,8 @@ def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np
     held = room[max(0, ty0 - region.y0):max(0, ty1 - region.y0), max(0, tx0 - region.x0):max(0, tx1 - region.x0)]
     if not held.size or cv2.countNonZero(held) < ROOM_HOLD * held.size:
         return None
-    # (closed over the strokes of glyphs that touch the outline: no bay of the lettering's own drawn in further; the
-    # box's edge carried on beyond it, so that the paper is not grown to an edge it came near)
-    glyph = float(region.glyph or 20.0 * scale)
-    reach = max(1, int(ROOM_CLOSE * glyph))
+    # (closed over again where the box cuts it: no bay of the lettering's own drawn in further there; the box's edge
+    # carried on beyond it, so that the paper is not grown to an edge it came near)
     room = cv2.morphologyEx(cv2.copyMakeBorder(room, reach, reach, reach, reach, cv2.BORDER_REPLICATE),
                             cv2.MORPH_CLOSE, pagescale.disc(2 * reach + 1, 1.0))[reach:-reach, reach:-reach]
     room = cv2.erode(room, pagescale.disc(ROOM_IN, scale))

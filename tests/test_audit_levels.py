@@ -46,6 +46,32 @@ def test_the_summary_goes_by_level_the_worst_first_each_region_once_a_level(tmp_
     assert json.loads(out.read_text(encoding="utf-8"))["levels"]["OVER_OTHER"] == "S2"
 
 
+def test_the_bubble_as_seen_is_its_room_joined_over_a_strand_of_hair_with_its_holes_filled():
+    """``ROOM_LOOSE`` measures a region's lettering against the bubble as seen (`_seen`): the room it was set in, cut
+    by a strand of hair into a piece above and one below it with a hole round a glyph the strand ran through, is one
+    bubble - its lettering set in the piece with the hole was small in it."""
+    whole = np.zeros((220, 140), np.uint8)
+    cv2.ellipse(whole, (70, 110), (60, 100), 0, 0, 360, 255, -1)
+    room = whole > 0
+    room[108:111, :] = False  # (the strand, 3 px)
+    room[70:94, 58:82] = False  # (a glyph it joined to the outline: a hole)
+    seen = audit_render._seen(room, None, 24.0)
+    assert seen[109, 70] and seen[80, 70]
+    assert seen[whole > 0].mean() > 0.99 and not seen[whole == 0].any()
+    inter = np.zeros_like(room)
+    inter[150:160, 60:80] = True  # (the closed interior round the text: its part of the bubble with it)
+    assert audit_render._seen(room & ~inter, inter, 24.0)[155, 70]
+
+
+def test_lettering_is_small_in_a_large_room_under_a_fifth_of_it_at_well_under_its_cap():
+    assert audit_render.room_loose(0.15, 14, 42, 64)  # (a third of its cap)
+    assert not audit_render.room_loose(0.15, 30, 42, 64)  # (near its cap: a short line in a tall bubble)
+    assert not audit_render.room_loose(0.3, 14, 42, 64)  # (it fills its room)
+    assert audit_render.room_loose(0.1, 30, 0, 64)  # (no cap: the largest size of all)
+    assert not audit_render.room_loose(0.1, 40, 80, 64)  # (a cap over the largest size: that holds it)
+    assert not audit_render.room_loose(0.1, 0, 42, 64)  # (not lettered)
+
+
 def test_a_glyph_joined_to_the_outline_inside_the_text_box_is_lettering_and_the_outline_a_line():
     page = np.zeros((300, 200), bool)
     outline = np.zeros((300, 200), np.uint8)

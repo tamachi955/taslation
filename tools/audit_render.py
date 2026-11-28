@@ -27,10 +27,12 @@ region is measured:
 * ``resid_line_px`` / ``resid_shared_px``: pixels of the original lettering left that the erased page has joined to a
   line it keeps (the outline, a tail: taken for one, so ``resid`` leaves them out), and those of all left beside an
   outline the region shares with a neighbour (where the neighbour's box meets it);
-* the font size against the original glyph and the room, the hyphenated lines, the lettering's own flags, and the
-  room a bubble's lettering took beyond its own across (``frame``: "turned", the line turned 90 degrees, whose lines,
-  size and ink are measured as drawn and whose room is judged narrow in the turned frame; "overrun", over the
-  outline), counted per set and scale by ``merge``;
+* the font size against the original glyph and the room, the share of the bubble as seen that its lettering's box
+  takes (``room_share``: the room it was set in and the closed interior round its text, joined over the drawing's thin
+  lines - a bubble drawn see-through over hair - and its holes filled), the hyphenated lines, the lettering's own
+  flags, and the room a bubble's lettering took beyond its own across (``frame``: "turned", the line turned 90
+  degrees, whose lines, size and ink are measured as drawn and whose room is judged narrow in the turned frame;
+  "overrun", over the outline), counted per set and scale by ``merge``;
 * the text box against the lettering it holds (``box_cover``, ``box_excess``: the box of its pieces alone);
 * regions with no bubble whose readers disagree (``false_likely``), regions far from every gold or made-up text,
   untranslated regions and gold texts with no region;
@@ -44,7 +46,9 @@ The made-up pages (`synthetic_pages`:
 the layouts of tools/make_sample_page.py and risky ones drawn here - tall narrow bubbles, bubbles joined or cut by
 the page's edge, text on tone or white on black, tails crossing text, very small and very large characters, map
 symbols, clothing patterns, sound effects, lettering that touches its outline or runs over it, heavy glyphs that
-touch each other, long bars and dots) also carry exact layers (the lettering, the outlines, the interiors), so
+touch each other, long bars and dots, tall bubbles drawn see-through or semi-transparent over hair, a tone or a
+hatching, or toned inside) also
+carry exact layers (the lettering, the outlines, the interiors), so
 their regions are measured against the truth as well (``t_*``).
 
     python tools/audit_render.py run --shard 0 --of 16 --out audit-0.json [--crops DIR] [--sets openmantra,synthetic]
@@ -78,8 +82,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-VERSION = 10  # (10: the lettering's box - BOX_SMALL, BOX_BIG - and the closed interior round it - INK_OUT, GHOST, the
-#               residue's zone, BOX_BIG - by its pieces alone, the glyphs joined to a line left out, as before 9; 9: a
+VERSION = 11  # (11: ROOM_LOOSE, lettering small in a large room; layout 20, tall bubbles drawn see-through or
+#               semi-transparent over hair, a tone or a hatching, or toned inside; 10: the lettering's box -
+#               BOX_SMALL, BOX_BIG - and the closed interior round it - INK_OUT, GHOST, the residue's zone, BOX_BIG -
+#               by its pieces alone, the glyphs joined to a line left out, as before 9; 9: a
 #               neighbour over a region's lettering, lettering left by a line or a shared outline, an outline cut only
 #               where broken, joined pairs in layouts 18 and 19, the codes' levels and the summary by them; 8: sound
 #               words)
@@ -126,6 +132,8 @@ INK_OTHER_PX = 6  # lettering pixels on another lettered region's interior or in
 OVER_PX = 6  # pixels of a region's lettering a neighbour's erase, lettering or patch shows otherwise ...
 OVER_DROP = 100  # ... by this many grey levels or more (the glyph gone to the paper, not its anti-aliasing)
 SMALL_FONT = 11  # set smaller than this (the readable size)
+LOOSE_SHARE = 0.2  # the lettering's box takes less than this share of the bubble as seen (`_seen`) ...
+LOOSE_SIZE = 0.6  # ... at a size under this share of the largest it may take (its cap; `room_loose`)
 BOX_COVER = 0.75  # the text box holds less than this share of the original lettering's box
 BOX_EXCESS = 4.5  # the text box is this many times the lettering's box (and 8 glyphs' area larger)
 LOW_AGREEMENT = 0.8  # OCR confidence under this, or the readers split
@@ -148,6 +156,8 @@ CODES = {
                     "tail): taken for that line",
     "LEFT_SHARED": "specks of the original lettering left beside an outline the region shares with a neighbour",
     "SMALL": "lettering under the readable size",
+    "ROOM_LOOSE": "lettering small in a large room: its box under a fifth of the bubble as seen (the room it was set "
+                  "in and the interior round its text, joined over the drawing's thin lines) at under 0.6 of its cap",
     "HYPHEN": "a word hyphenated",
     "SQUEEZED": "small lettering with a hyphen or in a narrow room",
     "NOFIT": "the text did not fit (cut at the mask)",
@@ -175,9 +185,11 @@ CODE_LEVELS = {
     # a translation cut or covered, the drawing destroyed, a false region lettered over the art
     "NOFIT": "S2", "OVER_OTHER": "S2", "INK_OTHER": "S2", "ART_CUT": "S2", "FALSE_LIKELY": "S2", "NO_GOLD": "S2",
     "T_FALSE": "S2",
-    # specks or ghosts, an outline or a line cut, lettering over an outline, under the readable size, hyphenated
+    # specks or ghosts, an outline or a line cut, lettering over an outline, under the readable size or small in a
+    # large room, hyphenated
     "RESIDUE": "S3", "GHOST": "S3", "LAMA_BUBBLE": "S3", "LEFT_BY_LINE": "S3", "LEFT_SHARED": "S3", "LINE_CUT": "S3",
-    "INK_ON_LINE": "S3", "INK_OUT": "S3", "SMALL": "S3", "HYPHEN": "S3", "SQUEEZED": "S3", "BOX_SMALL": "S3",
+    "INK_ON_LINE": "S3", "INK_OUT": "S3", "SMALL": "S3", "ROOM_LOOSE": "S3", "HYPHEN": "S3", "SQUEEZED": "S3",
+    "BOX_SMALL": "S3",
     "T_RESIDUE": "S3", "T_LINE_CUT": "S3", "T_INK_ON_LINE": "S3", "T_INK_OUT": "S3", "T_LEFT": "S3",
     # a size or a place a little off
     "TIGHT": "S4", "BOX_BIG": "S4",
@@ -272,10 +284,57 @@ class Drawn:
             y += pitch * 0.87
             row += 1
 
-    def hatching(self, box: Sequence[float], step: int = 9, width: int = 2) -> None:
+    def within(self, where: Any, paint: Any) -> None:
+        """What *paint*() draws on the page, kept inside *where* (a bool mask of the page) alone, darkening only."""
+        np = self.np
+        held = self.img
+        self.img = self.Image.new("L", (PW, PH), 255)
+        self._draws()
+        paint()
+        page = np.asarray(held).copy()
+        page[where] = np.minimum(page[where], np.asarray(self.img)[where])
+        self.img = self.Image.fromarray(page)
+        self._draws()
+
+    def veil(self, where: Any, keep: float = 0.35) -> None:
+        """The page inside *where* seen through a semi-transparent bubble's paper: each pixel's darkness kept by
+        *keep* (the drawing there faint, light grey)."""
+        np = self.np
+        page = np.asarray(self.img).astype(np.float32)
+        page[where] = 255.0 - (255.0 - page[where]) * keep
+        self.img = self.Image.fromarray(np.clip(np.round(page), 0, 255).astype(np.uint8))
+        self._draws()
+
+    def box_mask(self, box: Sequence[float]) -> Any:
+        x0, y0, x1, y1 = (int(v) for v in box)
+        out = self.np.zeros((PH, PW), bool)
+        out[y0:y1, x0:x1] = True
+        return out
+
+    def hatching(self, box: Sequence[float], step: int = 9, width: int = 2, shade: int = 40) -> None:
         x0, y0, x1, y1 = box
         for k in range(-int(y1 - y0), int(x1 - x0), step):
-            self.d.line((x0 + k, y1, x0 + k + (y1 - y0), y0), fill=40, width=width)
+            self.d.line((x0 + k, y1, x0 + k + (y1 - y0), y0), fill=shade, width=width)
+
+    def hair(self, box: Sequence[float], n: int, width: int = 3, down: bool = False) -> None:
+        """*n* strands of hair (the drawing seen through a bubble drawn over it): gentle curves across *box*, from
+        its left side to its right (*down*: from its top to its foot), on the page alone."""
+        x0, y0, x1, y1 = box
+        r = self.rng
+        for k in range(n):
+            t = (k + 0.5) / n
+            if down:
+                a = (x0 + t * (x1 - x0) + r.uniform(-20, 20), y0)
+                b = (x0 + t * (x1 - x0) + r.uniform(-60, 60), y1)
+                bend = (r.uniform(-50, 50), 0.0)
+            else:
+                a = (x0, y0 + t * (y1 - y0) + r.uniform(-20, 20))
+                b = (x1, y0 + t * (y1 - y0) + r.uniform(-60, 60))
+                bend = (0.0, r.uniform(-50, 50))
+            mid = ((a[0] + b[0]) / 2 + bend[0], (a[1] + b[1]) / 2 + bend[1])
+            pts = [((1 - s) ** 2 * a[0] + 2 * (1 - s) * s * mid[0] + s * s * b[0],
+                    (1 - s) ** 2 * a[1] + 2 * (1 - s) * s * mid[1] + s * s * b[1]) for s in (q / 24 for q in range(25))]
+            self.d.line(pts, fill=r.randint(20, 70), width=width)
 
     # -------------------------------------------------- bubbles
     def _shape(self, draw: Any, kind: str, box: Sequence[float], radius: float, fill: int) -> None:
@@ -484,7 +543,7 @@ class Drawn:
 
 
 def layout(n: int, font_path: str) -> Drawn:
-    """Made-up layout *n* (1 to 19), each built round one risk."""
+    """Made-up layout *n* (1 to 20), each built round one risk."""
     p = Drawn(1000 + n, font_path)
     lines = list(LINES)
     p.rng.shuffle(lines)
@@ -744,6 +803,41 @@ def layout(n: int, font_path: str) -> Drawn:
         b = p.bubble(bt[0] + 800, bt[1] + 330, 140, 190)
         c(lines[0] + lines[1], bt[0] + 800, bt[1] + 330, 28, 6, weight=500, bubble=b, case="normal")
         p.inter[p.np.asarray(p.outline) > 127] = 0
+    elif n == 20:  # tall bubbles drawn see-through or semi-transparent over hair, a tone or a hatching: large rooms
+        tr, tl, bt = p.frame3(art=False)
+        # two bubbles drawn over hair: the strands cross the paper of the one, faint on the other's semi-transparent
+        # paper (its lettering ringed white)
+        a = p.bubble(tr[0] + 130, tr[1] + 390, 85, 300)
+        b = p.bubble(tr[0] + 390, tr[1] + 400, 130, 260)
+        p.within(p.box_mask((tr[0] + 6, tr[1] + 6, tr[2] - 6, tr[3] - 6)),
+                 lambda: p.hair((tr[0] + 10, tr[1] + 60, tr[2] - 10, tr[3] - 60), 7))
+        p.veil(p.inter == b)
+        c("そんなことないよ信じて", tr[0] + 130, tr[1] + 390, 42, 6, weight=700, bubble=a, case="see-through")
+        c("まだ終わってないここで待っててね", tr[0] + 390, tr[1] + 400, 40, 6, weight=700, bubble=b,
+          case="veiled-hair", stroke=3)
+        # on a tone: a tall narrow white bubble, and a semi-transparent one, the tone faint on its paper
+        p.tone((tl[0] + 6, tl[1] + 6, tl[2] - 6, tl[3] - 6))
+        a = p.bubble(tl[0] + 140, tl[1] + 400, 72, 300)
+        c("ちょっと待って", tl[0] + 140, tl[1] + 400, 44, 9, weight=700, bubble=a, case="narrow-on-tone")
+        b = p.bubble(tl[0] + 380, tl[1] + 400, 105, 280)
+        p.within(p.inter == b, lambda: p.tone((tl[0] + 6, tl[1] + 6, tl[2] - 6, tl[3] - 6)))
+        p.veil(p.inter == b)
+        c("気をつけて行ってね", tl[0] + 380, tl[1] + 400, 40, 5, weight=700, bubble=b, case="veiled-tone")
+        # on a hatching: a semi-transparent bubble, the hatching faint on its paper; a tall narrow white one of one
+        # column; a tall one toned inside, of three
+        x0, y0, x1, y1 = bt
+        left = p.box_mask((x0 + 6, y0 + 6, x0 + 460, y1 - 6))
+        p.within(left, lambda: p.hatching((x0 + 6, y0 + 6, x0 + 460, y1 - 6), step=13, width=2))
+        a = p.bubble(x0 + 220, y0 + 400, 100, 320)
+        p.within(p.inter == a, lambda: p.hatching((x0 + 6, y0 + 6, x0 + 460, y1 - 6), step=13, width=2))
+        p.veil(p.inter == a)
+        c("本当に行くのか明日また来るよ", x0 + 220, y0 + 400, 42, 7, weight=700, bubble=a, case="veiled-hatch")
+        a = p.bubble(x0 + 620, y0 + 400, 62, 330)
+        c("絶対に許さない", x0 + 620, y0 + 400, 44, 9, weight=800, bubble=a, case="narrow-one-column")
+        a = p.bubble(x0 + 880, y0 + 400, 125, 330)
+        p.within(p.inter == a, lambda: p.tone((x0 + 750, y0 + 66, x0 + 1010, y0 + 734), pitch=6, dot=1.6, shade=150))
+        c("やっぱりそうかなんでここに何をしてるの", x0 + 880, y0 + 400, 40, 7, weight=600, bubble=a,
+          case="toned-inside")
     else:  # 16: narrow bubbles with heavy short columns at the sample set's size of characters
         tr, tl, bt = p.frame3()
         cols = ((tr[0] + 100, 34, 22), (tr[0] + 250, 38, 24), (tr[0] + 400, 42, 26), (tl[0] + 120, 36, 24),
@@ -758,12 +852,12 @@ def layout(n: int, font_path: str) -> Drawn:
     return p
 
 
-LAYOUTS = 19
+LAYOUTS = 20
 SAMPLE_SEEDS = (0, 1, 2, 3)  # tools/make_sample_page.py's own page, at these seeds
 
 
 def synthetic_page(name: str, models_dir: Path) -> dict[str, Any]:
-    """A made-up page by name ("L01".."L19", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
+    """A made-up page by name ("L01".."L20", or "S0".. for make_sample_page's): its RGB image (numpy), its layers
     (None for make_sample_page's) and its truth."""
     import numpy as np
 
@@ -989,6 +1083,10 @@ class Recorder:
         self.fits: list[Any] = []
         self.page: Any = None
         self.erased: Any = None
+
+    def largest(self) -> int:
+        """The largest size any lettering may take (``max_font_size``; a region's cap holds it under that)."""
+        return int(self.pipe.settings.max_font_size)
 
     def close(self) -> None:
         self.pipe._erase = self._erase
@@ -1237,6 +1335,37 @@ def _filled(mask: Any, win: Box) -> Any:
     out = mask.copy()
     out[y0:y1, x0:x1] |= holes
     return out
+
+
+def _seen(room: Any, inter: Any, g: float) -> Any:
+    """The bubble as the person sees it round a region's lettering (``ROOM_LOOSE``): the room it was set in (*room*,
+    bool, of the page) and the closed interior round its text (*inter*, or None), joined over the drawing's thin lines
+    across its paper (hair, a hatching: closed by a third of a glyph *g*) and its holes filled - not the piece of it a
+    line cut off for the lettering's layout."""
+    import numpy as np
+    import cv2
+
+    both = room if inter is None else room | inter
+    ys, xs = np.nonzero(both)
+    if not xs.size:
+        return both
+    h, w = both.shape
+    k = max(1, int(g / 3))
+    x0, y0 = max(0, int(xs.min()) - k), max(0, int(ys.min()) - k)
+    x1, y1 = min(w, int(xs.max()) + 1 + k), min(h, int(ys.max()) + 1 + k)
+    sub = cv2.copyMakeBorder(both[y0:y1, x0:x1].astype(np.uint8), k, k, k, k, cv2.BORDER_CONSTANT, value=0)
+    shut = cv2.morphologyEx(sub, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1)))
+    out = np.zeros(both.shape, bool)
+    out[y0:y1, x0:x1] = shut[k:-k, k:-k] > 0
+    return _filled(out, (x0, y0, x1, y1))
+
+
+def room_loose(share: float, font: int, cap: int, largest: int) -> bool:
+    """Whether a region's lettering is small in a large room (``ROOM_LOOSE``): its box takes under `LOOSE_SHARE` of
+    the bubble as seen (*share*, `_seen`) at a size *font* under `LOOSE_SIZE` of the largest it may take - its cap
+    (*cap*, the page's, 0 for none) and the largest size of all (*largest*, ``max_font_size``)."""
+    top = min(largest, cap) if cap > 0 else largest
+    return share < LOOSE_SHARE and 0 < font < LOOSE_SIZE * top
 
 
 def _off_rim(mask: Any, core: Any, win: Box) -> Any:
@@ -1544,6 +1673,7 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             m["won"] = rec.won.get(id(r), "")
             m["frame"] = rec.frame.get(id(r), "")
             room = rec.rooms.get(id(r))
+            rm = None
             if room is not None:
                 rm = _page_mask((h, w), room[0], room[1])
                 ys, xs = np.nonzero(rm)
@@ -1553,6 +1683,11 @@ def measure_page(orig: Any, erased: Any, final: Any, regions: Sequence[Any], rec
             ys, xs = np.nonzero(ink)
             if xs.size:
                 m["lettering_box"] = [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+                if rm is not None and rm.any():  # (the share of the bubble as seen its lettering takes)
+                    m["seen_px"] = int(_seen(rm, inter, g).sum())
+                    m["room_share"] = round(_area(m["lettering_box"]) / max(1, m["seen_px"]), 3)
+                    if room_loose(m["room_share"], int(r.font_size), int(r.size_cap), rec.largest()):
+                        codes.append("ROOM_LOOSE")
             if 0 < r.font_size < SMALL_FONT:
                 codes.append("SMALL")
             if m["hyphens"]:
