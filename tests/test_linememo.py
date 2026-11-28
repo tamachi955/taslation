@@ -414,18 +414,17 @@ def test_the_reused_note_stands_with_the_hint_line_and_never_widens_the_editor(h
         i18n.set_language("en")
 
 
-def test_the_system_page_counts_the_lines_reused(hidden_root, settings):
-    from taslation.ui.dialogs.system_page import SystemPage
+def test_the_report_counts_the_lines_reused(settings):
+    """Copy a report's translator line says how many short lines were reused this session (counts only; the System
+    page no longer says it)."""
+    from taslation.ui import report
 
-    pipeline = SimpleNamespace(line_tally=linememo.Tally(reused=4, asked=8), stage_times=None, translator=None)
-    page = SystemPage(hidden_root, settings, 600, pipeline=lambda: pipeline, look=lambda: [])
-    page.refresh(wait=True)
-    note = page.note_var.get().replace("\n", " ")
-    assert "Short lines reused this session without asking the model: 4 of 12." in note
+    pipeline = SimpleNamespace(line_tally=linememo.Tally(reused=4, asked=8), stage_times=None,
+                               translator=SimpleNamespace(model="m"), ocr=None, layout=None, art_eraser=None)
+    app = SimpleNamespace(settings=settings, pipeline=pipeline, _compute_where="GPU")
+    assert report._models(app)["translator"] == "m; on GPU; short lines reused 4 of 12"
     pipeline.line_tally = linememo.Tally()
-    page.refresh(wait=True)
-    assert "reused" not in page.note_var.get()
-    page.destroy()
+    assert report._models(app)["translator"] == "m; on GPU"
 
 
 # ------------------------------------------------------------------ export, import, delete

@@ -73,10 +73,11 @@ def test_other_programs_are_the_used_memory_less_what_is_taslation_s_own():
 
 
 def test_the_margin_is_the_driver_s_part_and_how_far_other_programs_rose_at_once():
-    from taslation.ui.dialogs import system_page
+    from pathlib import Path
 
+    manual = (Path(__file__).resolve().parents[1] / "docs" / "MANUAL.md").read_text(encoding="utf-8")
     assert (FLOOR_MIB, SWAY_MIB, MARGIN_MIB) == (490, 220, 710)
-    assert round(MARGIN_MIB * place.MiB / 1e8) * 100 == 700 and "about 700 MB" in system_page.OCR_RUNS_ON_TEXT
+    assert round(MARGIN_MIB * place.MiB / 1e8) * 100 == 700 and "with about 700 MB left over" in manual
 
 
 def test_the_default_6_gb_card_is_enough_up_to_1704_mib_of_other_programs():
@@ -900,26 +901,21 @@ def test_plamo_s_lines_are_requests_and_its_warm_up_none(monkeypatch):
 
 
 # ------------------------------------------------------------------ where it is said
-def test_the_system_page_shows_and_saves_where_the_ocr_runs(hidden_root, tmp_path, monkeypatch):
-    from taslation.i18n import set_language
+def test_where_the_ocr_runs_is_the_settings_file_s_alone(hidden_root, tmp_path, monkeypatch):
+    """``ocr_runs_on`` left the System page: a file that sets it loads, the readers go where it says, the OCR's row
+    says so, and the dialog neither shows nor writes it."""
     from taslation.ui.dialogs import settings as dlg
-    from taslation.ui.dialogs import system_page
 
     monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
-    in_force = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
-                        config_path=tmp_path / "taslation.toml")
-    got = []
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert [v for v, _label in system_page.OCR_RUNS_ON_CHOICES] == list(place.SETTING_VALUES)
-    assert d.system.ocr_runs_on.get() == "The GPU when it has room" and d.values()["ocr_runs_on"] == "auto"
-    d.system.ocr_runs_on.set("The processor (CPU)")
-    assert d.save() is True and got == [{"ocr_runs_on": "cpu"}]
-    assert Settings.from_toml(in_force.config_path).ocr_runs_on == "cpu"
-    d.destroy()
-    set_language("ja")
-    in_force.ocr_runs_on = "gpu"
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert d.system.ocr_runs_on.get() == "GPU" and d.values()["ocr_runs_on"] == "gpu"  # (shown in Japanese, kept as is)
+    path = tmp_path / "taslation.toml"
+    path.write_text('ocr_runs_on = "cpu"\n', encoding="utf-8")
+    in_force = Settings.from_toml(path).with_overrides(state_dir=tmp_path / "state", models_dir=tmp_path / "models")
+    assert in_force.ocr_runs_on == "cpu" and in_force.ignored_keys == ()
+    assert set(place.SETTING_VALUES) == {"auto", "cpu", "gpu"}
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    assert "ocr_runs_on" not in d.values() and not hasattr(d.system, "ocr_runs_on")
+    row = _ocr_row(in_force)
+    assert row.device == "cpu" and row.note == "As set in ocr_runs_on"
 
 
 def test_the_system_page_shows_and_saves_what_a_short_start_does(hidden_root, tmp_path, monkeypatch):
@@ -947,26 +943,37 @@ def _ocr_row(settings, ocr=None, cuda=True):
                          ocr=ocr)[1]
 
 
+READER_NAMES = ("manga-ocr-charspot-small", "manga-ocr-nar-small", "manga-ocr-base-CPT-flex")
+
+
 def test_the_system_page_says_where_the_readers_are_and_why(tmp_path):
+    """Each reader by its name, with where it reads when two of them are on the GPU (CPT on the CPU always); the note
+    says why they are where they are, nothing where the GPU had room."""
     s = _settings(tmp_path)
 
-    def row(*a, **k):
-        return _ocr_row(s, SimpleNamespace(placement=Placement(*a, **k), settings=s))
+    def row(*a, missing=(), **k):
+        return _ocr_row(s, SimpleNamespace(placement=Placement(*a, **k), settings=s, missing=list(missing)))
 
     on = row("gpu", place.ROOM, 1500)
-    assert on.where() == f"GPU ({GPU})" and on.what.startswith("Two of the OCR readers") and "third" in on.what
+    assert on.where() == f"GPU ({GPU})" and on.note == ""
+    assert on.models == ("manga-ocr-charspot-small (GPU)", "manga-ocr-nar-small (GPU)", "manga-ocr-base-CPT-flex (CPU)")
+    alone = row("gpu", place.ROOM, 1500, missing=["manga-ocr-nar-small"])  # (an install from before the three)
+    assert alone.models == ("manga-ocr-charspot-small (GPU)",)
     failed = row("cpu", place.FAILED, error="CudaError")
-    assert failed.where() == "CPU" and "CudaError" in failed.what
+    assert failed.where() == "CPU" and failed.models == READER_NAMES
+    assert failed.note == "On the CPU since the GPU failed (CudaError)"
     short = row("cpu", place.PROCESSOR, 300)
-    assert short.where() == "CPU" and "short at the start" in short.what
-    assert "next page" in row("cpu", place.RELEASED).what
-    assert "not known" in row("cpu", place.UNKNOWN).what
+    assert short.where() == "CPU" and short.note == "The GPU's memory was short at the start"
+    assert row("cpu", place.RELEASED).note == "The GPU memory was let go; the next page puts them back"
+    assert row("cpu", place.UNKNOWN).note == "The room on the GPU is not known"
+    assert row("cpu", place.NO_CUDA).note == "" and row("cpu", place.NO_CUDA).models == READER_NAMES
 
 
 def test_without_loaded_readers_the_plan_is_asked_now(tmp_path, monkeypatch):
     s = _settings(tmp_path)
-    assert _ocr_row(s, cuda=False).what == "The OCR readers"  # no GPU: as ever
-    assert _ocr_row(_settings(tmp_path, ocr_runs_on="cpu")).what == "The OCR readers, as set in ocr_runs_on"
+    no_gpu = _ocr_row(s, cuda=False)  # no GPU: as ever (charspot alone in an empty models folder)
+    assert no_gpu.models == ("manga-ocr-charspot-small",) and no_gpu.note == ""
+    assert _ocr_row(_settings(tmp_path, ocr_runs_on="cpu")).note == "As set in ocr_runs_on"
     assert place.session().why == place.NO_GPU  # (made by the row above: the suite's facts are none)
     place.reset()
     monkeypatch.setattr(place, "gather", lambda settings, memory=None, own=None, ask=True: _card(1000))
@@ -974,7 +981,7 @@ def test_without_loaded_readers_the_plan_is_asked_now(tmp_path, monkeypatch):
     row = _ocr_row(s)
     assert row.device == "gpu" and row.gpu == GPU
     old = SimpleNamespace(settings=None)  # (readers loaded without settings, as a caller of before)
-    assert _ocr_row(s, old).where() == "CPU" and _ocr_row(s, old).what == "The OCR readers"
+    assert _ocr_row(s, old).where() == "CPU" and _ocr_row(s, old).note == ""
 
 
 def test_the_page_models_rows_follow_the_plan(tmp_path, monkeypatch):
@@ -1028,17 +1035,14 @@ def test_the_start_s_dialog_is_refused_in_a_test_that_does_not_ask_for_it():
 
 
 def test_the_new_lines_are_in_every_language():
-    from taslation.i18n import CATALOGS, FEATURE_LANGUAGES
-    from taslation.locales.features import gpu_start, ocr_release
+    from taslation.i18n import FEATURE_LANGUAGES
+    from taslation.locales.features import gpu_start, ocr_on_gpu
     from taslation.ui.dialogs import gpu_short, system_page
     from taslation.ui import status_slot
 
-    for text in (*devices.OCR_WHY.values(), *devices.OCR_SET.values()):
-        for code, catalog in CATALOGS.items():
-            assert code == "en" or text in catalog, (code, text)
-    for key in (system_page.OCR_RUNS_ON_LABEL, system_page.OCR_RUNS_ON_TEXT,
-                *(label for _value, label in system_page.OCR_RUNS_ON_CHOICES)):
-        assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+    assert sorted(ocr_on_gpu.TEXTS) == sorted(devices.OCR_NOTES.values())
+    for key in devices.OCR_NOTES.values():
+        assert sorted(ocr_on_gpu.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
     keys = (gpu_short.TEXT, gpu_short.ON_PROCESSOR, gpu_short.AGAIN, gpu_short.PROCESSOR, gpu_short.QUIT,
             gpu_short.REMEMBER, gpu_short.OURS_LOADED, gpu_short.THEIRS_LOADED, gpu_short.MODEL_MB, gpu_short.RELEASE,
             *devices.PART_NAMES.values(), ", ", status_slot.MODELS_KEY, devices.PLAN_SHORT,
@@ -1129,55 +1133,36 @@ def test_the_readers_read_the_same_on_either_device(device, real_readers, sample
 
 
 # ------------------------------------------------------------------ the window cache of the Ollama TASlation starts
-def test_the_system_page_shows_and_saves_the_window_cache(hidden_root, tmp_path, monkeypatch):
-    from taslation.i18n import set_language
+def test_the_window_cache_is_the_settings_file_s_alone_and_the_report_says_what_the_server_got(hidden_root, tmp_path,
+                                                                                               monkeypatch):
+    """``ollama_window_cache`` left the System page: a file that sets it loads and the dialog neither shows nor writes
+    it; what the server TASlation started got is in Copy a report's server line (`ui.report`), not on the page."""
+    from taslation import errorlog, ollama_start
+    from taslation.ollama_start import WHY_SET, WHY_SETTING, ServerSetup
+    from taslation.ui import report
     from taslation.ui.dialogs import settings as dlg
-    from taslation.ui.dialogs import system_page
 
     monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
-    in_force = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
-                        config_path=tmp_path / "taslation.toml")
-    got = []
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert [v for v, _label in system_page.WINDOW_CACHE_CHOICES] == ["auto", "off"]
-    assert d.system.window_cache.get() == "On" and d.values()["ollama_window_cache"] == "auto"
-    d.system.window_cache.set("Off")
-    assert d.save() is True and got == [{"ollama_window_cache": "off"}]
-    assert Settings.from_toml(in_force.config_path).ollama_window_cache == "off"
-    d.destroy()
-    set_language("ja")
-    in_force.ollama_window_cache = "on"  # (a file from before: "always on" is on, as "auto" is now)
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert d.system.window_cache.get() == "使う"
-
-
-def test_the_translator_s_row_says_what_the_server_taslation_started_got(tmp_path, monkeypatch):
-    from taslation import ollama_start
-    from taslation.ollama_start import WHY_SET, WHY_SETTING, ServerSetup
-
+    monkeypatch.setattr(errorlog, "ollama_line", lambda port=None: "Ollama: not asked in the tests")
+    monkeypatch.setattr(ollama_start, "own_server", lambda url: None)
+    path = tmp_path / "taslation.toml"
+    path.write_text('ollama_window_cache = "off"\n', encoding="utf-8")
+    in_force = Settings.from_toml(path).with_overrides(state_dir=tmp_path / "state", models_dir=tmp_path / "models")
+    assert in_force.ollama_window_cache == "off" and in_force.ignored_keys == ()
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    assert "ollama_window_cache" not in d.values() and not hasattr(d.system, "window_cache")
     s = _settings(tmp_path)
     translator = SimpleNamespace(model="m", _loaded=lambda model: None)
-    assert devices._translator_device(s, translator, GPU).what == "Ollama: m"  # (an Ollama TASlation did not start)
-    for setup, key in ((ServerSetup("q8_0", True, "256", WHY_SETTING), "on"),
-                       (ServerSetup("f16", False, "0", WHY_SETTING), "off"),
-                       (ServerSetup("f16", False, "0", WHY_SET), "off"),
-                       (ServerSetup("q8_0", False, "0", "readers"), "off")):  # (a record of a version before)
+    app = SimpleNamespace(settings=s, pipeline=None)
+    for setup, said in ((None, "its own settings"),
+                        (ServerSetup("q8_0", True, "256", WHY_SETTING), "cloud features off; window cache on"),
+                        (ServerSetup("f16", False, "0", WHY_SETTING), "cloud features off; window cache off"),
+                        (ServerSetup("f16", False, "0", WHY_SET), "cloud features off; window cache off"),
+                        (ServerSetup("q8_0", False, "0", "readers"), "cloud features off; window cache off")):
         monkeypatch.setattr(ollama_start, "setup_of", lambda url, state_dir=None, setup=setup: setup)
-        assert devices._translator_device(s, translator, GPU).what == "Ollama: m; " + devices.WINDOW_CACHE_ROWS[key]
-    line = "\n".join(devices.lines(s, translator=translator, cuda=False, gpu=""))  # (`taslation doctor`'s lines)
-    assert devices.WINDOW_CACHE_ROWS["off"] in line
-
-
-def test_the_window_cache_s_lines_are_in_every_language():
-    from taslation.i18n import FEATURE_LANGUAGES
-    from taslation.locales.features import window_cache
-    from taslation.ui.dialogs import system_page
-
-    keys = (system_page.WINDOW_CACHE_LABEL, system_page.WINDOW_CACHE_TEXT,
-            *(label for _value, label in system_page.WINDOW_CACHE_CHOICES), *devices.WINDOW_CACHE_ROWS.values())
-    assert sorted(window_cache.TEXTS) == sorted(keys)
-    for key in keys:
-        assert sorted(window_cache.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+        assert devices._translator_device(s, translator, GPU).models == ("m",)  # (the page names the model alone)
+        server = next(line for line in report.program_lines(app) if line.startswith("server = "))
+        assert f"; {said}; " in server, server
 
 
 def test_the_window_cache_is_the_setting_s_alone_and_counted_at_its_real_size(tmp_path, monkeypatch):

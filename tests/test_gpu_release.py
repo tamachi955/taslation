@@ -2,8 +2,8 @@
 translators exactly as before without the setting, and with ``num_gpu`` in every request and warm-up with it; a model
 split on purpose neither loaded again nor reported; Tools > Release the model now unloading TASlation's own model only
 (another program's model in the same server stays), also with ``keep_alive`` "-1", refused while a translation or a
-run is on, and what the status line says; the setting checked, read from the file and set from the Settings dialog's
-System page. Fake servers only: the machine's own Ollama is never asked anything."""
+run is on, and what the status line says; the setting checked and read from the file (the Settings dialog does not
+hold it). Fake servers only: the machine's own Ollama is never asked anything."""
 from __future__ import annotations
 
 import json
@@ -22,10 +22,8 @@ from taslation.translate import OllamaTranslator
 from taslation.translate.models import PLAMO, make_translator
 from taslation.translate.ollama import NUM_GPU_MOST, num_gpu_value
 from taslation.translate.plamo import STOPS, PlamoTranslator
-from taslation.ui import app as app_mod
 from taslation.ui import gpu_release
 from taslation.ui.dialogs import settings as dlg
-from taslation.ui.dialogs import system_page
 
 MODEL = "qwen3.5:4b"
 OTHER = "someone-elses:7b"  # a model another program loaded into the same server
@@ -312,8 +310,7 @@ def test_the_strings_are_in_every_language():
 
     for key in (gpu_release.RELEASE_ENTRY, gpu_release.RELEASE_REFUSED, gpu_release.RELEASING,
                 gpu_release.RELEASED_BOTH, gpu_release.RELEASED_MODEL, gpu_release.RELEASED_PAGES,
-                gpu_release.RELEASED_NOTHING, system_page.NUM_GPU_LABEL, system_page.NUM_GPU_TEXT,
-                system_page.NUM_GPU_PROBLEM):
+                gpu_release.RELEASED_NOTHING):
         assert sorted(texts.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
     for key in (gpu_release.RELEASED_ALL, gpu_release.RELEASED_MODEL_OCR,
                 gpu_release.RELEASED_PAGES_OCR, gpu_release.RELEASED_OCR):
@@ -332,31 +329,16 @@ def in_force(tmp_path, monkeypatch):
     return Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models", config_path=tmp_path / "taslation.toml")
 
 
-def test_the_system_page_shows_saves_and_checks_the_layers(hidden_root, in_force):
-    got = []
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert d.system.num_gpu.get() == "" and d.values()["ollama_num_gpu"] == ""
-    for bad in ("x", "-1", str(NUM_GPU_MOST + 1), "2.5"):
-        d.system.num_gpu.set(bad)
-        assert d.save() is False and got == [] and not in_force.config_path.exists()
-        assert d.message_var.get().replace("\n", " ") == system_page.NUM_GPU_PROBLEM.format(most=NUM_GPU_MOST)
-    d.system.num_gpu.set(" 020 ")
-    assert d.values()["ollama_num_gpu"] == "20" and d.save() is True and got == [{"ollama_num_gpu": "20"}]
-    assert Settings.from_toml(in_force.config_path).ollama_num_gpu == "20"
-    in_force.ollama_num_gpu = "20"  # (as the window sets it)
-    d.system.num_gpu.set("")
-    assert d.save() is True and got[-1] == {"ollama_num_gpu": ""}
-    assert Settings.from_toml(in_force.config_path).ollama_num_gpu == ""
-
-
-def test_saved_layers_are_set_on_the_window_s_translators(tmp_path):
-    translator, other = FakeTranslator([]), FakeTranslator([])
-    w = SimpleNamespace(settings=Settings(state_dir=tmp_path), translator=translator,
-                        pipeline=SimpleNamespace(translator=other), last_result=None, busy=False)
-    app_mod.App._settings_saved(w, {"ollama_num_gpu": "0"})
-    assert w.settings.ollama_num_gpu == "0" and translator.num_gpu == 0 and other.num_gpu == 0
-    app_mod.App._settings_saved(w, {"ollama_num_gpu": ""})
-    assert translator.num_gpu is None and other.num_gpu is None
+def test_the_layers_on_the_gpu_are_the_settings_file_s_alone(hidden_root, in_force):
+    """``ollama_num_gpu`` left the System page: a file that sets it loads (a value that does not fit is refused as
+    before, `test_the_setting_is_empty_by_default_and_takes_a_number_of_layers`), and the dialog neither shows nor
+    writes it."""
+    in_force.config_path.write_text("ollama_num_gpu = 0\n", encoding="utf-8")
+    loaded = Settings.from_toml(in_force.config_path).with_overrides(state_dir=in_force.state_dir,
+                                                                    models_dir=in_force.models_dir)
+    assert loaded.ollama_num_gpu == "0" and loaded.ignored_keys == ()
+    d = dlg.SettingsDialog(hidden_root, loaded)
+    assert "ollama_num_gpu" not in d.values() and not hasattr(d.system, "num_gpu") and d.changed() == {}
 
 
 def test_the_menu_has_the_entry():

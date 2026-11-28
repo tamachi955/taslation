@@ -172,7 +172,7 @@ def test_the_report_keeps_its_sections_and_keys(tmp_path):
                                  "foreground", "foreground_line", "keys_guard", "hidden_root")
     assert report.PROGRAM_KEYS == ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_language",
                                    "target_language", "mode", "translator", "ocr", "layout_model", "inpainting",
-                                   "server", "offline_guard", "settings_changed", "last_error")
+                                   "stage_seconds", "server", "offline_guard", "settings_changed", "last_error")
     assert report.LOG_KEYS == ("problem",) and report.TEXT_KEYS == ("reading_text", "translation_text")
     app = _app(tmp_path)
     region = app.last_result.regions[0]
@@ -206,14 +206,34 @@ def test_the_server_line_says_whether_ollama_s_cloud_features_are_off(tmp_path, 
     asked: list[tuple] = []
     for ours, setup, said in ((None, None, "not started by TASlation; its own settings; Ollama: not asked in the tests"),
                               ((1, 2), ServerSetup("f16", True, "256", "setting"),
-                               "started by TASlation; cloud features off; Ollama: not asked in the tests"),
-                              ((1, 2), ServerSetup("f16", True, "256", "setting", no_cloud=False),
-                               "started by TASlation; cloud features not turned off; Ollama: not asked in the tests")):
+                               "started by TASlation; cloud features off; window cache on; Ollama: not asked in the "
+                               "tests"),
+                              ((1, 2), ServerSetup("f16", False, "0", "setting", no_cloud=False),
+                               "started by TASlation; cloud features not turned off; window cache off; Ollama: not "
+                               "asked in the tests")):
         monkeypatch.setattr(ollama_start, "own_server", lambda url, ours=ours: ours)
         monkeypatch.setattr(ollama_start, "setup_of", lambda url, state=None, setup=setup: asked.append((url, state))
                             or setup)
         assert _values(report.report_text(app), "program")["server"] == said
     assert asked[0] == (app.settings.ollama_url, app.settings.state_dir)
+
+
+def test_the_stage_seconds_are_this_session_s_else_those_kept(tmp_path):
+    """The seconds a page of each stage left the System page: the report has them, this session's where the pipeline
+    timed pages, else those kept when TASlation last closed (`devices.StageTimes`)."""
+    from taslation.devices import StageTimes
+
+    app = _app(tmp_path)
+    assert _values(report.report_text(app), "program")["stage_seconds"] == "none yet"  # (no pipeline yet)
+    app.pipeline = SimpleNamespace(stage_times=StageTimes())
+    assert _values(report.report_text(app), "program")["stage_seconds"] == "none yet"
+    StageTimes([{"detect": 0.5, "ocr": 1.25, "erase": 0.3}]).save(app.settings.state_dir)
+    assert _values(report.report_text(app), "program")["stage_seconds"] == (
+        "detect 0.50 s, ocr 1.25 s, erase 0.30 s a page; the mean of 1 page(s), kept when TASlation last closed")
+    app.pipeline.stage_times = StageTimes([{"detect": 0.25, "ocr": 1.0, "translate": 3.0, "erase": 0.5},
+                                           {"detect": 0.75, "ocr": 2.0, "erase": 0.5}])
+    assert _values(report.report_text(app), "program")["stage_seconds"] == (
+        "detect 0.50 s, ocr 1.50 s, translate 3.00 s, erase 0.50 s a page; the mean of 2 page(s), this session")
 
 
 def test_a_region_report_holds_why_its_lettering_is_not_shown(tmp_path):

@@ -894,7 +894,7 @@ def has_cuda() -> bool:
 
 def runs_here(setting: str, cuda: bool | None = None) -> bool:
     """THE RULE for `art_erase`, which everything that asks whether the erase on the art runs goes by (`available`,
-    `devices.stage_devices`, `health.page_models_missing`, the Settings dialog): "off" never; "lama" always, on the
+    `devices.stage_devices`, `health.page_models_missing`): "off" never; "lama" always, on the
     CPU too; "auto" (the default) only where torch has a CUDA GPU: *cuda* when the caller knows it, else `has_cuda`,
     asked only for "auto". The weights are `available`'s to check. A GPU that fails at run time moves the work to the
     CPU for the rest of the session (`ArtEraser._fill`): a fallback, not this rule's choice."""

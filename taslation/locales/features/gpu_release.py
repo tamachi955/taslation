@@ -1,9 +1,7 @@
-"""The window's strings for giving the GPU back (`ui.gpu_release`, `ui.dialogs.system_page`): Tools > Release the
-model now, what the status line says of it (its tip, and the lines that name the OCR: `ocr_release.py`), and the
-System page's box for the translation model's layers on
-the GPU (``ollama_num_gpu``) with its line and what Save says of a value that does not fit. The translation model is
-worded as in the other lines on it (ja 「翻訳モデル」, de „Übersetzungsmodell“), the page models as in the Settings
-dialog (ja 「ページ用モデル」), the processor as the CPU where a language says so.
+"""The window's strings for giving the GPU back (`ui.gpu_release`): Tools > Release the model now and what the status
+line says of it (its tip, and the lines that name the OCR: `ocr_release.py`). The translation model is worded as in
+the other lines on it (ja 「翻訳モデル」, de „Übersetzungsmodell“), the page models as elsewhere (ja 「ページ用モデル」),
+the processor as the CPU where a language says so.
 
 Machine-translated; no native review."""
 
@@ -111,51 +109,5 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "沒有可釋放的：TASlation 的模型未載入。",
         "ko": "해제할 것이 없습니다: TASlation의 모델은 불러와 있지 않았습니다.",
         "th": "ไม่มีอะไรให้ปล่อย: โมเดลของ TASlation ไม่ได้ถูกโหลดอยู่",
-    },
-    "Translation model's layers on the GPU:": {
-        "ja": "翻訳モデルの GPU に置く層の数:", "es": "Capas del modelo de traducción en la GPU:",
-        "pt": "Camadas do modelo de tradução na GPU:", "fr": "Couches du modèle de traduction sur le GPU :",
-        "de": "Schichten des Übersetzungsmodells auf der GPU:", "it": "Livelli del modello di traduzione sulla GPU:",
-        "nl": "Lagen van het vertaalmodel op de GPU:", "pl": "Warstwy modelu tłumaczenia na GPU:",
-        "ru": "Слои модели перевода на GPU:", "tr": "Çeviri modelinin GPU'daki katmanları:",
-        "id": "Lapisan model terjemahan di GPU:", "vi": "Số lớp của mô hình dịch trên GPU:",
-        "zh": "翻译模型放在 GPU 上的层数：", "zh-tw": "翻譯模型放在 GPU 上的層數：",
-        "ko": "GPU에 올릴 번역 모델의 레이어 수:", "th": "จำนวนเลเยอร์ของโมเดลแปลบน GPU:",
-    },
-    "Empty: Ollama decides (the fastest). 0: the processor only, which leaves the GPU free and translates several times slower. A number: that many of the model's layers on the GPU, the rest on the processor.": {
-        "ja": "空欄: Ollama に任せます（いちばん速い）。0: CPU だけで動かし、GPU を空けます（翻訳は数倍遅くなります）。数: モデルのその数の層を GPU に置き、残りを CPU で動かします。",
-        "es": "Vacío: decide Ollama (lo más rápido). 0: solo el procesador, que deja libre la GPU y traduce varias veces más despacio. Un número: esa cantidad de capas del modelo en la GPU, el resto en el procesador.",
-        "pt": "Vazio: o Ollama decide (o mais rápido). 0: só o processador, que deixa a GPU livre e traduz várias vezes mais devagar. Um número: essa quantidade de camadas do modelo na GPU, o resto no processador.",
-        "fr": "Vide : Ollama décide (le plus rapide). 0 : le processeur seul, qui laisse le GPU libre et traduit plusieurs fois plus lentement. Un nombre : autant de couches du modèle sur le GPU, le reste sur le processeur.",
-        "de": "Leer: Ollama entscheidet (am schnellsten). 0: nur der Prozessor; die GPU bleibt frei, die Übersetzung ist mehrfach langsamer. Eine Zahl: so viele Schichten des Modells auf der GPU, der Rest auf dem Prozessor.",
-        "it": "Vuoto: decide Ollama (il più veloce). 0: solo il processore, che lascia libera la GPU e traduce diverse volte più lentamente. Un numero: tanti livelli del modello sulla GPU, il resto sul processore.",
-        "nl": "Leeg: Ollama beslist (het snelst). 0: alleen de processor; de GPU blijft vrij en vertalen gaat enkele keren trager. Een getal: zoveel lagen van het model op de GPU, de rest op de processor.",
-        "pl": "Puste: decyduje Ollama (najszybciej). 0: tylko procesor, co zwalnia GPU, a tłumaczenie jest kilka razy wolniejsze. Liczba: tyle warstw modelu na GPU, reszta na procesorze.",
-        "ru": "Пусто: решает Ollama (быстрее всего). 0: только процессор — GPU остаётся свободным, перевод в несколько раз медленнее. Число: столько слоёв модели на GPU, остальное на процессоре.",
-        "tr": "Boş: Ollama karar verir (en hızlısı). 0: yalnızca işlemci; GPU boş kalır, çeviri birkaç kat yavaşlar. Bir sayı: modelin o kadar katmanı GPU'da, kalanı işlemcide.",
-        "id": "Kosong: Ollama yang memutuskan (paling cepat). 0: hanya prosesor, GPU tetap kosong dan terjemahan beberapa kali lebih lambat. Angka: sebanyak itu lapisan model di GPU, sisanya di prosesor.",
-        "vi": "Để trống: Ollama tự quyết (nhanh nhất). 0: chỉ dùng bộ xử lý, để trống GPU và dịch chậm hơn vài lần. Một số: chừng ấy lớp của mô hình trên GPU, phần còn lại trên bộ xử lý.",
-        "zh": "留空：由 Ollama 决定（最快）。0：只用处理器，GPU 空出来，翻译会慢好几倍。数字：模型的这么多层放在 GPU 上，其余在处理器上。",
-        "zh-tw": "留空：由 Ollama 決定（最快）。0：只用處理器，GPU 空出來，翻譯會慢好幾倍。數字：模型的這麼多層放在 GPU 上，其餘在處理器上。",
-        "ko": "비워 두기: Ollama가 정합니다(가장 빠름). 0: 프로세서만 사용해 GPU를 비워 두며 번역이 몇 배 느려집니다. 숫자: 모델의 그만큼의 레이어를 GPU에, 나머지는 프로세서에 둡니다.",
-        "th": "เว้นว่าง: ให้ Ollama ตัดสินใจ (เร็วที่สุด) 0: ใช้โปรเซสเซอร์อย่างเดียว ปล่อย GPU ว่างไว้ และแปลช้าลงหลายเท่า ตัวเลข: วางเลเยอร์ของโมเดลจำนวนนั้นบน GPU ที่เหลือบนโปรเซสเซอร์",
-    },
-    "The layers on the GPU: leave the box empty, or a whole number from 0 to {most}.": {
-        "ja": "GPU に置く層の数: 空欄にするか、0 から {most} までの整数を入れてください。",
-        "es": "Las capas en la GPU: deja la casilla vacía o escribe un número entero de 0 a {most}.",
-        "pt": "As camadas na GPU: deixe a caixa vazia ou escreva um número inteiro de 0 a {most}.",
-        "fr": "Les couches sur le GPU : laissez la case vide, ou un nombre entier de 0 à {most}.",
-        "de": "Die Schichten auf der GPU: Lassen Sie das Feld leer oder geben Sie eine ganze Zahl von 0 bis {most} ein.",
-        "it": "I livelli sulla GPU: lascia la casella vuota oppure un numero intero da 0 a {most}.",
-        "nl": "De lagen op de GPU: laat het vak leeg, of een geheel getal van 0 tot {most}.",
-        "pl": "Warstwy na GPU: zostaw pole puste albo wpisz liczbę całkowitą od 0 do {most}.",
-        "ru": "Слои на GPU: оставьте поле пустым или введите целое число от 0 до {most}.",
-        "tr": "GPU'daki katmanlar: kutuyu boş bırakın ya da 0 ile {most} arasında bir tam sayı yazın.",
-        "id": "Lapisan di GPU: biarkan kotak kosong, atau isi bilangan bulat dari 0 sampai {most}.",
-        "vi": "Số lớp trên GPU: để trống ô, hoặc nhập một số nguyên từ 0 đến {most}.",
-        "zh": "GPU 上的层数：请留空，或填写 0 到 {most} 之间的整数。",
-        "zh-tw": "GPU 上的層數：請留空，或填寫 0 到 {most} 之間的整數。",
-        "ko": "GPU의 레이어 수: 칸을 비워 두거나 0부터 {most}까지의 정수를 입력하세요.",
-        "th": "เลเยอร์บน GPU: เว้นช่องว่างไว้ หรือใส่จำนวนเต็มตั้งแต่ 0 ถึง {most}",
     },
 }

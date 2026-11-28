@@ -183,13 +183,13 @@ def in_force(tmp_path, monkeypatch):
 
 
 def test_the_dialog_shows_the_settings_in_force(hidden_root, in_force):
-    in_force.art_erase = "lama"
     d = dlg.SettingsDialog(hidden_root, in_force)
     assert d.title() == "Settings" and d.resizable() == (False, False)
-    assert d.values() == {key: getattr(in_force, key) for key in dlg.KEYS}  # (lama stays lama)
+    assert d.values() == {key: getattr(in_force, key) for key in dlg.KEYS}
     assert d.path == in_force.config_path and d.path_field.get() == str(in_force.config_path)
-    assert d.models_line == "Not installed on this computer: run install.cmd again and agree to them."
     assert d.scale.get() == "100 %" and dlg.scale_of("125 %") == 1.25 and dlg.scale_label(1.75) == "175 %"
+    frames = [str(w.cget("text")) for w in _all(d.general_tab.content) if w.winfo_class() == "TLabelframe"]
+    assert frames == ["Lettering", "Fitting lettering into bubbles", "Dialogs"]  # (no box of the page models)
 
 
 def test_save_writes_what_changed_and_hands_it_on(hidden_root, in_force):
@@ -204,9 +204,9 @@ def test_save_writes_what_changed_and_hands_it_on(hidden_root, in_force):
     d.sizes["min_font_size"].set("10")
     d.uppercase.set(True)
     d.extra["see_through_indicators"].set(False)
-    d.detect.set(_("Always used"))
+    d.system.gpu_short.set(True)
     assert d.save() is True
-    changed = {"min_font_size": 10, "uppercase": True, "see_through_indicators": False, "detect_model": "on"}
+    changed = {"min_font_size": 10, "uppercase": True, "see_through_indicators": False, "gpu_short": "processor"}
     assert got == [changed] and d.message_var.get() == "Saved. The changes apply now."
     text = in_force.config_path.read_text(encoding="utf-8")
     assert text.startswith(NEW_FILE_HEADER) and '# ollama_url = "http://127.0.0.1:11434"' in text
@@ -252,11 +252,11 @@ def test_open_settings_file_makes_the_file_first_and_opens_it(hidden_root, in_fo
 def test_the_dialog_in_japanese(hidden_root, in_force):
     set_language("ja")
     d = dlg.SettingsDialog(hidden_root, in_force)
-    assert d.title() == "設定" and d.detect.get() == "インペイントと一緒のときだけ"  # (the default, "auto")
-    d.detect.set(_("Always used"))
-    d.erase.set(_("Always, also on the CPU"))
-    assert d.values()["detect_model"] == "on" and d.values()["art_erase"] == "lama"
-    assert d.erase.get() == "いつも使う（CPU でも）"
+    assert d.title() == "設定" and [d.pages.tab(t, "text") for t in d.pages.tabs()] == ["全般", "システム"]
+    headings = [str(w.cget("text")) for w in d.system.table.grid_slaves(row=0)]
+    assert sorted(headings) == sorted(["段階", "実行場所", "モデル"])
+    d.system.update_check.set(True)
+    assert d.values()["update_check"] == "daily"
 
 
 def test_the_look_for_a_new_version_is_off_until_its_box_is_ticked_and_saved(hidden_root, in_force):
@@ -271,76 +271,52 @@ def test_the_look_for_a_new_version_is_off_until_its_box_is_ticked_and_saved(hid
     assert again.system.update_check.get() and again.changed() == {}
 
 
-@pytest.mark.parametrize("value", ["off", "auto", "lama"])
-def test_the_inpainting_s_three_choices_come_back_as_they_were_saved(hidden_root, in_force, value):
+# the settings the dialog no longer holds: the file alone has them (taslation.toml.example)
+FILE_ONLY = {"detect_model": "off", "art_erase": "lama", "ollama_num_gpu": "0", "load_model_at_start": False,
+             "ocr_runs_on": "cpu", "ollama_window_cache": "off"}
+
+
+def test_a_file_with_the_settings_the_dialog_no_longer_holds_loads_and_keeps_them(hidden_root, in_force):
+    """The page models' choice, the translation model's layers on the GPU, its load at the start, where the OCR runs
+    and the window cache left the dialog: a file that sets them loads as before (none of them unknown), the dialog
+    neither shows nor writes them, and a Save of another setting leaves their lines as they were."""
+    assert not set(FILE_ONLY) & set(dlg.KEYS) and not set(FILE_ONLY) & dlg.PAGE_SETTINGS
+    lines = "".join(f"{key} = {toml_value(value)}  # mine\n" for key, value in FILE_ONLY.items())
+    in_force.config_path.write_text(lines, encoding="utf-8")
+    loaded = Settings.from_toml(in_force.config_path).with_overrides(state_dir=in_force.state_dir,
+                                                                    models_dir=in_force.models_dir)
+    assert loaded.ignored_keys == () and {key: getattr(loaded, key) for key in FILE_ONLY} == FILE_ONLY
     got = []
-    in_force.art_erase = "off" if value != "off" else "lama"
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    d.erase.set(_(dict(dlg.ERASE_CHOICES)[value]))
-    assert d.values()["art_erase"] == value and d.save() is True and got == [{"art_erase": value}]
-    loaded = Settings.from_toml(in_force.config_path)
-    assert loaded.art_erase == value
-    again = dlg.SettingsDialog(hidden_root, loaded)
-    assert again.erase.get() == _(dict(dlg.ERASE_CHOICES)[value]) and again.values()["art_erase"] == value
-    assert again.changed() == {}
+    d = dlg.SettingsDialog(hidden_root, loaded, on_saved=got.append)
+    assert not set(FILE_ONLY) & set(d.values()) and d.changed() == {}
+    d.uppercase.set(True)
+    assert d.save() is True and got == [{"uppercase": True}]
+    text = in_force.config_path.read_text(encoding="utf-8")
+    assert text.startswith(lines) and text.endswith("uppercase = true\n")
+    again = Settings.from_toml(in_force.config_path)
+    assert {key: getattr(again, key) for key in FILE_ONLY} == FILE_ONLY and again.uppercase
 
 
-@pytest.mark.parametrize("value", ["off", "auto", "on"])
-def test_the_layout_model_s_three_choices_come_back_as_they_were_saved(hidden_root, in_force, value):
-    got = []
-    in_force.detect_model = "off" if value != "off" else "auto"
-    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    d.detect.set(_(dict(dlg.DETECT_CHOICES)[value]))
-    assert d.values()["detect_model"] == value and d.save() is True and got == [{"detect_model": value}]
-    loaded = Settings.from_toml(in_force.config_path)
-    assert loaded.detect_model == value
-    again = dlg.SettingsDialog(hidden_root, loaded)
-    assert again.detect.get() == _(dict(dlg.DETECT_CHOICES)[value]) and again.changed() == {}
-
-
-def test_a_layout_model_choice_never_made_is_never_written_and_takes_the_default(hidden_root, in_force, monkeypatch):
-    """The default is "auto" since 0.2.0. A file the dialog made, or Open settings file made, holds the layout model's
-    line as a note while nobody chose it, also after other settings were saved: such a reader gets the new default.
-    A choice of "Not used" made in the dialog is a line of its own and stays."""
-    assert Settings().detect_model == "auto" and in_force.detect_model == "auto"
+def test_the_page_models_are_left_to_their_default_where_nobody_chose(hidden_root, in_force, monkeypatch):
+    """"auto" since 0.2.0: a file the dialog made, or Open settings file made, holds the page models' lines as notes
+    while nobody chose them, also after other settings were saved; a note sets nothing."""
+    assert Settings().detect_model == "auto" and Settings().art_erase == "auto"
     d = dlg.SettingsDialog(hidden_root, in_force)
-    assert d.detect.get() == _("Only with the inpainting")
     d.scale.set("125 %")
     assert d.save() is True
     text = in_force.config_path.read_text(encoding="utf-8")
-    assert not re.search(r"^detect_model\s*=", text, re.M) and re.search(r"^# detect_model = \"auto\"", text, re.M)
-    assert Settings.from_toml(in_force.config_path).detect_model == "auto"
+    for key in ("detect_model", "art_erase"):
+        assert not re.search(rf"^{key}\s*=", text, re.M) and re.search(rf'^# {key} = "auto"', text, re.M)
+    loaded = Settings.from_toml(in_force.config_path)
+    assert (loaded.detect_model, loaded.art_erase) == ("auto", "auto")
     opened = in_force.config_path.with_name("opened.toml")
     monkeypatch.setattr(dlg, "open_in_editor", lambda path: None)
     d.path = opened
     assert d.open_file() == opened and Settings.from_toml(opened).detect_model == "auto"
-    # an old file of the dialog's, its note naming the old default: a note sets nothing
     old = in_force.config_path.with_name("old.toml")
     old.write_text(NEW_FILE_HEADER + '\n# detect_model = "off"          # (opt-in for now)\nui_scale = 1.25\n',
                    encoding="utf-8")
     assert Settings.from_toml(old).detect_model == "auto"
-    loaded = Settings.from_toml(in_force.config_path).with_overrides(state_dir=in_force.state_dir,
-                                                                    models_dir=in_force.models_dir)
-    chosen = dlg.SettingsDialog(hidden_root, loaded)
-    chosen.detect.set(_("Not used"))
-    assert chosen.save() is True
-    assert re.search(r'^detect_model = "off"', in_force.config_path.read_text(encoding="utf-8"), re.M)
-    assert Settings.from_toml(in_force.config_path).detect_model == "off"
-
-
-def test_the_inpainting_row_says_when_this_computer_has_no_gpu(hidden_root, in_force, monkeypatch):
-    assert in_force.art_erase == "auto"  # the default: only with a GPU (the suite's computer has none)
-    d = dlg.SettingsDialog(hidden_root, in_force)
-    assert d.erase.get() == "Only with a GPU" and d.gpu_line_shown() and d.gpu_label.winfo_manager() == "grid"
-    assert str(d.gpu_label.cget("text")).replace("\n", " ") == dlg.NO_GPU_TEXT
-    d.erase.set(_("Always, also on the CPU"))
-    assert not d.gpu_line_shown() and d.gpu_label.winfo_manager() == ""
-    d.erase.set(_("Not used"))
-    assert d.gpu_label.winfo_manager() == ""
-    monkeypatch.setattr(artwork, "_cuda", True)  # a computer with a GPU: nothing to say
-    d.erase.set(_("Only with a GPU"))
-    assert not d.gpu_line_shown() and d.gpu_label.winfo_manager() == ""
-    assert dlg.SettingsDialog(hidden_root, in_force).gpu_label.winfo_manager() == ""
 
 
 # ------------------------------------------------------------------ on a low screen
@@ -363,10 +339,12 @@ def _outer_height(d) -> int:
 
 
 def _shown_rows():
-    return [StageDevice("detect", "gpu", "The layout model and the classical detectors", "NVIDIA Test GPU"),
-            StageDevice("ocr", "both", "The OCR readers", "NVIDIA Test GPU", share=0.6),
-            StageDevice("translate", "", "Ollama: qwen3.5:4b", why="Not loaded now: Ollama loads it for the first line"),
-            StageDevice("erase", "cpu", "The paper fill")]
+    return [StageDevice("detect", "gpu", ("comic-text-and-bubble-detector", "The classical detectors"),
+                        "NVIDIA Test GPU"),
+            StageDevice("ocr", "gpu", ("manga-ocr-charspot-small (GPU)", "manga-ocr-nar-small (GPU)",
+                                       "manga-ocr-base-CPT-flex (CPU)"), "NVIDIA Test GPU"),
+            StageDevice("translate", "", ("PLaMo 3 Translate 2B",), note="Not loaded now"),
+            StageDevice("erase", "cpu", ("The paper fill",))]
 
 
 @pytest.mark.parametrize("code", sorted(UI_LANGUAGES))
@@ -376,10 +354,11 @@ def test_on_a_low_screen_the_pages_scroll_and_the_dialog_with_its_buttons_stays_
     d = dlg.SettingsDialog(hidden_root, in_force)
     assert d.state() == "withdrawn"  # (out of sight: the tests' root is not on the screen)
     assert _outer_height(d) <= LOW[3]
-    for page in (d.general_tab, d.system_tab):  # the content whole, the canvas showing part of it
+    for page in (d.general_tab, d.system_tab):  # the content whole, the canvas showing part of it where it is taller
         height = page.content.winfo_reqheight()
-        assert page.scrolls() and page.canvas.winfo_reqheight() < height
+        assert page.scrolls() == (page.canvas.winfo_reqheight() < height)
         assert d.tk.splitlist(page.canvas.cget("scrollregion"))[3] == str(height)
+    assert d.general_tab.scrolls()  # (the System page, two settings under its list, may fit whole)
     d.system.look = _shown_rows  # the System page with its rows, as when it is shown
     d.system.refresh(wait=True)
     assert len(d.system.shown_rows) == 4 and _outer_height(d) <= LOW[3]
@@ -388,7 +367,7 @@ def test_on_a_low_screen_the_pages_scroll_and_the_dialog_with_its_buttons_stays_
     font = tkfont.nametofont("TkDefaultFont")  # every box of choices shows its longest choice whole
     zero = font.measure("0")
     boxes = [w for page in d.scrolled_pages() for w in _all(page.content) if w.winfo_class() == "TCombobox"]
-    assert len(boxes) >= 7
+    assert len(boxes) >= 3
     for box in boxes:
         longest = max(font.measure(str(v)) for v in d.tk.splitlist(box.cget("values")))
         assert longest <= int(box.cget("width")) * zero, (code, d.tk.splitlist(box.cget("values")))
@@ -447,8 +426,8 @@ def test_saved_settings_are_set_on_the_window_and_applied_at_once(hidden_root, t
     app_mod.App._settings_saved(w, {"hover_delay_ms": 900})  # nothing on the page changes
     assert w.settings.hover_delay_ms == 900 and done == []
     w.busy = True
-    app_mod.App._settings_saved(w, {"detect_model": "on"})
-    assert done == [("job", "rebuild")]  # a page under way: the next one is made with the new models
+    app_mod.App._settings_saved(w, {"uppercase": False})
+    assert done == [("job", "rebuild")]  # a page under way: the next one is lettered with the new settings
 
 
 def test_the_worker_makes_the_page_models_for_the_new_settings(tmp_path, monkeypatch):

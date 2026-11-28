@@ -71,7 +71,6 @@ from .book_areas import AreaMixin
 from .book_fields import BookFields, fields_committed, kept_name, refused_line
 from .font_memory import FontMemory
 from .dialogs.settings import PAGE_SETTINGS, SettingsDialog, warn_ignored
-from .gpu_release import apply_num_gpu
 from .history import EditHistory
 from .jobs import JobsMixin
 from .layout import (
@@ -630,14 +629,12 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
     def _settings_saved(self, changed: dict[str, Any]) -> None:
         """The Settings dialog saved *changed*: set on the settings the window and its pipeline share, and shown at
         once - the dialogs' text size and colours (the side panes take theirs from the viewer: its DPI and the ground
-        of its page), then (on the worker, before the page is translated again) the page models made for the new
-        choice and the pages of this session lettered anew."""
+        of its page), then (on the worker, before the page is translated again) the detectors made again and the pages
+        of this session lettered anew."""
         for key, value in changed.items():
             setattr(self.settings, key, value)
         if "ui_scale" in changed:
             self._dpi_watch.rescale()
-        if "ollama_num_gpu" in changed:  # (the translators send it from their next request on)
-            apply_num_gpu(self, changed["ollama_num_gpu"])
         if "theme" in changed:  # the dialogs take the new colours at once
             self._colours_again()
         if "see_through_indicators" in changed:  # (the banner's lines in the right pane or a dialog)

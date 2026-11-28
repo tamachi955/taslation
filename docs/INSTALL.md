@@ -18,7 +18,7 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 |---|---|---|
 | One screen showing one page (about 9 lines; without a GPU about 5) | about 3 s (1 to 5) | about 6 s (3 to 9) |
 | One screen showing two pages (about 18 lines) | about 6 s (4 to 12) | about 21 s (10 to 44) |
-| The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 9 s from the start; "Loading the models..." shows until then); with Load the translation model at start off, 4 to 5 s more | the same |
+| The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 9 s from the start; "Loading the models..." shows until then); with `load_model_at_start = false` in `taslation.toml`, 4 to 5 s more | the same |
 
 The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). The times run from the turn of the page until every line of the screen is lettered; the first bubble comes after about 0.7 s on a screen of one page and about 1 s on one of two (about 1.8 s without a GPU), because a page's lines go to the translator as they are read. They were measured with a viewer that draws the page sharp at once: a viewer that draws a page soft first adds that time. With the GPU, everything had room on it (docs/MANUAL.md, "What runs on the GPU"): the translation model, two of the three OCR readers, LaMa and the layout model.
 
@@ -78,13 +78,13 @@ and tells you to start Ollama from the Start menu or restart the PC (the setting
 open "Edit environment variables for your account", delete the variable and restart Ollama.
 
 The Ollama TASlation starts also gets the full window cache: `LLAMA_ARG_SWA_FULL=1`, and `LLAMA_ARG_CACHE_RAM=256` instead of `0`
-(the setting "Translator's window cache" in Settings... > System, `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
+(the setting `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
 (in TASlation's environment, or kept by Windows for this user or this computer) is passed on as it is.
 With it, llama.cpp keeps the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
-and keeps 256 MB of earlier requests in RAM. "On" (the default) uses it, "Off" does not.
+and keeps 256 MB of earlier requests in RAM. `"auto"` (the default) and `"on"` use it, `"off"` does not.
 The check of the GPU's memory as TASlation starts counts the translation model with the window cache (docs/MANUAL.md, "What runs on the GPU"):
 on a 6 GB GPU with the default settings it asks when other programs hold more than about 1.7 GB of it.
-Settings... > System and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
+The report (Menu > Copy a report) says in its `server` line whether the Ollama TASlation started has it.
 
 For an Ollama you run yourself, neither the installer nor TASlation sets these two variables. To use the window cache there,
 set `LLAMA_ARG_SWA_FULL=1` and `LLAMA_ARG_CACHE_RAM=256` for your account as above and restart Ollama; they apply to every model that Ollama runs.

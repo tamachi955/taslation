@@ -1,8 +1,9 @@
 """Where each stage of a page runs (`taslation.devices`): detection, OCR, the translator and the erase on "GPU (its
 name)" or "CPU" - the layout model and LaMa on the GPU only where torch has CUDA and they are in use, the classical
-detectors on the CPU, the OCR readers where `ocr.place` puts them (tests/test_ocr_place.py), Ollama's model where /api/ps says it is (all, none or a part in video memory,
-never loaded to find out) - with the seconds a page from the last pages lettered (`StageTimes`, kept in the state
-folder when TASlation closes); Settings... > System shows it and `taslation doctor` prints it."""
+detectors on the CPU, the OCR readers where `ocr.place` puts them (tests/test_ocr_place.py), Ollama's model where
+/api/ps says it is (all, none or a part in video memory, never loaded to find out) - and the models that run there by
+their public names; the seconds a page from the last pages lettered (`StageTimes`, kept in the state folder when
+TASlation closes). Settings... > System shows where and what, `taslation doctor` prints all of it."""
 
 from __future__ import annotations
 
@@ -26,10 +27,15 @@ from taslation.i18n import set_language
 from taslation.pipeline import Pipeline
 from taslation.render import artwork
 from taslation.translate import DictTranslator, OllamaTranslator, TranslationError
+from taslation.ui import theme
 from taslation.ui.dialogs import settings as dlg
+from taslation.ui.dialogs import system_page
 from taslation.ui.dialogs.system_page import SystemPage
 
 GPU = "NVIDIA Test GPU"
+LAYOUT = "comic-text-and-bubble-detector"
+CLASSICAL = ("The classical detectors",)
+FILL = ("The paper fill",)
 
 
 class Ps:
@@ -65,6 +71,15 @@ def _settings(tmp_path, **kw):
 
 def _by_stage(rows):
     return {r.stage: r for r in rows}
+
+
+def _all(widget):
+    found, stack = [], [widget]
+    while stack:
+        w = stack.pop(0)
+        found.append(w)
+        stack.extend(w.winfo_children())
+    return found
 
 
 # ------------------------------------------------------------------ the seconds a page
@@ -131,26 +146,26 @@ def test_without_cuda_everything_is_on_the_cpu(tmp_path, models):
     rows = _by_stage(stage_devices(settings, Ps({"size": 10, "size_vram": 0}), cuda=False))
     assert [r.stage for r in stage_devices(_settings(tmp_path), Ps(None), cuda=False)] == list(devices.STAGES)
     assert {s: r.device for s, r in rows.items()} == {"detect": "cpu", "ocr": "cpu", "translate": "cpu", "erase": "cpu"}
-    assert rows["detect"].what == "The layout model and the classical detectors"
-    assert rows["erase"].what == "LaMa on the drawing, the paper fill in the bubbles"  # "lama": on the CPU too
-    assert rows["detect"].where() == "CPU"
+    assert rows["detect"].models == (LAYOUT, *CLASSICAL)
+    assert rows["erase"].models == ("LaMa", *FILL)  # "lama": on the CPU too
+    assert rows["detect"].where() == "CPU" and rows["detect"].note == rows["erase"].note == ""
 
 
 def test_without_cuda_the_default_inpainting_is_the_paper_fill_and_auto_takes_no_layout_model(tmp_path, models):
     models.update(layout=True, lama=True)
     rows = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=False))  # the defaults: both "auto"
-    assert rows["erase"].device == "cpu" and rows["erase"].what == "The paper fill"
-    assert rows["detect"].device == "cpu" and rows["detect"].what == "The classical detectors"  # as before
+    assert rows["erase"].device == "cpu" and rows["erase"].models == FILL
+    assert rows["detect"].device == "cpu" and rows["detect"].models == CLASSICAL  # as before
     with_gpu = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=True, gpu=GPU))
-    assert with_gpu["erase"].where() == f"GPU ({GPU})"
+    assert with_gpu["erase"].where() == f"GPU ({GPU})" and with_gpu["erase"].models == ("LaMa", *FILL)
     assert with_gpu["detect"].where() == f"GPU ({GPU})"
-    assert with_gpu["detect"].what == "The layout model and the classical detectors"
+    assert with_gpu["detect"].models == (LAYOUT, *CLASSICAL)
     off = _by_stage(stage_devices(_settings(tmp_path, detect_model="off"), Ps(None), cuda=True, gpu=GPU))
-    assert off["detect"].what == "The classical detectors" and off["erase"].where() == f"GPU ({GPU})"
+    assert off["detect"].models == CLASSICAL and off["erase"].where() == f"GPU ({GPU})"
     models.update(layout=False, lama=False)  # a no to the two models at the installation: as before, GPU or none
     for cuda in (True, False):
         declined = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=cuda, gpu=GPU))
-        assert declined["detect"].what == "The classical detectors" and declined["erase"].what == "The paper fill"
+        assert declined["detect"].models == CLASSICAL and declined["erase"].models == FILL
 
 
 def test_the_system_page_and_the_pipeline_ask_torch_the_same_question(tmp_path, models, monkeypatch):
@@ -161,7 +176,7 @@ def test_the_system_page_and_the_pipeline_ask_torch_the_same_question(tmp_path, 
     monkeypatch.setattr(devices, "cuda_available", lambda: asked.append(1) or False)
     rows = _by_stage(stage_devices(_settings(tmp_path), Ps(None), gpu=""))
     stage_devices(_settings(tmp_path), Ps(None), gpu="")
-    assert rows["erase"].what == "The paper fill" and len(asked) == 1
+    assert rows["erase"].models == FILL and len(asked) == 1
 
 
 def test_with_cuda_the_page_models_in_use_are_on_the_gpu(tmp_path, models):
@@ -170,16 +185,17 @@ def test_with_cuda_the_page_models_in_use_are_on_the_gpu(tmp_path, models):
                                    Ps({"size": 100, "size_vram": 100}), cuda=True, gpu=GPU))
     assert rows["detect"].where() == f"GPU ({GPU})"
     assert rows["erase"].where() == f"GPU ({GPU})"
-    assert rows["translate"].where() == f"GPU ({GPU})" and rows["translate"].what == "Ollama: qwen3.5:4b"
-    # (the OCR readers: "auto" judges no facts in the tests, tests/conftest.py)
-    assert rows["ocr"].where() == "CPU" and rows["ocr"].what == "The OCR readers: the room on the GPU is not known"
+    assert rows["translate"].where() == f"GPU ({GPU})" and rows["translate"].models == ("Qwen3.5 4B",)
+    # (the OCR readers: "auto" judges no facts in the tests, tests/conftest.py; charspot alone in an empty folder)
+    assert rows["ocr"].where() == "CPU" and rows["ocr"].models == ("manga-ocr-charspot-small",)
+    assert rows["ocr"].note == "The room on the GPU is not known"
 
 
 def test_models_not_in_use_or_not_installed_leave_it_to_the_cpu(tmp_path, models):
     rows = _by_stage(stage_devices(_settings(tmp_path, detect_model="on", art_erase="auto"), Ps(None), cuda=True,
                                    gpu=GPU))
-    assert rows["detect"].device == "cpu" and rows["detect"].what == "The classical detectors"
-    assert rows["erase"].device == "cpu" and rows["erase"].what == "The paper fill"
+    assert rows["detect"].device == "cpu" and rows["detect"].models == CLASSICAL
+    assert rows["erase"].device == "cpu" and rows["erase"].models == FILL
     models.update(layout=True, lama=True)
     off = _by_stage(stage_devices(_settings(tmp_path, detect_model="off", art_erase="off"), Ps(None), cuda=True,
                                   gpu=GPU))
@@ -192,17 +208,27 @@ def test_models_not_in_use_or_not_installed_leave_it_to_the_cpu(tmp_path, models
     assert classic["erase"].device == "cpu"  # the classic erase has no LaMa
 
 
-@pytest.mark.parametrize("entry, device, where", [
-    ({"size": 100, "size_vram": 100}, "gpu", f"GPU ({GPU})"),
-    ({"size": 100, "size_vram": 0}, "cpu", "CPU"),
-    ({"size": 100, "size_vram": 60}, "both", "GPU and CPU (60 % on the GPU)"),
-    ({"size": 100}, "", "Ollama does not say"),
-    (None, "", "Not loaded now: Ollama loads it for the first line"),
-    (TranslationError("down"), "", "Ollama is not answering"),
+@pytest.mark.parametrize("entry, device, where, note", [
+    ({"size": 100, "size_vram": 100}, "gpu", f"GPU ({GPU})", ""),
+    ({"size": 100, "size_vram": 0}, "cpu", "CPU", ""),
+    ({"size": 100, "size_vram": 60}, "both", "GPU and CPU (60 % on the GPU)", ""),
+    ({"size": 100}, "", "-", "Ollama does not say"),
+    (None, "", "-", "Not loaded now"),
+    (TranslationError("down"), "", "-", "Ollama is not answering"),
 ])
-def test_ollama_s_model_is_where_api_ps_says(tmp_path, models, entry, device, where):
+def test_ollama_s_model_is_where_api_ps_says(tmp_path, models, entry, device, where, note):
     row = _by_stage(stage_devices(_settings(tmp_path), Ps(entry), cuda=True, gpu=GPU))["translate"]
-    assert (row.device, row.where()) == (device, where)
+    assert (row.device, row.where(), row.note, row.models) == (device, where, note, ("Qwen3.5 4B",))
+
+
+def test_the_translation_model_goes_by_the_name_the_reader_knows(tmp_path, models):
+    """PLaMo by its public name, not the tag TASlation gives it in Ollama; a model of the reader's own (the settings
+    name it) by Ollama's name."""
+    for model, shown in (("taslation-plamo3-translate-2b", "PLaMo 3 Translate 2B"),
+                         ("taslation-plamo3-translate-2b:latest", "PLaMo 3 Translate 2B"),
+                         ("qwen3.5:4b", "Qwen3.5 4B"), ("my-own-model:7b", "my-own-model:7b")):
+        row = _by_stage(stage_devices(_settings(tmp_path), Ps(None, model=model), cuda=False))["translate"]
+        assert row.models == (shown,) and devices.translator_name(model) == shown
 
 
 def test_a_translator_that_is_not_ollama_s_asks_for_the_settings_model(tmp_path, models):
@@ -217,7 +243,7 @@ def test_a_translator_that_is_not_ollama_s_asks_for_the_settings_model(tmp_path,
             assert row.device == "both" and row.share == pytest.approx(0.5)
             fake.loaded.clear()
             row = _by_stage(stage_devices(settings, OllamaTranslator(fake.url, "qwen3.5:4b"), cuda=False))["translate"]
-            assert row.why.startswith("Not loaded now") and fake.loads == 0  # asking loads nothing
+            assert row.note == "Not loaded now" and fake.loads == 0  # asking loads nothing
             assert not fake.requests  # nor sends a request that could
         finally:
             netguard.uninstall()
@@ -227,12 +253,12 @@ def test_the_doctor_s_lines(tmp_path, models):
     settings = _settings(tmp_path)
     out = lines(settings, StageTimes(), Ps({"size": 1, "size_vram": 1}), cuda=False)
     assert out[0] == "  Finding the text: CPU (The classical detectors); not timed yet"
-    assert out[2] == "  Translating: GPU (Ollama: qwen3.5:4b); not timed yet"  # no name known without CUDA in torch
+    assert out[2] == "  Translating: GPU (Qwen3.5 4B); not timed yet"  # no name known without CUDA in torch
     assert out[-1].startswith("  (seconds a page: none yet")
     times = StageTimes([{"detect": 0.25, "ocr": 1.5, "translate": 4.0, "erase": 0.5}])
     out = lines(settings, times, Ps(None), cuda=False)
-    assert out[1] == "  Reading the text (OCR): CPU (The OCR readers); 1.5 s a page"
-    assert out[2].startswith("  Translating: Not loaded now")
+    assert out[1] == "  Reading the text (OCR): CPU (manga-ocr-charspot-small); 1.5 s a page"
+    assert out[2] == "  Translating: - (Qwen3.5 4B; Not loaded now); 4.0 s a page"
     assert out[-1] == "  (seconds a page: the mean of the last 1 page(s) lettered)"
 
 
@@ -261,67 +287,83 @@ def test_the_gpu_name_needs_no_cuda_context(monkeypatch):
 def test_the_stage_names_are_in_the_window_s_language(tmp_path, models):
     set_language("ja")
     try:
-        assert StageDevice("ocr", "cpu", "x").where() == "CPU"
-        assert StageDevice("x", "both", "x", share=0.25).where() == "GPU と CPU（25 % が GPU）"
+        assert StageDevice("ocr", "cpu", ("x",)).where() == "CPU"
+        assert StageDevice("x", "both", ("x",), share=0.25).where() == "GPU と CPU（25 % が GPU）"
+        row = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=False))["translate"]
+        assert row.note == "今は読み込まれていません" and row.models == ("Qwen3.5 4B",)
         assert lines(_settings(tmp_path), StageTimes(), Ps(None), cuda=False)[0].startswith("  文字の検出: CPU (従来の検出)")
     finally:
         set_language("en")
 
 
 # ------------------------------------------------------------------ Settings... > System
+OCR_ON_GPU = ("manga-ocr-charspot-small (GPU)", "manga-ocr-nar-small (GPU)", "manga-ocr-base-CPT-flex (CPU)")
+
+
 def _rows():
-    return [StageDevice("detect", "gpu", "The layout model and the classical detectors", GPU),
-            StageDevice("ocr", "cpu", "The OCR readers"),
-            StageDevice("translate", "", "Ollama: qwen3.5:4b", why="Not loaded now: Ollama loads it for the first line"),
-            StageDevice("erase", "cpu", "The paper fill")]
+    return [StageDevice("detect", "gpu", (LAYOUT, *CLASSICAL), GPU),
+            StageDevice("ocr", "gpu", OCR_ON_GPU, GPU),
+            StageDevice("translate", "", ("PLaMo 3 Translate 2B",), note="Not loaded now"),
+            StageDevice("erase", "cpu", FILL)]
 
 
-def test_the_system_page_lists_the_stages_with_the_window_s_seconds(hidden_root, tmp_path):
+def test_the_system_page_lists_the_stages_with_where_they_run_and_their_models(hidden_root, tmp_path):
     times = StageTimes([{"detect": 0.5, "ocr": 2.0, "erase": 0.25}])
     page = SystemPage(hidden_root, _settings(tmp_path), 400, pipeline=lambda: SimpleNamespace(stage_times=times),
                       look=_rows)
     assert not page.shown_rows and not page._cells  # nothing looked at before it is shown
     page.refresh(wait=True)
     assert page.shown_rows == [
-        ("Finding the text", f"GPU ({GPU})", "The layout model and the classical detectors", "0.5 s"),
-        ("Reading the text (OCR)", "CPU", "The OCR readers", "2.0 s"),
-        ("Translating", "Not loaded now: Ollama loads it for the first line", "Ollama: qwen3.5:4b", "-"),
-        ("Erasing and lettering", "CPU", "The paper fill", "0.2 s")]
+        ("Finding the text", f"GPU ({GPU})", f"{LAYOUT}\nThe classical detectors", ""),
+        ("Reading the text (OCR)", f"GPU ({GPU})", "\n".join(OCR_ON_GPU), ""),
+        ("Translating", "-", "PLaMo 3 Translate 2B", "Not loaded now"),
+        ("Erasing and lettering", "CPU", "The paper fill", "")]
+    headings = sorted(str(w.cget("text")) for w in page.table.grid_slaves(row=0))
+    assert headings == ["Model", "Runs on", "Stage"]  # (the seconds a page are not on the page: Copy a report has them)
     note = page.note_var.get().replace("\n", " ")
-    assert "the mean of the last 1 pages" in note and "NVIDIA" in note
+    assert note == "Only an NVIDIA GPU with CUDA counts here; nothing is loaded to find out."
     assert str(page.again_btn.cget("state")) == "normal" and page.state_var.get() == ""
+    cell = page.table.grid_slaves(row=3, column=2)[0]  # the translator's: its name, the note under it in grey
+    name, line = cell.winfo_children()
+    assert str(name.cget("text")) == "PLaMo 3 Translate 2B" and str(line.cget("text")) == "Not loaded now"
+    assert str(line.cget("foreground")) == str(theme.colour("note"))
+
+
+def test_below_the_list_only_the_start_short_of_memory_and_the_update_check(hidden_root, tmp_path):
+    page = SystemPage(hidden_root, _settings(tmp_path, gpu_short="processor"), 400, look=_rows)
+    checks = [w for w in _all(page) if w.winfo_class() == "TCheckbutton"]
+    assert [str(c.cget("text")).replace("\n", " ") for c in checks] == [system_page.GPU_SHORT_LABEL,
+                                                                        system_page.UPDATE_CHECK_LABEL]
+    assert not [w for w in _all(page) if w.winfo_class() in ("TCombobox", "TEntry", "TSpinbox")]
+    assert (page.gpu_short_value(), page.update_check_value()) == ("processor", "off")
 
 
 def test_long_names_take_another_line_instead_of_running_off_the_page(hidden_root, tmp_path):
     long_gpu = "NVIDIA GeForce RTX 4090 Laptop GPU with a long name"
-    rows = [StageDevice("detect", "gpu", "The layout model and the classical detectors", long_gpu),
-            StageDevice("ocr", "cpu", "The OCR readers"),
-            StageDevice("translate", "both", "Ollama: a-reader-s-own-model-with-a-very-long-name:latest", long_gpu, 0.4),
-            StageDevice("erase", "cpu", "The paper fill")]
+    rows = [StageDevice("detect", "gpu", (LAYOUT, *CLASSICAL), long_gpu),
+            StageDevice("ocr", "cpu", ("manga-ocr-charspot-small",)),
+            StageDevice("translate", "both", ("a-reader-s-own-model-with-a-very-long-name:latest",), long_gpu, 0.4),
+            StageDevice("erase", "cpu", FILL)]
     page = SystemPage(hidden_root, _settings(tmp_path), 360, look=lambda: rows)
     page.refresh(wait=True)
     page.update_idletasks()
     assert page.table.winfo_reqwidth() <= 360
-    texts = [w.cget("text") for cell in page._cells for w in (cell.winfo_children() or [cell])]
-    assert any(len(str(text).splitlines()) > 1 and "NVIDIA" in str(text) for text in texts)
+    texts = [str(w.cget("text")) for cell in page._cells for w in (cell.winfo_children() or [cell])]
+    assert any(len(text.splitlines()) > 1 and "NVIDIA" in text for text in texts)
+    assert any(len(text.splitlines()) > 1 and "a-reader-s-own" in text for text in texts)
 
 
-def test_the_seconds_column_takes_room_for_its_heading_from_the_middle_one():
+def test_the_three_columns_share_the_page():
     from taslation.ui.dialogs.system_page import GAP, column_widths
 
-    plain = column_widths(400, 10)
-    assert sum(plain) == 400 - 3 * GAP
-    wide = column_widths(400, 110)
-    assert wide[0] == plain[0] and wide[2] > plain[2] and sum(wide) == sum(plain)
-    assert column_widths(400, 1000)[2] == int(400 * 0.32)  # never more than a third or so of the page
+    widths = column_widths(400)
+    assert sum(widths) == 400 - 3 * GAP and widths[2] == max(widths)  # (the models' the widest)
 
 
-def test_the_system_page_falls_back_to_the_kept_seconds_and_says_a_failure(hidden_root, tmp_path):
-    settings = _settings(tmp_path)
-    StageTimes([{"ocr": 3.0}]).save(settings.state_dir)
-    page = SystemPage(hidden_root, settings, 400, pipeline=lambda: None, look=_rows)
+def test_the_system_page_says_a_failure_to_look(hidden_root, tmp_path):
+    page = SystemPage(hidden_root, _settings(tmp_path), 400, pipeline=lambda: None, look=_rows)
     page.refresh(wait=True)
-    assert page.shown_rows[1][3] == "3.0 s"
+    assert len(page.shown_rows) == 4
 
     def broken():
         raise OSError("no")
@@ -329,10 +371,9 @@ def test_the_system_page_falls_back_to_the_kept_seconds_and_says_a_failure(hidde
     page.look = broken
     page.refresh(wait=True)
     assert not page.shown_rows and not page._cells and page.state_var.get() == "Could not look: OSError"
-    (settings.state_dir / TIMINGS_FILE).unlink()
     page.look = _rows
     page.refresh(wait=True)
-    assert page.note_var.get().startswith("Seconds a page: none yet")
+    assert len(page.shown_rows) == 4 and page.state_var.get() == ""
 
 
 def test_the_system_page_looks_on_a_thread_once_shown(hidden_root, tmp_path):

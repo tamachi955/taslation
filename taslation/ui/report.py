@@ -72,8 +72,8 @@ SCREEN_KEYS = ("monitor", "viewer", "viewer_known", "viewer_window", "viewer_cli
 PANES_KEYS = ("left", "right", "lettering_window", "lettering", "takes_mouse", "insert_key", "foreground",
               "foreground_line", "keys_guard", "hidden_root")
 PROGRAM_KEYS = ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_language", "target_language", "mode",
-                "translator", "ocr", "layout_model", "inpainting", "server", "offline_guard", "settings_changed",
-                "last_error")
+                "translator", "ocr", "layout_model", "inpainting", "stage_seconds", "server", "offline_guard",
+                "settings_changed", "last_error")
 LOG_KEYS = ("problem",)
 ANALYSIS_KEYS = ("table", "cut")
 SECTIONS = ("region", "page", "screen", "panes", "program", "log", "analysis")
@@ -588,6 +588,9 @@ def _models(app: Any) -> dict[str, str]:
     model = getattr(translator, "model", "") or getattr(settings, "ollama_model", "?")
     where = getattr(app, "_compute_where", "") or "not loaded yet"
     out["translator"] = f"{model}; on {where}"
+    tally = getattr(pipeline, "line_tally", None)  # (`linememo.Tally`: counts only)
+    if tally is not None and tally.reused + tally.asked:
+        out["translator"] += f"; short lines reused {tally.reused} of {tally.reused + tally.asked}"
     ocr = getattr(pipeline, "ocr", None)
     if ocr is None:
         out["ocr"] = "not loaded"
@@ -605,7 +608,25 @@ def _models(app: Any) -> dict[str, str]:
                          f"{getattr(eraser, 'setting', '?')}; "
                          f"{'failed' if getattr(eraser, 'failed', False) else 'GPU' if _get(eraser.uses_gpu, False) else 'processor'}; "
                          f"regions {getattr(eraser, 'counts', {})}")
+    out["stage_seconds"] = _get(lambda: stage_seconds(app), "not known")
     return out
+
+
+def stage_seconds(app: Any) -> str:
+    """The seconds a page of each stage (`devices.StageTimes.per_page`): this session's, else those kept when the
+    window last closed; "none yet" without either."""
+    from .. import devices
+
+    times = getattr(getattr(app, "pipeline", None), "stage_times", None)
+    source = "this session"
+    if times is None or not len(times):
+        times = devices.StageTimes.load(app.settings.state_dir)
+        source = "kept when TASlation last closed"
+    if not len(times):
+        return "none yet"
+    per = times.per_page()
+    stages = ", ".join(f"{stage} {per[stage]:.2f} s" for stage in devices.STAGES if stage in per)
+    return f"{stages} a page; the mean of {len(times)} page(s), {source}"
 
 
 def program_lines(app: Any) -> list[str]:
@@ -636,6 +657,8 @@ def program_lines(app: Any) -> list[str]:
     setup = _get(lambda: setup_of(url, getattr(settings, "state_dir", None)), None)
     cloud = ("its own settings" if setup is None else "cloud features off" if setup.no_cloud
              else "cloud features not turned off")  # (TASlation tells only the server it starts: `ollama_start`)
+    if setup is not None:  # (what the server got of the window cache: ``ollama_window_cache``)
+        cloud += f"; window cache {'on' if setup.full_window else 'off'}"
     lines.add("server", f"{'started by TASlation' if ours else 'not started by TASlation'}; {cloud}; "
                         f"{_get(lambda: errorlog.ollama_line(port), 'not asked')}")
     lines.add("offline_guard", errorlog.guard_line())

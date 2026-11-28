@@ -3,8 +3,8 @@
 in the status line, the page models warmed beside it and "Loading the models..." (`_watch_loads`) until both are over;
 one load with the page that needs the model meanwhile (which then says that it loads); nothing with the setting off (the first line loads it, as before), with ``ollama_keep_alive`` "0",
 with Ollama down or the model missing; a load that fails says nothing; Release the model now waits for it and nothing
-loads after it; the window's close ends it. And the setting's row on the Settings dialog's System page. Against a
-stand-in Ollama for PLaMo: the machine's own Ollama is never asked anything."""
+loads after it; the window's close ends it. And the setting read from the file alone (the Settings dialog does not hold
+it). Against a stand-in Ollama for PLaMo: the machine's own Ollama is never asked anything."""
 from __future__ import annotations
 
 import importlib.machinery
@@ -21,12 +21,9 @@ import pytest
 
 from taslation import netguard
 from taslation.config import Settings
-from taslation.i18n import FEATURE_LANGUAGES
-from taslation.locales.features import start_and_stop as texts
 from taslation.translate.models import PLAMO
 from taslation.ui import gpu_release, jobs
 from taslation.ui.dialogs import settings as dlg
-from taslation.ui.dialogs import system_page
 
 MODEL = PLAMO.ollama_name
 
@@ -440,18 +437,16 @@ def test_the_setting_is_on_by_default_and_read_from_the_file(tmp_path):
     assert jobs.loads_at_start(Settings()) and not jobs.loads_at_start(Settings(load_model_at_start=False))
 
 
-def test_the_system_page_shows_and_saves_the_setting(hidden_root, tmp_path, monkeypatch):
+def test_the_setting_is_the_settings_file_s_alone(hidden_root, tmp_path, monkeypatch):
+    """``load_model_at_start`` left the System page: the dialog neither shows nor writes it, and a file's value
+    stays."""
     monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
-    in_force = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
-                        config_path=tmp_path / "taslation.toml")
+    path = tmp_path / "taslation.toml"
+    path.write_text("load_model_at_start = false\n", encoding="utf-8")
+    in_force = Settings.from_toml(path).with_overrides(state_dir=tmp_path / "state", models_dir=tmp_path / "models")
     got = []
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert d.system.load_at_start.get() is True and d.values()["load_model_at_start"] is True
-    d.system.load_at_start.set(False)
-    assert d.save() is True and got == [{"load_model_at_start": False}]
-    assert Settings.from_toml(in_force.config_path).load_model_at_start is False
-
-
-def test_the_strings_are_in_every_language():
-    for key in (system_page.LOAD_AT_START_LABEL, system_page.LOAD_AT_START_TEXT):
-        assert sorted(texts.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+    assert "load_model_at_start" not in d.values() and not hasattr(d.system, "load_at_start")
+    d.uppercase.set(True)
+    assert d.save() is True and got == [{"uppercase": True}]
+    assert Settings.from_toml(path).load_model_at_start is False

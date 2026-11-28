@@ -8,22 +8,20 @@ for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book ma
 slanted lettering; Fitting lettering into bubbles (``fit_tries``, `FIT_ROWS`: the line turned 90 degrees, narrower
 letters, hyphens and running over the bubble's outline, each ticked or not, in the order tried, moved with the arrows
 beside it) with the smallest size under them; the dialogs' text size (`ui_scale`, `ui.scaling`) and colours (`theme`,
-`ui.theme`: as Windows is set, light or dark, said to wait while Windows' high contrast is on); the two optional page models
-(`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither says where its
-training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
-GPU, always): "Only with a GPU" is the default, and where the rule (`artwork.runs_here`) finds no GPU on this computer
-the row says it is not used here (`NO_GPU_TEXT`). The layout model has three too (`DETECT_CHOICES`: not used, only
-with the inpainting, always): "Only with the inpainting" is the default, so it goes where the inpainting goes. Save
-writes only what was changed, so a choice never made is never written and a later default applies to it.
+`ui.theme`: as Windows is set, light or dark, said to wait while Windows' high contrast is on). Save writes only what
+was changed, so a choice never made is never written and a later default applies to it.
 
-Two pages (a notebook): General, those settings; System,
-what each stage of a page runs on and the seconds a page there (`system_page.SystemPage`, looked at when first
-shown), how many of the translation model's layers Ollama puts on the GPU (``ollama_num_gpu``), whether the window
-loads that model at its start (``load_model_at_start``), where the OCR readers run (``ocr_runs_on``), what a start
-short of GPU memory does (``gpu_short``), the window
-cache of the Ollama TASlation starts (``ollama_window_cache``) and whether the window looks for a new version at its
-start (``update_check``), saved with the others. Each page scrolls where the whole dialog would be taller than the
-screen leaves room for (`ScrolledPage`), so that Save and Close stay on the screen.
+Two pages (a notebook): General, those settings; System, what each stage of a page runs on and with which models
+(`system_page.SystemPage`, looked at when first shown), what a start short of GPU memory does (``gpu_short``) and
+whether the window looks for a new version at its start (``update_check``), saved with the others. Each page scrolls
+where the whole dialog would be taller than the screen leaves room for (`ScrolledPage`), so that Save and Close stay
+on the screen.
+
+The optional page models (``detect_model``, ``art_erase``) are not chosen here: the program uses them where the
+computer has a GPU TASlation can use and they are installed (the defaults, "auto"), and the settings file may say
+otherwise (taslation.toml.example). Nor are the translation model's layers on the GPU (``ollama_num_gpu``), its load at
+the start (``load_model_at_start``), where the OCR readers run (``ocr_runs_on``) and the window cache of the Ollama
+TASlation starts (``ollama_window_cache``): the file alone holds them, and a file that has them loads as ever.
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
 `Settings` has the key, written and applied like the others. A whole number is one line in `NUMBER_ROWS` (a
@@ -49,8 +47,6 @@ from typing import Any, Callable
 from ...config import (
     FIT_TRIES,
     HOVER_DELAY_RANGE,
-    LAMA_MODEL,
-    LAYOUT_MODEL,
     ConfigError,
     Settings,
     create_settings_file,
@@ -58,7 +54,6 @@ from ...config import (
     write_settings,
 )
 from ...i18n import _, load_ui_table, save_ui_entry
-from ...render import artwork
 from ...render.typeset import CONDENSE_STEPS
 from .. import theme
 from ..layout import dialog_area, frame_extents, place_window, work_area
@@ -177,18 +172,14 @@ def whole_number(text: str) -> int | str:
 
 SHOWN_ROWS = shown_rows()
 SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
-# (ollama_num_gpu, load_model_at_start, ocr_runs_on, gpu_short, ollama_window_cache and update_check: on the System
-# page, `system_page.SystemPage.num_gpu`, `load_at_start`, `ocr_runs_on`, `gpu_short`, `window_cache` and
-# `update_check`)
+# (gpu_short and update_check: on the System page, `system_page.SystemPage.gpu_short` and `update_check`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text",
-        "fit_tries", "ui_scale", "theme", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
-        *dict.fromkeys(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
-        "gpu_short",
-        "ollama_window_cache", "update_check")
+        "fit_tries", "ui_scale", "theme", *(row.key for row in SHOWN_ROWS),
+        *dict.fromkeys(row.key for row in SHOWN_NUMBERS), "gpu_short", "update_check")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
-PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "fit_tries", "detect_model",
-                           "art_erase", *(row.key for row in SHOWN_ROWS if row.page)})
+PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "fit_tries",
+                           *(row.key for row in SHOWN_ROWS if row.page)})
 # Fitting lettering into bubbles (``fit_tries``, `render.typeset.fitted_frame`): a row for each try there is (label,
 # tip), ticked where it is tried, in the order tried (the arrows beside it move it), and the smallest size under them;
 # the words: `locales/features/fitting.py`
@@ -225,9 +216,6 @@ def fit_order(tries: tuple[str, ...]) -> list[str]:
 # the lettering sizes offered: 80 % to 130 % by 5, then on to 200 % by 10 (`config.TEXT_SCALE_RANGE`)
 TEXT_SCALES = (*(round(0.8 + 0.05 * i, 2) for i in range(11)), *(round(1.4 + 0.1 * i, 2) for i in range(7)))
 SIZE_RANGE = (0, 200)  # what a size box steps through (the bounds are checked on Save: `size_problem`)
-DETECT_CHOICES = (("off", "Not used"), ("auto", "Only with the inpainting"), ("on", "Always used"))
-# art_erase's three values (`artwork.runs_here`): never; only where torch has a CUDA GPU (the default); always, the CPU too
-ERASE_CHOICES = (("off", "Not used"), ("auto", "Only with a GPU"), ("lama", "Always, also on the CPU"))
 # the dialogs' colours (`theme`: applied at once by `App._settings_saved`; the panes take the viewer's); the words:
 # `locales/features/window_theme.py`
 THEME_CHOICES = (("system", "As Windows is set"), ("light", "Light"), ("dark", "Dark"))
@@ -238,12 +226,6 @@ CONTRAST_TEXT = "Windows' high contrast is on: the dialogs take Windows' colours
 TEXT_CHARS = 58  # the dialog's sentences are broken at so many "0" widths of its font: as many words at any scale
 PAGE_LEAST = 160  # the least height a page keeps on a screen too low for the rest of the dialog (pixels)
 IGNORED_TABLE, IGNORED_ENTRY = "settings", "ignored"  # where ui.json keeps the unknown keys named last
-PAGE_MODELS_TEXT = ("Two optional models: a layout model (comic-text-and-bubble-detector, tagged Apache-2.0) that "
-                    "finds lettering on the drawing that the usual detection misses, and an inpainting model (LaMa, "
-                    "MIT) that takes lettering out of the drawing. Neither says where its training images come from. "
-                    "Both are on by default where the computer has a GPU TASlation can use and they are installed; "
-                    "the layout model is used only together with the inpainting. TASlation works without them.")
-NO_GPU_TEXT = "Not used on this computer: it has no GPU that TASlation can use (NVIDIA, with CUDA)."
 
 
 def scale_label(scale: float) -> str:
@@ -280,11 +262,6 @@ def size_problem(low: int, high: int, readable: int) -> str | None:
     if low < 4 or high < low or (readable and not low <= readable <= high) or readable < 0:
         return _("The sizes do not fit together: the smallest at least 4, the largest at least the smallest, and the review size 0 or between the two.")
     return None
-
-
-def page_models_installed(models_dir: Path | str) -> bool:
-    """Whether both optional page models are in the models folder (nothing is imported for it)."""
-    return not LAYOUT_MODEL.missing(Path(models_dir)) and not LAMA_MODEL.missing(Path(models_dir))
 
 
 def open_in_editor(path: Path) -> None:
@@ -364,7 +341,7 @@ class ScrolledPage(ttk.Frame):
 class SettingsDialog(tk.Toplevel):
     """The settings of `KEYS` for *settings* (the window's own object: what is saved is set on it by *on_saved*, the
     changed settings by name) on the General page, where the stages run on the System page (*pipeline* gives the
-    window's pipeline, for its translator and its seconds a page), the file the settings are written to
+    window's pipeline, for its translator and its OCR readers), the file the settings are written to
     (`config.settings_file`) in a read-only line, Open settings file, Save and Close. ``message`` holds what the last Save or Open said. Not
     modal: the window goes on behind it. Where the whole dialog would be taller than the screen's work area under
     the window, the pages scroll (`ScrolledPage`, `_fit`), so that the buttons stay on the screen."""
@@ -465,28 +442,6 @@ class SettingsDialog(tk.Toplevel):
             ttk.Label(window, text=in_lines(_(CONTRAST_TEXT), self.text_width), justify="left").grid(
                 row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self._extra_rows(window, "window", 4)
-
-        models = ttk.LabelFrame(general, text=_("Optional page models"), padding=8)
-        models.pack(fill="x", pady=(10, 0))
-        ttk.Label(models, text=in_lines(_(PAGE_MODELS_TEXT), self.text_width), justify="left").grid(
-            row=0, column=0, columnspan=2, sticky="w")
-        self.detect = tk.StringVar(self, value=self._shown(DETECT_CHOICES, settings.detect_model))
-        self.erase = tk.StringVar(self, value=self._shown(ERASE_CHOICES, settings.art_erase))
-        for row, (word, var, choices) in enumerate((("Layout model:", self.detect, DETECT_CHOICES),
-                                                    ("Inpainting:", self.erase, ERASE_CHOICES)), start=1):
-            ttk.Label(models, text=_(word)).grid(row=row, column=0, sticky="w", pady=(4, 0))
-            shown = [_(label) for _value, label in choices]
-            box = ttk.Combobox(models, textvariable=var, values=shown, state="readonly", width=box_chars(shown))
-            box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
-        self.gpu_label = ttk.Label(models, text=in_lines(_(NO_GPU_TEXT), self.text_width), justify="left")
-        self.gpu_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        self.erase.trace_add("write", lambda *_a: self._show_gpu_line())
-        self._show_gpu_line()
-        installed = page_models_installed(settings.models_dir)
-        self.models_line = (_("Installed on this computer.") if installed else
-                            _("Not installed on this computer: run install.cmd again and agree to them."))
-        ttk.Label(models, text=in_lines(self.models_line, self.text_width), justify="left").grid(
-            row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.general_tab.hold(general)
         self.system = SystemPage(self.system_tab.canvas, settings, self.text_width, pipeline=pipeline)
@@ -674,17 +629,6 @@ class SettingsDialog(tk.Toplevel):
     def _value(choices: tuple[tuple[str, str], ...], shown: str) -> str:
         return next((v for v, label in choices if _(label) == shown), choices[0][0])
 
-    def gpu_line_shown(self) -> bool:
-        """Whether the Inpainting row says that it is not used on this computer: "Only with a GPU" is chosen and the
-        rule (`artwork.runs_here`) finds no GPU here, as the System page counts one (torch asked once, and only now)."""
-        return self._value(ERASE_CHOICES, self.erase.get()) == "auto" and not artwork.runs_here("auto")
-
-    def _show_gpu_line(self) -> None:
-        if self.gpu_line_shown():
-            self.gpu_label.grid()
-        else:
-            self.gpu_label.grid_remove()
-
     def values(self) -> dict[str, Any]:
         """What the fields say, by setting; ValueError for a size that is no whole number."""
         out: dict[str, Any] = {key: int(var.get().strip()) for key, var in self.sizes.items()}
@@ -694,8 +638,6 @@ class SettingsDialog(tk.Toplevel):
         out["fit_tries"] = self.fit_tries()
         out["ui_scale"] = scale_of(self.scale.get())
         out["theme"] = self._value(THEME_CHOICES, self.colours_var.get())
-        out["detect_model"] = self._value(DETECT_CHOICES, self.detect.get())
-        out["art_erase"] = self._value(ERASE_CHOICES, self.erase.get())
         for spec in SHOWN_ROWS:  # (a row not shown: as it is in force)
             var = self.extra.get(spec.key)
             if var is None:
@@ -705,11 +647,7 @@ class SettingsDialog(tk.Toplevel):
         for spec in SHOWN_NUMBERS:  # (as typed when it is no whole number: `number_problem` says so on Save)
             var = self.numbers.get(spec.key)
             out[spec.key] = getattr(self.settings, spec.key) if var is None else whole_number(var.get())
-        out["ollama_num_gpu"] = self.system.num_gpu_value()  # (the System page's box, as typed when it is none)
-        out["load_model_at_start"] = bool(self.system.load_at_start.get())
-        out["ocr_runs_on"] = self.system.ocr_runs_on_value()
         out["gpu_short"] = self.system.gpu_short_value()
-        out["ollama_window_cache"] = self.system.window_cache_value()
         out["update_check"] = self.system.update_check_value()
         return out
 
@@ -737,7 +675,7 @@ class SettingsDialog(tk.Toplevel):
             problem = size_problem(-1, -1, -1)
         else:
             problem = (size_problem(values["min_font_size"], values["max_font_size"], values["readable_font_size"])
-                       or self.number_problem(values) or self.system.num_gpu_problem())
+                       or self.number_problem(values))
         if problem:
             self._say(problem, error=True)
             return False

@@ -1,6 +1,5 @@
 """Menu > Release the model now (`release_now`): the GPU memory TASlation's own models hold given back at once, for a
-game or another program, without closing the window; and the layers on the GPU (``ollama_num_gpu``) set on the
-window's translators when the Settings dialog saved them (`apply_num_gpu`).
+game or another program, without closing the window.
 
 What goes:
 
@@ -142,19 +141,5 @@ def release_now(window: Any) -> bool:
     return True
 
 
-def apply_num_gpu(window: Any, value: Any) -> None:
-    """The Settings dialog saved ``ollama_num_gpu`` (*value*): every translator of the window sends it from the next
-    request on (a model Ollama holds with other layers may be loaded again for it); a value that is none leaves them
-    as they are."""
-    from ..translate.ollama import num_gpu_value
-
-    try:
-        layers = num_gpu_value(value)
-    except ValueError:
-        return
-    for translator in translators(window):
-        translator.num_gpu = layers
-
-
-__all__ = ["RELEASE_ENTRY", "apply_num_gpu", "in_use", "ocr_holds_gpu", "release_models", "release_now",
+__all__ = ["RELEASE_ENTRY", "in_use", "ocr_holds_gpu", "release_models", "release_now",
            "released_line", "translators"]

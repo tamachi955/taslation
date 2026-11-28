@@ -14,9 +14,9 @@ ollama_timeout = 900.0
 ollama_temperature = 0.2
 ollama_num_ctx = 16384        # the chat translator's context window (0 = server default); PLaMo has its own (8192)
 ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); TASlation's start (load_model_at_start) or the first line to translate loads it, Menu > Release the model now or quitting TASlation releases it. "-1": load it at the start and never unload
-load_model_at_start = true    # TASlation loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; also Settings... > System). false: the first line to translate loads it
-ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Settings... > System). Menu > Release the model now gives the GPU memory back at once
-ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto" (the default) and "on": with it; "off": as before (also Settings... > System; from Ollama's next start)
+load_model_at_start = true    # TASlation loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; set here only). false: the first line to translate loads it
+ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (set here only). Menu > Release the model now gives the GPU memory back at once
+ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto" (the default) and "on": with it; "off": as before (set here only; from Ollama's next start; Menu > Copy a report says which the running one has)
 target_language = "English"
 context_pages = 2             # live mode: previous pages given to the model as context (memory only; PLaMo's earlier
                               # lines grow to 60 and are cut back to the newest 20; 0: none)
@@ -27,8 +27,8 @@ context_pairs = 40            # previous (source, translation) pairs carried int
 # --- OCR ---
 # models_dir = "C:/path/to/models"   # where setup_models.py put the OCR model (default: ./models)
 ocr_threads = 0               # threads for the OCR model (0 = one per core); while other programs keep the CPU busy, half the cores can be faster
-ocr_runs_on = "auto"          # "auto": two of the OCR readers where the check at the start puts them (the GPU when everything fits); "cpu"; "gpu"
-gpu_short = "ask"             # when the GPU's memory is short at the start: "ask" (a dialog), or "processor" (what does not fit runs on the processor, without asking)
+ocr_runs_on = "auto"          # "auto": two of the OCR readers where the check at the start puts them (the GPU when everything fits); "cpu"; "gpu" (set here only; Settings... > System shows where they run)
+gpu_short = "ask"             # when the GPU's memory is short at the start: "ask" (a dialog), or "processor" (what does not fit runs on the processor, without asking; also Settings... > System)
 
 # --- detection ---
 white_threshold = 225
@@ -44,7 +44,7 @@ split_joined_bubbles = true   # bubbles that touch or overlap (one white area): 
 take_columns_beyond = false   # dark bubbles: also read a column that goes on past the interior on the bubble's own black
 slant_text = true             # lettering set at a slant: measured, read turned upright and lettered at its slant (false: all upright)
 translate_sfx = true          # translate short katakana sound effects found outside bubbles
-detect_model = "auto"         # the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs too: with its "auto", only on a computer with a GPU and both page models installed; elsewhere classical alone), "on" or "off" (classical alone, the default of earlier versions)
+detect_model = "auto"         # the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs too: with its "auto", only on a computer with a GPU and both page models installed; elsewhere classical alone), "on" or "off" (classical alone, the default of earlier versions); set here only
 margins = [0, 0, 0, 0]        # left, top, right, bottom pixels of the capture to ignore ("Set area" in the GUI)
 
 # --- rendering ---
@@ -60,7 +60,7 @@ enforce_terms = true         # a translation that misses a rendering from the se
 uppercase = false
 size_emphasis = true          # the part of a bubble the original letters larger is set larger in the translation too, where it is found there (one or two requests beside the page's for such a bubble; the words never change) and the bubble holds both sizes; false: every translation at one size
 erase_mode = "fill"           # "fill": the bubble's own paper, flat or along its shading, within its outline; "inpaint": the lettering inpainted (keeps toned bubble interiors); "classic": the erase of before 2026-10-30 (one flat colour, lettering told by light and dark alone)
-art_erase = "auto"            # with "fill", lettering on the drawing is inpainted by LaMa, once its model is installed: "auto" only where PyTorch has a CUDA GPU (elsewhere the erase is as with "off"), "lama" always, on the CPU too (about 4 s a screen), or "off"
+art_erase = "auto"            # with "fill", lettering on the drawing is inpainted by LaMa, once its model is installed: "auto" only where PyTorch has a CUDA GPU (elsewhere the erase is as with "off"), "lama" always, on the CPU too (about 4 s a screen), or "off"; set here only
 
 # --- translation cache (translated text + bubble geometry + page fingerprints; never images) ---
 # state_dir = "~/.taslation"
@@ -88,6 +88,6 @@ auto_interval_ms = 700
 see_through_indicators = true # the pane at the right edge of the viewer's area - the bubble last under the pointer (its original, its translation, Copy and Ask again) and the indicators; off, neither shows (the switch in the controls at the left, or Settings..., keeps the choice here)
 hover_delay_ms = 450          # how long the pointer rests on a bubble's lettering before it gives way to the original under it (0-3000; 0: at once)
 follow = "events"             # "events": the viewer is captured every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
-update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... in the Menu asks, when you choose it; also Settings...
+update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... in the Menu asks, when you choose it; also Settings... > System
 analysis_log = "auto"         # the session's analysis log in the state folder (analysis.jsonl: what each page cost and what each step changed, numbers only - no text, no titles, no pictures): "auto" writes it when TASlation runs from a source checkout and never in an installed copy; "on" or "off" force either
 debug = false

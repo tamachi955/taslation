@@ -1,5 +1,5 @@
 """The window's strings for line reuse (`taslation.linememo`): the region editor's note on a translation reused from
-an identical line before it, and the System page's count of the lines reused this session."""
+an identical line before it (the count of the lines reused this session is in Copy a report: `ui.report`)."""
 
 from __future__ import annotations
 
@@ -21,23 +21,5 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "此譯文沿用了先前一句相同台詞的譯文，沒有詢問模型。「重新翻譯」會給出新的譯文。",
         "ko": "이 번역은 앞에 나온 같은 대사의 번역을 다시 쓴 것입니다(모델에 묻지 않음). \"다시 번역\"으로 새 번역을 받을 수 있습니다.",
         "th": "คำแปลนี้ใช้ซ้ำจากบทพูดที่เหมือนกันก่อนหน้า โดยไม่ได้ถามโมเดล \"ถามอีกครั้ง\" จะให้คำแปลใหม่",
-    },
-    "Short lines reused this session without asking the model: {reused} of {lines}.": {
-        "ja": "このセッションでモデルに尋ねずに使い回した短いセリフ: {lines} 件中 {reused} 件。",
-        "es": "Frases cortas reutilizadas en esta sesión sin preguntar al modelo: {reused} de {lines}.",
-        "pt": "Falas curtas reutilizadas nesta sessão sem consultar o modelo: {reused} de {lines}.",
-        "fr": "Répliques courtes reprises pendant cette session sans interroger le modèle : {reused} sur {lines}.",
-        "de": "In dieser Sitzung ohne Frage an das Modell wiederverwendete kurze Zeilen: {reused} von {lines}.",
-        "it": "Battute brevi riutilizzate in questa sessione senza chiedere al modello: {reused} su {lines}.",
-        "nl": "Korte regels die deze sessie zonder het model hergebruikt zijn: {reused} van {lines}.",
-        "pl": "Krótkie kwestie użyte ponownie w tej sesji bez pytania modelu: {reused} z {lines}.",
-        "ru": "Коротких реплик за этот сеанс взято повторно без обращения к модели: {reused} из {lines}.",
-        "tr": "Bu oturumda modele sorulmadan yeniden kullanılan kısa replikler: {lines} içinden {reused}.",
-        "id": "Baris pendek yang dipakai ulang sesi ini tanpa bertanya ke model: {reused} dari {lines}.",
-        "vi": "Số câu thoại ngắn được dùng lại trong phiên này mà không hỏi mô hình: {reused} trên {lines}.",
-        "zh": "本次会话中未询问模型而沿用的短台词：{lines} 句中的 {reused} 句。",
-        "zh-tw": "本次工作階段中未詢問模型而沿用的短台詞：{lines} 句中的 {reused} 句。",
-        "ko": "이번 세션에서 모델에 묻지 않고 다시 쓴 짧은 대사: {lines}개 중 {reused}개.",
-        "th": "บทพูดสั้นที่ใช้ซ้ำในเซสชันนี้โดยไม่ถามโมเดล: {reused} จาก {lines}",
     },
 }

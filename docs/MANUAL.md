@@ -659,7 +659,7 @@ carried by the encrypted export and brought back by an import (an import into a 
 the lines it lacks). Since the key is in the file, whoever can open the file (your Windows user, or anyone with an
 export and its passphrase) can test whether a line they guess was in the book, and a short exclamation is easy to
 guess. With the setting off nothing is reused or kept from then on; what was kept stays in the cache until the book's
-translations are deleted. The "System" page of "Settings" shows how many lines this session reused.
+translations are deleted. The report ("Menu > Copy a report", "Reporting a problem") counts the lines this session reused.
 
 ### Translating into other languages
 
@@ -824,29 +824,28 @@ A row unticked is not tried; with none ticked, the lettering is set at the size 
 Under "Dialogs" it has the size of the dialogs' text, the dialogs' colours (light, dark, or as Windows is set), reusing the translation of a short line seen before,
 "Indicators at the right of the viewer" (`see_through_indicators`, the same as "Indicators" in the left pane), "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default; a number out of these bounds is not saved),
 "Insert adds a text area" (`add_area_key`, on by default; off, Insert stays the viewer's) and "Start in Reader mode" (`role = "reader"`, off by default; from the next start, for a book you have not switched "Reader mode" for).
-Last come the optional page models (the layout model and the inpainting).
 "Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
 that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
 where it is not found, the bubble's line is asked once more with the part marked, and the answer only points at the words in the translation (kept only where their share of the translation fits the Japanese part's share and the part's own translation bears them out).
 These are one or two short requests beside the page's, only for such a bubble (on the test volume about one bubble in ten pages, and about half a second for each such bubble). Measured with stand-in parts on a test set, the words it found were the right ones about 11 times in 12, and it found some for about half of the parts.
 The part found is lettered larger (never more times larger than in the original, and at most twice the size; the rest never smaller than the readable size `readable_font_size`, nor than four fifths of the size the whole translation gets at one size). Where the bubble cannot hold both sizes so, the part is set less larger first, and under 1.15 times the rest the bubble is lettered at one size; where nothing is found, the bubble is lettered as before.
 The translation cache keeps the part as its place in the translation (no Japanese), so a page from the cache asks nothing. With the setting off, every translation is lettered at one size. The right pane and copying keep the plain text.
-For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
-it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
-On other computers, erasing works as with "Not used", and the model is not even loaded (the setting's row then says so).
-With "Not used" too, lettering on a screentone, a hatching or another pattern that repeats itself is painted over with that pattern (no model takes part in that).
+The two page models are not chosen in "Settings": TASlation decides by the GPU.
+The inpainting (erasing lettering on the drawing with LaMa and filling in the drawing) is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
+On other computers, erasing is done without it, and the model is not even loaded (the erase row of the System page then names the paper fill alone).
+Without it too, lettering on a screentone, a hatching or another pattern that repeats itself is painted over with that pattern (no model takes part in that).
 Lettering in a bubble the layout model found and the usual detection could not outline, drawn see-through over the drawing (the drawing's lines cross the lettering), counts as lettering on the drawing too. Where the inpainting is not used, the straight lines of the drawing through it are kept.
-`install.cmd` installs PyTorch's GPU build (the CUDA build) on a computer with an NVIDIA GPU, so there it is used with "Only with a GPU" as it is.
+`install.cmd` installs PyTorch's GPU build (the CUDA build) on a computer with an NVIDIA GPU, so there it is used as it is.
 On a computer without a GPU (AMD and Intel GPUs are not counted as GPUs either), with an old driver, or where the GPU build did not work, the CPU build is installed, and the inpainting is not used there (docs/INSTALL.md, "Installation").
 On a computer where an installation before this version put in the CPU build, running `install.cmd` again replaces it with the GPU build. The installation after `update.cmd` does not replace it, and says so.
-With "Always, also on the CPU", it is used even without a GPU, but takes about 4 seconds a screen (about 0.6 seconds on a GPU).
-For the layout model (it finds lettering on the drawing that the usual detection misses), choose "Not used", "Only with the inpainting" or "Always used". The default is "Only with the inpainting".
-It is used on a computer that uses the inpainting, so on a computer without a GPU, or without the two models, detection works as before.
-Before version 0.2.0 the default was "Not used". If you never chose, the new default applies. A settings file that says `detect_model = "off"` (a copy of the old `taslation.toml.example` has that line too) keeps it off.
+In the settings file, `art_erase` says the same: `"auto"` (the default) is the rule above, `"lama"` uses it even without a GPU, but it takes about 4 seconds a screen (about 0.6 seconds on a GPU), and `"off"` never uses it.
+The layout model (it finds lettering on the drawing that the usual detection misses) is used on a computer that uses the inpainting, so on a computer without a GPU, or without the two models, detection works as before.
+In the settings file it is `detect_model`: `"auto"` (the default) is that rule, `"on"` always uses it and `"off"` never does.
+Before version 0.2.0 the default was off. A settings file that says `detect_model = "off"` (a copy of the old `taslation.toml.example` has that line too) keeps it off, and so does one where an earlier version's "Settings" saved a choice for either model: it loads and works as before.
 Neither model makes clear where the images used to train it come from (`docs/THIRD_PARTY.md`).
 The two models are installed together, with one question (`install.cmd` tells you about their origin before it asks). On a computer where TASlation uses LaMa on the GPU (one where the GPU build of PyTorch is being or has been installed),
 Enter installs them ([Y/n]); elsewhere Enter does not ([y/N]). A run without a console installs them on neither (`-Yes` does not answer this question either).
-Running `python setup_models.py` by hand asks the same way, and what Enter means is decided by whether PyTorch can use a CUDA GPU (the same judgement as "Only with a GPU"). With `--agreed`, it installs them without asking.
+Running `python setup_models.py` by hand asks the same way, and what Enter means is decided by whether PyTorch can use a CUDA GPU (the same judgement as `art_erase = "auto"`). With `--agreed`, it installs them without asking.
 "Save" writes to `taslation.toml` and takes effect at once (the page on show is re-set from the cache). The file's comments and other lines stay as they are.
 The dialogs' text size and colours change as soon as you save.
 The dialogs' colours are "As Windows is set" (the default: the app mode in Windows' colour settings, looked at when TASlation starts), "Light" (Windows' own look) or "Dark"
@@ -864,30 +863,28 @@ TASlation has no keys of its own to set: every key goes to the viewer, except In
 ("Insert adds a text area" turns it off), and Delete, which drops the selected regions while editing ("Editing: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
 Ctrl+Shift+C and Ctrl+Shift+V. Keys an earlier version saved for these in `shortcuts.json` in the state folder still apply, but there is no page to change them any more.
 
-The "System" page of "Settings" shows, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU") and how many seconds a page took.
-For detection, the classical detection runs on the CPU, and when the layout model is used, that model runs on the GPU. The OCR runs on the CPU, or two of its three readers on the GPU where it has room for them (`ocr_runs_on`, below), and the row says which and why. Translation runs where Ollama loaded the model,
-and when only part of it is in video memory, it shows something like "GPU and CPU (60 % on the GPU)" (if no model is loaded, it says so).
-For erasing, the fill with the paper's colour runs on the CPU, and when the inpainting (LaMa) is used, the part on the drawing runs on the GPU (on the CPU with "Always, also on the CPU" and no GPU). Only NVIDIA GPUs with CUDA are counted as GPUs,
-and it neither loads a model nor starts Ollama to find out. The seconds are the average of the last 20 pages lettered, saved in `timings.json` in the state folder when TASlation quits (numbers only; nothing of the pages' content).
-"Look again" refreshes it. `taslation doctor` prints the same as "Where each stage runs:". Below, it says how many short lines this session reused without asking the model ("Reusing short lines"; counts only).
-Under that, "Translation model's layers on the GPU" (`ollama_num_gpu`) decides how much of the translation model Ollama puts on the GPU, for both translators (PLaMo and Qwen).
-Empty (the default) leaves it to Ollama, and the requests are exactly as before. `0` runs it on the processor only and leaves the GPU free (translating several times slower); a number puts that many of the model's layers on the GPU and the rest on the processor.
-It is sent as the `num_gpu` option of Ollama's requests. Once saved, the next request uses it (a model already loaded may take a moment to be loaded again for it).
-With a number of layers set, a model split between the GPU and the processor is neither loaded again nor reported (it was asked for). Anything but empty or a whole number from 0 to 999 is not saved.
-Under that, "OCR runs on" (`ocr_runs_on`) chooses where the OCR readers run: "The GPU when it has room" (the default), "The processor (CPU)" or "The GPU" (see below).
-Where they run now, and why, is in the OCR row above. Once saved, "The processor (CPU)" and "The GPU" apply from the next page, "The GPU when it has room" from the next start.
-The box under it, "When the GPU's memory is short at the start, start with part of the work on the processor without asking" (`gpu_short`), decides what a start does when its check finds the GPU's memory short ("What runs on the GPU", below).
+The "System" page of "Settings" lists, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU"; "-" when that is not known) and the models that run there, by their names.
+For detection, the classical detectors run on the CPU, and when the layout model (comic-text-and-bubble-detector) is used, it runs on the GPU. The OCR runs on the CPU, or the first two of its three readers (manga-ocr-charspot-small, manga-ocr-nar-small, manga-ocr-base-CPT-flex) on the GPU where it has room for them (`ocr_runs_on`, below); each reader is named with where it reads, and a grey line under them says why they read on the CPU when they do. Translation names the translation model and runs where Ollama loaded it,
+and when only part of it is in video memory, it shows something like "GPU and CPU (60 % on the GPU)" (when no model is loaded, it says "Not loaded now").
+For erasing, the paper fill runs on the CPU, and when the inpainting is used, LaMa erases the part on the drawing on the GPU (on the CPU with `art_erase = "lama"` and no GPU). Only NVIDIA GPUs with CUDA are counted as GPUs,
+and it neither loads a model nor starts Ollama to find out. "Look again" refreshes it. When the start was short of GPU memory, or a part failed on the GPU, a note under the list says so and what runs on the processor.
+`taslation doctor` prints the same as "Where each stage runs:", with how many seconds a page each stage took, and the report has those seconds too ("Reporting a problem"). They are the average of the last 20 pages lettered, saved in `timings.json` in the state folder when TASlation quits (numbers only; nothing of the pages' content).
+Under the list, the box "When the GPU's memory is short at the start, start with part of the work on the processor without asking" (`gpu_short`) decides what a start does when its check finds the GPU's memory short ("What runs on the GPU", below).
 Off (the default), it says by how much and asks; on, it starts with what does not fit on the processor. It applies from the next start.
-When the start was short, or a part failed on the GPU, a note under the rows says so and what runs on the processor.
-Last, "Translator's window cache" (`ollama_window_cache`) decides whether the Ollama TASlation starts keeps the cache of the translation model's whole window:
-"On" (the default) or "Off" (see below). It applies from the next start of Ollama; the translation's row above
-says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it).
 Under it, the box "Look for a new version once a day when TASlation starts" (`update_check`: `"off"`, the default, or `"daily"`; the installer asks once) makes TASlation, at a start a day or more after the last look,
 30 seconds or more after TASlation is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for the first 16 KB of `CHANGELOG.md`.
 A newer version is named in the "Check for updates..." item of "Menu > Help" and in one line on the status line (no dialog). When it could not ask, it says nothing. It applies from the next start.
 "Menu > Help > Check for updates..." asks when you choose it, whether the box is on or off; chosen again within a minute of an answer, it shows that answer again and asks nothing (after "could not ask" it asks again at once). It shows this version and the new one with their dates and what changed; "Update now" closes TASlation,
 and `update.cmd` downloads the new version, updates and starts TASlation again (docs/INSTALL.md, "Updating"). The same box is in that window too.
 The time of the last look and the newest version it found are kept in `update-check.json` in the state folder (nothing else is written there). In a git clone there is no look at the start.
+
+The other settings of where the work runs are in the settings file alone (an earlier version had them on the System page; a file where it saved them loads and works as before). Like every setting in the file, they apply from the next start:
+`ollama_num_gpu` decides how much of the translation model Ollama puts on the GPU, for both translators (PLaMo and Qwen).
+Empty (the default) leaves it to Ollama, and the requests are exactly as before. `"0"` runs it on the processor only and leaves the GPU free (translating several times slower); a number up to 999 puts that many of the model's layers on the GPU and the rest on the processor.
+It is sent as the `num_gpu` option of Ollama's requests. With a number of layers set, a model split between the GPU and the processor is neither loaded again nor reported (it was asked for).
+`ocr_runs_on` chooses where the OCR readers run: `"auto"` (the default: the GPU when it has room), `"cpu"` (the processor) or `"gpu"` (see "What runs on the GPU", below); where they run, and why, is in the OCR row of the System page.
+`load_model_at_start` (on by default) loads the translation model at the start ("What runs on the GPU", below), and `ollama_window_cache` decides whether the Ollama TASlation starts keeps the cache of the translation model's whole window
+(`"auto"`, the default, or `"on"`: with it; `"off"`: without it; below). It applies from the next start of Ollama; the report's `server` line says whether the Ollama running now has it.
 
 The settings file `taslation.toml` is looked for in this order: the one given with `--config`, `./taslation.toml` in the folder it was run from, and `taslation.toml` in the state folder (`~/.taslation`,
 or the place in the environment variable `TASLATION_STATE_DIR`); the first one found is read (with none, the defaults apply).
@@ -984,7 +981,7 @@ When Ollama has the translation model loaded already as TASlation asks for it, i
 The check comes after the legal notice, while the viewer is being chosen, once Ollama answers and before any model is loaded. It asks nothing over the network (the figures are this computer's card's and Ollama's).
 
 When it all fits, the models load in the background while you choose the viewer (and give the book's name, when it is asked for). The right pane says "Loading the models..." from the start until they are all there. A page shown before that waits until what it needs is there, and is read then.
-With "Load the translation model at start" off, the translation model loads at the first page that needs it, but its room is counted at the start all the same.
+With `load_model_at_start = false`, the translation model loads at the first page that needs it, but its room is counted at the start all the same.
 Everything stays where it was put for the session: nothing is looked at again, and nothing moves.
 
 When it does not fit, a box comes before anything loads, once the viewer is chosen (and the book's name given, when it is asked for): it never comes over those dialogs, nothing is read until it is answered, and over the viewer it leaves the keys to the viewer until you click it. It says: "The GPU's memory is short by N MB. Close other applications that use it and check again, or start with part of the work on the processor (slower)." Under that, it says what would run on the processor.
@@ -992,7 +989,7 @@ When it does not fit, a box comes before anything loads, once the viewer is chos
 When Ollama holds other models in the card's memory, the box names them with their sizes, TASlation's own (for example the Qwen model a Portuguese (Brazil) or Turkish session left loaded) apart from other programs'. With one of TASlation's among them, "Release and check again" comes first (Enter then): it releases TASlation's models, waits until the card shows their memory free (3 s at most) and checks again. Another program's model is never released: close it in that program, or stop it with `ollama stop` and its name, then press "Check again".
 The order puts first what loses the least time: the OCR reads beside the translation (a page about 1.2 s on the CPU, about 0.6 s on the GPU), LaMa erases only lettering on the drawing (about 1.7 s a place on the CPU, about 0.2 s on the GPU), the layout model works on every page before its first bubble (about 0.5 s a page unit on the CPU, about 0.06 s on the GPU), and the translation model translates about four times slower on the CPU.
 With "Do not ask again on this computer" ticked, the next starts do so without asking (`gpu_short = "processor"`; the box "When the GPU's memory is short at the start, start with part of the work on the processor without asking" on the System page of "Settings..." is that setting).
-The System page then says, under its rows, by how much the start was short and what runs on the processor this session.
+The System page then says, under its list, by how much the start was short and what runs on the processor this session.
 On a 6 GB card with the default settings (PLaMo, both page models, a screen up to 1440 pixels high), the box comes when other programs hold more than about 1.7 GB at the start (about 1.4 GB with a taller screen). The larger translation model (Qwen3.5 4B) does not fit on a 6 GB card together with the OCR readers and the page models.
 
 A computer without an NVIDIA GPU never sees the box. Neither do the `taslation` commands and the developer's tools, which cannot ask: they do as "Start on the processor" does.
@@ -1002,8 +999,8 @@ The memory other programs take after the start is theirs: TASlation does not loo
 When a part fails on the GPU (its memory runs out, a CUDA error), it goes on on the CPU until the session ends, the page comes out as usual, and the System page says so. The readings are the same on both.
 While the translation model answers (the next page of a spread is read meanwhile, for one), the two OCR readers read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
 
-Ollama's model is put in GPU memory only while it is needed. TASlation loads it at start, while the OCR models load (`load_model_at_start = true`, the default;
-"Load the translation model at start" on the System page of "Settings..."), so the first page to translate does not wait for it. Nothing is shown for this load,
+Ollama's model is put in GPU memory only while it is needed. TASlation loads it at start, while the OCR models load (`load_model_at_start = true`, the default,
+in the settings file), so the first page to translate does not wait for it. Nothing is shown for this load,
 and when Ollama is not running or the model is not installed it does nothing (the first page that needs the model says what is wrong, as before).
 With the setting off, and for the `taslation` commands, the model is loaded when a line that needs translating comes up
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
@@ -1033,10 +1030,10 @@ On an NVIDIA GPU with 6 GB of memory or less, `OLLAMA_KV_CACHE_TYPE` is `q8_0` (
 and `LLAMA_ARG_CACHE_RAM=256` keeps 256 MB of earlier requests in RAM (without the variable Ollama uses up to 8 GB for them).
 In TASlation's measurements on a 6 GB GPU, translating took about a quarter less time with them (296 s instead of 401 s for 214 pages translated in one pass,
 0.98 s instead of 1.28 s a line without a GPU), and the model took 130 MB more GPU memory (220 MB with Ollama's default KV cache).
-The setting "Translator's window cache" (`ollama_window_cache`) decides: "On" (the default; `"auto"` or `"on"` in the file) passes both,
-"Off" (`"off"`) `LLAMA_ARG_CACHE_RAM=0` alone, as before. The check at the start counts the translation model with its window cache (130 MB) (the start of this section);
+The setting `ollama_window_cache` in the settings file decides: `"auto"` (the default) or `"on"` passes both,
+`"off"` `LLAMA_ARG_CACHE_RAM=0` alone, as before. The check at the start counts the translation model with its window cache (130 MB) (the start of this section);
 the window cache is no longer left out to keep the OCR readers on the GPU. What it chose is in the log, one line each time it starts Ollama,
-and in the translation's row of the System page and of `taslation doctor`.
+and in the report's `server` line ("Reporting a problem").
 For an Ollama that was there before, `install.cmd` sets `LLAMA_ARG_CACHE_RAM=0` and, on a GPU of 6 GB or less, `OLLAMA_KV_CACHE_TYPE=q8_0` as environment variables of this Windows user
 ("Installation" in docs/INSTALL.md, which also says how to give your own Ollama the window cache). Because Windows keeps them, the Ollama TASlation starts on that computer gets `LLAMA_ARG_CACHE_RAM=0` too: the window cache without the 256 MB in RAM
 (317 s instead of 296 s in the measurement above).
@@ -1071,7 +1068,7 @@ It is plain text between two lines of three backquotes, in sections with English
 - the page: its key as the log names it, its size, single page or spread, from the cache or read now, the regions by state, how many of those lettered show, the times of the page jobs (started, first request, first line lettered, finished or cancelled and why) and the translator's requests;
 - the screen: the monitors, the viewer's window (a browser or an app, never its name), its place, DPI and state, whether it is in front and what covers it, the capture, the frames per second and what the frames were lately, the capture area, the page box at rest, the band where bars never come and the bars;
 - the side panes and the lettering's window: where each shows, or why it is hidden, whether the lettering takes the mouse, the Insert and Delete keys, the last changes of the window in front;
-- the program: its version and commit, Python, Windows, torch and the GPU with its memory free, the languages, the mode, the models and where each runs, the translation program, the offline guard, the settings changed and the last error;
+- the program: its version and commit, Python, Windows, torch and the GPU with its memory free, the languages, the mode, the models and where each runs, how many short lines this session reused, the seconds a page each stage took, the translation program (with whether the Ollama TASlation started has the window cache), the offline guard, the settings changed and the last error;
 - the log: the kinds of warnings and errors of this session and how many, without their values.
 
 While editing, with regions chosen, the Menu also has "Copy a report of the chosen regions" (those first and in full) and, with one region chosen, "Copy a report with this region's text".
@@ -1126,7 +1123,7 @@ with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change
 
 ## Limitations
 
-* Where the inpainting runs (by default, a computer with an NVIDIA GPU that PyTorch can use with CUDA and both page models installed; "Layout model:" and "Inpainting:" in "Settings"), the layout model finds the lettering first and the classical image processing adds what it missed; elsewhere detection is classical image processing alone.
+* Where the inpainting runs (by default, a computer with an NVIDIA GPU that PyTorch can use with CUDA and both page models installed; `detect_model` and `art_erase` in the settings file), the layout model finds the lettering first and the classical image processing adds what it missed; elsewhere detection is classical image processing alone.
   The classical detection covers closed bubbles and boxes (bright and dark alike; dark bubbles, and light lettering on dark parts, are lettered in white)
   and dialogue and sound effects written straight on the page. For text written straight on the page, only the letters and the bright background around them are erased; the drawing next to them, fine lines and halftone dots included, is kept,
   and the translation is set in the space that is freed. When the drawing is close, the translation gets smaller, and small bits of drawing mistaken for parts of letters are erased with them.
