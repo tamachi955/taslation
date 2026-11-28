@@ -68,7 +68,7 @@ SCREEN_KEYS = ("monitor", "viewer", "viewer_window", "viewer_client", "viewer_dp
                "viewer_covered", "tab", "capture_route", "frame_size", "frames_per_s", "frame_states", "capture_area",
                "page_at_rest", "steady_band", "bars")
 PANES_KEYS = ("left", "right", "lettering_window", "lettering", "takes_mouse", "insert_key", "foreground",
-              "foreground_line", "hidden_root")
+              "foreground_line", "keys_guard", "hidden_root")
 PROGRAM_KEYS = ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_language", "target_language", "mode",
                 "translator", "ocr", "layout_model", "inpainting", "server", "offline_guard", "settings_changed",
                 "last_error")
@@ -544,6 +544,12 @@ def panes_lines(app: Any) -> list[str]:
     lines.add("foreground", ", ".join(f"{k} {n}" for k, n in sorted(counts.items())) or "no change noted")
     for line in list(getattr(app, "_see_foreground_lines", ()) or ())[-FOREGROUND_LINES:]:
         lines.add("foreground_line", line)
+    guarded = getattr(app, "_see_guarded", None) or {}
+    woke = (_get(lambda: dict(over.counts), {}) or {}) if over is not None else {}
+    lines.add("keys_guard", f"given back {sum(guarded.values())}"
+              + (f" ({', '.join(f'{k} {n}' for k, n in sorted(guarded.items()))})" if guarded else "")
+              + f"; the viewer made the foreground window at a press {woke.get('woke', 0)}"
+              + (f", refused {woke['woke_failed']}" if woke.get("woke_failed") else ""))
     geometry = _get(app.winfo_geometry, "?") if callable(getattr(app, "winfo_geometry", None)) else "?"
     lines.add("hidden_root", geometry)
     return lines.lines

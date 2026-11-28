@@ -95,6 +95,7 @@ tell the frames TASlation captured apart;
 nothing else reads it. */
 
 const CONTROL_MS = 100;
+const KEYS_LOOK_MS = 20;  // whether the page has the keyboard focus, looked at so often ("keys on=": `keysLook`)
 const CELL = 6, CODE_X = 12, CODE_Y = 12;  // the code's cells, CSS pixels from the content's top left
 const GROUND = "#2b2b2b", BAND = "#3a3d41", BAND_LINE = "#56595e", BAND_PART = "#4a4e53", COUNTER = "#9a9a9a";
 const BAND_LINE_OTHER = "#9aa0a6";  // (band_line_ms) the band's line in its other shade
@@ -1217,7 +1218,15 @@ addEventListener("keydown", e => {
   else if (e.key === "ArrowRight") { e.preventDefault(); black ? say("lost", "why=key") : previous(); }
 });
 addEventListener("focus", () => { say("focus"); if (cfg.focusBlack) flash(cfg.flashMs); });
-addEventListener("blur", () => { if (P) say("blur"); });
+addEventListener("blur", () => say("blur"));  // (the page's keys gone elsewhere: the driver's look at the keys)
+// whether a key pressed now would reach the page (the document has the keyboard focus), said at each change: what
+// the driver checks after the start and each turn - nothing is pressed for it
+let keysHad = null;
+function keysLook() {
+  const has = document.hasFocus();
+  if (has !== keysHad) { keysHad = has; say("keys", "on=" + (has ? 1 : 0)); }
+}
+setInterval(keysLook, KEYS_LOOK_MS);
 if (P && P.band_line_ms > 0) setInterval(() => { if (!black) compose(); }, P.band_line_ms);  // (its line's shades)
 addEventListener("resize", () => {
   if (!sizeCanvas()) return;

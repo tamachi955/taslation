@@ -858,15 +858,15 @@ def test_a_click_on_a_plate_types_its_place_enter_takes_it_and_esc_or_any_other_
     assert app._see_place_entry is None and not entry.alive() and len(given) == 2 and len(placed) == 1
     hand(app, kind="plate", index=0, shift=False)
     entry = app._see_place_entry
-    hand(app, kind="ground")  # (a press anywhere else on the page)
-    assert app._see_place_entry is None and not entry.alive() and len(given) == 2
+    hand(app, kind="ground")  # (a press anywhere else on the page: the foreground back to the viewer as it goes)
+    assert app._see_place_entry is None and not entry.alive() and given[2:] == [entry.top]
     hand(app, kind="plate", index=0, shift=False)
     entry = app._see_place_entry
     entry._focus_out()  # (no keys had yet: kept)
     assert entry.alive()
     entry._focus_in()
-    entry._focus_out()  # (a click on the viewer or another window)
-    assert app._see_place_entry is None and not entry.alive() and len(given) == 2
+    entry._focus_out()  # (a click on the viewer or another window: the keys where the click took them)
+    assert app._see_place_entry is None and not entry.alive() and len(given) == 3
     hand(app, kind="plate", index=0, shift=False)
     entry = app._see_place_entry
     entry.opened -= see_edit.PLACE_FOCUS_S + 0.1  # (the keys never came: the viewer kept them)

@@ -442,6 +442,7 @@ def test_the_quiet_start_makes_a_decoy_first_window_on_windows_and_drops_it(monk
     box, decoy = made
     # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
     assert box.options == {"container": True} and decoy.options == {"use": "4242"}
+    assert ui._name_of(decoy) == "the start's decoy"  # (as the log of the foreground's "just before" names it)
     assert ui.quiet(app)  # (not maximised at the start then)
     # ... and the window itself is never on the screen in this mode, an application's window with its taskbar
     # button (no tool window) titled for it

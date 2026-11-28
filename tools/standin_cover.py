@@ -13,9 +13,11 @@ stand-in has it -, as a program the reader brought to the front over the viewer 
 
 It prints "ready HWND FRONT" (FRONT 1 when it took the foreground) and then reads its standard input, a word a
 line: "raise" - the stand-in put over it and given the foreground, as a person's click on the viewer does (the cover
-stays, under it); "end" (or the input closed) - the foreground given back to the stand-in when the cover holds it,
-and the cover closed. Each answered with a line of what was done. Nothing is pressed or clicked; only the stand-in's
-window and its own are touched. ctypes and the standard library only: nothing of TASlation's is imported."""
+stays, under it); "front" - the cover given the foreground, only while the stand-in has it (this thread shares its
+input with the stand-in's for that moment), as a person's click on another program does: the keys go there; "end"
+(or the input closed) - the foreground given back to the stand-in when the cover holds it, and the cover closed.
+Each answered with a line of what was done. Nothing is pressed or clicked; only the stand-in's window and its own
+are touched. ctypes and the standard library only: nothing of TASlation's is imported."""
 
 from __future__ import annotations
 
@@ -52,6 +54,8 @@ user32.CreateWindowExW.restype = wintypes.HWND
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 user32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 gdi32.GetStockObject.restype = wintypes.HGDIOBJ
 
@@ -95,6 +99,23 @@ def raise_standin(standin: int) -> dict[str, int]:
     return {"raised": 1, "given": given}
 
 
+def take_front(standin: int, hwnd: int) -> dict[str, int]:
+    """The cover given the foreground - only while the stand-in has it: its thread's input shared with the stand-in's
+    for the moment of the hand-over (no key, no click) -, as a person's click on another program gives it that."""
+    if front() != standin:
+        return {"took": 0, "standin_had_it": 0}
+    me = kernel32.GetCurrentThreadId()
+    other = user32.GetWindowThreadProcessId(wintypes.HWND(standin), None)
+    attached = bool(other) and other != me and bool(user32.AttachThreadInput(me, other, True))
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(me, other, False)
+    return {"took": int(front() == hwnd), "standin_had_it": 1}
+
+
 def main(argv: list[str] | None = None) -> int:
     if sys.platform != "win32":
         raise SystemExit("Windows only")
@@ -115,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if msg == WM_APP:  # ("raise", from the reading thread: done on the window's own thread)
             done.update(raise_standin(standin))
+            answered.set()
+            return 0
+        if msg == WM_APP + 1:  # ("front", as "raise")
+            done.update(take_front(standin, int(hwnd)))
             answered.set()
             return 0
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -151,6 +176,12 @@ def main(argv: list[str] | None = None) -> int:
                 user32.PostMessageW(hwnd, WM_APP, 0, 0)
                 answered.wait(3.0)
                 print("raised " + " ".join(f"{k}={v}" for k, v in sorted(done.items())), flush=True)
+            elif word == "front":
+                answered.clear()
+                done.clear()
+                user32.PostMessageW(hwnd, WM_APP + 1, 0, 0)
+                answered.wait(3.0)
+                print("fronted " + " ".join(f"{k}={v}" for k, v in sorted(done.items())), flush=True)
             elif word == "end":
                 break
         gave = 0

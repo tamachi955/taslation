@@ -265,6 +265,7 @@ def tick(app: Any, over: Any) -> None:
     place_entry_tick(app)
     take_keys = getattr(over, "take_keys", None)
     for _when in (take_keys() if take_keys is not None else ()):
+        seethrough.did(app, "the Insert key")
         toggle_adding(app)
     for event in over.take_edits():
         app._see_edit_seen = max(int(getattr(app, "_see_edit_seen", 0)), int(event.get("press", 0)))
@@ -274,6 +275,7 @@ def tick(app: Any, over: Any) -> None:
             seethrough.log.debug("see-through mode: a press in editing could not be acted on", exc_info=True)
     take_deletes = getattr(over, "take_deletes", None)
     for _when in (take_deletes() if take_deletes is not None else ()):
+        seethrough.did(app, "the Delete key")
         if delete_wanted(app):
             app._drop_chosen()
     marks = marks_for(app)
@@ -350,7 +352,8 @@ def act(app: Any, event: dict[str, Any]) -> None:
     click or a double click on a region brings it to the front (one region at a time). A place entry open goes first,
     whatever the press. Nothing for a page gone by now, nor while a change is being stored."""
     kind = event.get("kind")
-    drop_place_entry(app)
+    seethrough.did(app, f"a press on the page: {kind}")
+    drop_place_entry(app, give_back=True)
     if kind == "add":
         adding, app._see_adding = getattr(app, "_see_adding", False), False
         box = event.get("box")
@@ -481,6 +484,7 @@ class PlaceEntry:
         self.opened = time.monotonic()
         self.focused = self.closed = False
         self.top = top = tk.Toplevel(app)
+        top._see_name = seethrough.PLACE_ENTRY  # type: ignore[attr-defined]  # (the log of the foreground's name)
         top.withdraw()
         top.wm_overrideredirect(True)
         try:
@@ -598,11 +602,13 @@ def open_place_entry(app: Any, region: Any) -> bool:
     return True
 
 
-def drop_place_entry(app: Any) -> None:
-    """A place entry open given up (another press, Reader mode, another page): nothing changes."""
+def drop_place_entry(app: Any, give_back: bool = False) -> None:
+    """A place entry open given up (another press, Reader mode, another page): nothing changes. With *give_back* (a
+    press on the page or a click on a side pane: neither takes the foreground) the foreground goes back to the viewer
+    as the entry goes, where the entry has it (`seethrough.closing`)."""
     entry = getattr(app, "_see_place_entry", None)
     if entry is not None:
-        entry.close(give_back=False)
+        entry.close(give_back=give_back)
         app._see_place_entry = None
 
 

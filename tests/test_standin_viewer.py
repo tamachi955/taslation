@@ -97,6 +97,36 @@ def test_the_scenarios_of_the_former_own_window_are_unknown_ones(gone):
         standin_e2e.wanted(f"a,{gone}")
 
 
+def test_scenario_fg_is_the_start_and_one_turn_then_twenty_seconds_by_its_name_only():
+    assert standin_e2e.SCENARIOS["fg"][1] == ["n", "w20000"] and "fg" in standin_e2e.NAMED_ONLY
+    assert "fg" not in standin_e2e.wanted("all") and standin_e2e.wanted("fg") == ["fg"]
+
+
+def test_the_keys_after_the_start_and_each_turn_are_judged_on_who_was_in_front_and_the_page_s_keys():
+    """(`standin_e2e.keys_report`: the moments from the chooser's answer and each turn's first draw, KEYS_GRACE_MS on;
+    the kinds in front from the watch's 10 ms looks, the page's keys from its own ``keys on=`` words)"""
+    t0 = 1000.0
+    see = SimpleNamespace(front_kinds=[(t0 * 1000 - 50, "dialog"), ((t0 + 0.4) * 1000, "root"),
+                                       ((t0 + 0.6) * 1000, "standin"), ((t0 + 4.0) * 1000, "dialog"),
+                                       ((t0 + 6.5) * 1000, "standin"), ((t0 + 12.0) * 1000, "root")])
+    director = SimpleNamespace(see=see, chooser_rows=[{"answered_t": t0 * 1000}],
+                               notes=SimpleNamespace(app_events=[]))
+    events = [{"ev": "keys", "on": "1", "t": (t0 + 0.6) * 1000}, {"ev": "keys", "on": "0", "t": (t0 + 4.0) * 1000},
+              {"ev": "keys", "on": "1", "t": (t0 + 6.5) * 1000}, {"ev": "end", "t": (t0 + 20.0) * 1000}]
+    turns = [{"why": "next", "soft_t": (t0 + 10.0) * 1000}]
+    out = standin_e2e.keys_report(director, events, 0.0, turns, (t0 + 30) * 1000, lambda t: t)
+    start, turn = out["moments"]
+    assert start["what"] == "start" and start["in_front"] == ["standin", "dialog"] and start["ok"]
+    # (the hidden window in front)
+    assert turn["what"] == "turn 1" and turn["in_front"] == ["standin", "root"] and not turn["ok"]
+    assert out["page_said_keys"] is True
+    see.front_kinds[-1] = ((t0 + 12.0) * 1000, "standin")
+    events.insert(3, {"ev": "keys", "on": "0", "t": (t0 + 12.0) * 1000})  # (the stand-in in front, its page blurred)
+    turn = standin_e2e.keys_report(director, events, 0.0, turns, (t0 + 30) * 1000, lambda t: t)["moments"][1]
+    assert not turn["ok"] and turn["standin_without_keys_ms"] == 8000
+    assert standin_e2e.keys_report(SimpleNamespace(), events, 0.0, turns, 0.0, lambda t: t) is None
+
+
 def _plan(wait_done=None):
     names = standin_e2e.wanted("all")
     first = standin_e2e.pages_needed(names)

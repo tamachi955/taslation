@@ -559,7 +559,9 @@ def _edit_correctness(run: dict[str, Any], check: Any) -> None:
     done found, the see-through window taking the mouse over it; a click choosing it and opening no editor, a double
     click opening its editor on it; the drags, the number plate and the rectangle handed over as what they are; a
     click on the empty ground choosing nothing, opening nothing and changing nothing; the Delete key's message
-    dropping the region chosen as a change of the history, the key let go of after."""
+    dropping the region chosen as a change of the history, the key let go of after; a press on the page with another
+    program in front (a window of the tool's own process) making the stand-in the window in front, one on the empty
+    ground doing nothing else."""
     edit = _edit_report(run)
     if edit is None:
         return
@@ -601,6 +603,34 @@ def _edit_correctness(run: dict[str, Any], check: Any) -> None:
           and change[0] in ("drop", "drops"), delete)
     check("edit", "the Delete key was let go of after", delete.get("key_let_go_ms") is not None,
           delete.get("key_let_go_ms"))
+    wake = edit.get("wake")
+    if isinstance(wake, dict):  # (a tool before it did not measure it: not looked at)
+        presses = {k: v for k, v in wake.items() if isinstance(v, dict) and v.get("posted")}
+        check("edit", "a press on the page with another program in front made the stand-in the window in front, and "
+              "one on the empty ground did nothing else",
+              bool(presses) and all(v.get("standin_in_front_ms") is not None for v in presses.values())
+              and (presses.get("ground") or {"handed": False}).get("handed") is False,
+              {k: {f: v.get(f) for f in ("other_in_front", "standin_in_front_ms", "handed", "page_keys")}
+               for k, v in wake.items() if isinstance(v, dict)} or wake)
+
+
+def _keys_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """Scenario fg (by its name only: the start and one turn, then 20 s with no other; with --chooser and
+    --book-asked): after the start and each page turn the window in front was the viewer's - the stand-in's, its page
+    with the keyboard focus - unless a dialog of TASlation's was open (`standin_e2e.keys_report`, looked at every
+    10 ms)."""
+    keys = run.get("keys")
+    if "fg" not in names or not isinstance(keys, dict):
+        return
+    moments = [m for m in keys.get("moments") or [] if isinstance(m, dict)]
+    what = [str(m.get("what")) for m in moments]
+    check("fg", "the start and a page turn were looked at", "start" in what and any(w.startswith("turn") for w in what),
+          what)
+    bad = [[m.get("what"), m.get("in_front"), m.get("standin_without_keys_ms")] for m in moments if not m.get("ok")]
+    check("fg", "after the start and each page turn the window in front was the viewer's, its page with the keys, "
+          "unless a dialog of TASlation's was open", bool(moments) and not bad, bad)
+    check("fg", "the stand-in's page said where its keys were", keys.get("page_said_keys") is True,
+          keys.get("page_said_keys"))
 
 
 # editing's times (`edit_figures`: part.key of the tool's report) and their words in a summary
@@ -802,7 +832,7 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             check(name, "the narrow window's page read at its new size",
                   any(r.get("first_capture_ms") is not None for r in sizes), len(sizes))
     _k_correctness(run, names, check)
-    for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness):
+    for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness, _keys_correctness):
         judge(run, names, check)
     _edit_correctness(run, check)
     return found

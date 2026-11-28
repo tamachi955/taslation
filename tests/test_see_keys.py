@@ -84,11 +84,12 @@ def test_each_change_that_involves_the_programs_windows_is_one_line_and_counted_
     with caplog.at_level("INFO", logger=ui.log.name):
         lines = ui.foreground_tick(app)
     assert lines[0] == ("foreground: the viewer -> a dialog (EditBubbleDialog); 120 ms after the last job's start, "
-                        "a job at work; editing on")
+                        "a job at work; editing on; just before: nothing of TASlation's")
     assert lines[1].startswith("foreground: a dialog (EditBubbleDialog) -> the viewer; 400 ms")
     assert any(line.startswith("foreground: the viewer -> another program; -30 ms") for line in lines)
     counts = app._see_foreground
-    assert counts["a dialog (EditBubbleDialog)"] == 1 and counts["back to the viewer"] == 2  # (another program -> the viewer: no line)
+    # (back to the viewer from another program too)
+    assert counts["a dialog (EditBubbleDialog)"] == 1 and counts["back to the viewer"] == 3
     assert counts["the hidden window"] == 1 and counts["the lettering"] == 1 and counts["a side pane"] == 1
     assert counts["to another program"] == 2 and counts["a message box"] == 1 and counts["a menu"] == 1
     assert counts["the viewer lost it in a job"] == 4  # (to the editor, the hidden window, the lettering, another)
@@ -102,7 +103,8 @@ def test_the_log_says_when_no_job_ran_yet_and_edit_off_and_another_programs_wind
     app = _app(_see_front_kind="another program")
     app._see_fronts = Notes([_note(DIALOG), _note(VIEWER, pid=999, root=1234, owner=VIEWER)])  # (a popup of the viewer)
     lines = ui.foreground_tick(app)
-    assert lines == ["foreground: another program -> a window of TASlation's; no job yet; editing off",
+    assert lines == ["foreground: another program -> a window of TASlation's; no job yet; editing off; just before: "
+                     "nothing of TASlation's",
                      "foreground: a window of TASlation's -> the viewer; no job yet; editing off"]
     kinds = [ui.front_kind(app, _note(888, pid=999)), ui.front_kind(app, _note(0, pid=0))]
     assert kinds == ["another program", "nothing"]
@@ -124,7 +126,8 @@ def test_a_change_the_hook_did_not_bring_is_seen_at_the_tick_and_logged_once():
     app = _app(_see_front_kind="the viewer", _see_front_hwnd=VIEWER)
     app._see_kinds[DIALOG] = "WarningBox"
     app._see_fronts = Looked([], _note(DIALOG))  # (the hook brought nothing: the dialog is in front now)
-    assert ui.foreground_tick(app) == ["foreground: the viewer -> a dialog (WarningBox); no job yet; editing off"]
+    assert ui.foreground_tick(app) == ["foreground: the viewer -> a dialog (WarningBox); no job yet; editing off; "
+                                       "just before: nothing of TASlation's"]
     assert ui.foreground_tick(app) == [] and app._see_front_polled == 1  # (still in front: no second line)
     app._see_fronts = Looked([_note(VIEWER, pid=999)], _note(VIEWER, pid=999))  # (the hook's note: none added)
     assert ui.foreground_tick(app) == ["foreground: a dialog (WarningBox) -> the viewer; no job yet; editing off"]
@@ -157,6 +160,297 @@ def test_the_foreground_notes_take_nothing_of_another_programs_window():
 
         desk = int(ctypes.windll.user32.GetDesktopWindow())
         assert capture.fronted(desk, own_pid=-1).own_class == ""  # (another process: no class name either)
+
+
+def test_a_line_to_a_window_of_taslations_says_what_taslation_did_just_before():
+    t0 = time.monotonic()
+    app = _app(_see_front_kind="the viewer")
+    app._see_kinds[DIALOG] = "ViewerDialog"
+    ui.did(app, "a request of the person's")
+    ui.did(app, "ViewerDialog shown")
+    app._see_acts[-1] = (t0, "ViewerDialog shown")
+    app._see_fronts = Notes([_note(DIALOG, at=t0 + 0.004), _note(VIEWER, pid=999, at=t0 + 0.2),
+                             _note(LETTERING, at=t0 + ui.JUST_BEFORE_S + 1)])
+    lines = ui.foreground_tick(app)
+    assert lines[0].endswith("; just before: ViewerDialog shown, 4 ms before")
+    assert "just before" not in lines[1]  # (to the viewer: none)
+    assert lines[2].endswith("; just before: nothing of TASlation's")  # (too long before)
+    for i in range(ui.ACTS_KEPT + 3):
+        ui.did(app, f"act {i}")
+    assert len(app._see_acts) == ui.ACTS_KEPT and ui.just_before(app).startswith(f"act {ui.ACTS_KEPT + 2}, ")
+    assert ui.just_before(SimpleNamespace()) == "nothing of TASlation's"
+
+
+def test_the_viewer_losing_or_getting_the_foreground_is_logged_outside_a_job_and_its_programs_other_window_named():
+    app = _app(_see_front_kind="the viewer")
+    app.selected.pid = 999
+    app._see_fronts = Notes([_note(950, pid=999),            # the viewer's program's other window (a browser's)
+                             _note(960, pid=555),            # from it to another program: no line
+                             _note(0, pid=0),                # nothing: no line
+                             _note(VIEWER, pid=999),         # back to the viewer
+                             _note(961, pid=555)])           # to another program, no job at work
+    lines = ui.foreground_tick(app)
+    assert lines == ["foreground: the viewer -> another window of the viewer's program; no job yet; editing off",
+                     "foreground: nothing -> the viewer; no job yet; editing off",
+                     "foreground: the viewer -> another program; no job yet; editing off"]
+    assert app._see_foreground == {"to another window of the viewer's program": 1, "back to the viewer": 1,
+                                   "to another program": 1}
+
+
+def test_a_window_of_taslations_not_seen_shown_yet_is_named_by_its_live_window(hidden_root):
+    import tkinter as tk
+
+    class SomeDialog(tk.Toplevel):
+        pass
+
+    app = hidden_root
+    dialog, entry, tip = SomeDialog(app), tk.Toplevel(app), tk.Toplevel(app)
+    try:
+        for w in (dialog, entry, tip):
+            w.withdraw()
+        entry._see_name = ui.PLACE_ENTRY
+        entry.wm_overrideredirect(True)
+        tip.wm_overrideredirect(True)
+        kinds = [ui.front_kind(app, _note(int(w.wm_frame(), 16), cls="TkTopLevel")) for w in (dialog, entry, tip)]
+        assert kinds == ["a dialog (SomeDialog)", "the place entry", "a window of TASlation's (TkTopLevel)"]
+        assert app._see_kinds[int(dialog.wm_frame(), 16)] == "SomeDialog"  # (remembered: it may go before the log)
+    finally:
+        for w in (dialog, entry, tip):
+            w.destroy()
+        app.__dict__.pop("_see_kinds", None)
+
+
+# ------------------------------------------------------------------ the guard of the keys
+@pytest.fixture
+def front_now(monkeypatch):
+    """The window in front, a fake's: (hwnd, pid, class) set by the test; what was given the foreground."""
+    state = {"front": (LETTERING, ME, "TASlationSeeThrough"), "given": []}
+
+    def fronted(hwnd, own_pid=None):
+        front, pid, cls = state["front"]
+        return _note(front, pid=pid, cls=cls)
+
+    def give(hwnd):
+        state["given"].append(hwnd)
+        state["front"] = (hwnd, 999, "")
+        return True
+
+    monkeypatch.setattr(capture, "foreground_window", lambda: state["front"][0])
+    monkeypatch.setattr(capture, "fronted", fronted)
+    monkeypatch.setattr(capture, "give_foreground", give)
+    monkeypatch.setattr(capture, "window_exists", lambda hwnd: True)
+    monkeypatch.setattr(ui, "own_dialogs", lambda app: state.get("dialogs", []))
+    return state
+
+
+@pytest.mark.parametrize("front, given", [
+    ((LETTERING, ME, "TASlationSeeThrough"), "the lettering"), ((PANE, ME, "TASlationPane"), "a side pane"),
+    ((555, ME, "TkTopLevel"), "a window of TASlation's (TkTopLevel)"), ((ROOT_HWND, ME, "TkTopLevel"), ""),
+    ((DIALOG, ME, "TkTopLevel"), ""), ((903, ME, "#32770"), ""), ((904, ME, "#32768"), ""), ((VIEWER, 999, ""), ""),
+    ((900, 999, ""), "")],
+    ids=["the lettering", "a side pane", "an unknown window", "the hidden window (front_tick's)", "a dialog",
+         "a message box", "a menu", "the viewer", "another program"])
+def test_the_guard_gives_the_viewer_the_foreground_back_from_a_window_of_taslations_that_takes_no_keys(
+        front_now, caplog, front, given):
+    app = _app()
+    app._see_kinds[DIALOG] = "EditBubbleDialog"
+    front_now["front"] = front
+    ui.did(app, "a press on the page: click")
+    with caplog.at_level("INFO", logger=ui.log.name):
+        assert ui.guard(app) == given
+    if given:
+        assert front_now["given"] == [VIEWER] and app._see_guarded == {given: 1}
+        line = app._see_foreground_lines[-1]
+        assert line.startswith(f"foreground guard: {given} was in front with no dialog of TASlation's open; given back "
+                               "to the viewer; just before: a press on the page: click, ")
+        assert any(r.getMessage() == line for r in caplog.records)
+    else:
+        assert front_now["given"] == [] and not getattr(app, "_see_guarded", None)
+
+
+def test_the_guard_waits_while_a_dialog_the_editor_the_place_entry_or_a_menu_holds_the_person(front_now):
+    holding = Shown()
+    for setup in (lambda a: front_now.__setitem__("dialogs", [holding]),
+                  lambda a: setattr(a, "_see_place_entry", object()),
+                  lambda a: setattr(a, "_editor", SimpleNamespace(winfo_exists=lambda: True)),
+                  lambda a: setattr(a, "_see_menu_up", True), ui.asked,
+                  lambda a: setattr(a, "selected", None), lambda a: setattr(a, "_see_hidden", False)):
+        app = _app()
+        front_now["dialogs"], front_now["front"] = [], (LETTERING, ME, "")
+        setup(app)
+        assert ui.guard(app) == "" and front_now["given"] == []
+    holding._see_quiet = True  # (a dialog that came by itself and waits, never clicked, holds no one)
+    app = _app()
+    front_now["dialogs"] = [holding]
+    assert ui.guard(app) == "the lettering" and front_now["given"] == [VIEWER]
+
+
+def test_the_guard_logs_the_same_window_once_in_a_while_and_counts_every_time(front_now):
+    app = _app()
+    for _again in range(3):
+        front_now["front"] = (PANE, ME, "")
+        assert ui.guard(app) == "a side pane"
+    assert app._see_guarded == {"a side pane": 3} and len(app._see_foreground_lines) == 1
+    app._see_guard_last = (PANE, time.monotonic() - ui.GUARD_QUIET_S - 1)
+    front_now["front"] = (PANE, ME, "")
+    ui.guard(app)
+    assert len(app._see_foreground_lines) == 2
+
+
+def test_nothing_of_taslations_moves_the_foreground_when_the_viewer_gets_it_from_another_program(front_now,
+                                                                                                  monkeypatch):
+    """(Alt+Tab, a click on the viewer, its taskbar button: Windows gives the viewer the foreground; the guard, the
+    hand-back and the tick's look at the hidden window take nothing then)"""
+    monkeypatch.setattr(ui.window, "cursor_pos", lambda: (10, 10))
+    monkeypatch.setattr(ui.window, "shell_at", lambda point: True)
+    app = _app(_see_front_kind="another program")
+    front_now["front"] = (VIEWER, 999, "")
+    app._see_fronts = Notes([_note(VIEWER, pid=999)])
+    assert ui.foreground_tick(app) == ["foreground: another program -> the viewer; no job yet; editing off"]
+    assert ui.guard(app) == "" and ui.front_tick(app) == "" and ui.hand_back(app) is False
+    assert front_now["given"] == []
+
+
+# ------------------------------------------------------------------ a press on the page with another program in front
+@pytest.mark.parametrize("front, pid, tops, woken", [
+    (VIEWER, 999, (VIEWER, VIEWER, VIEWER), False), (1234, 999, (1234, 1234, VIEWER), False),
+    (900, 999, (900, 900, 900), True), (0, 0, (), True), (ROOT_HWND, ME, (ROOT_HWND,) * 3, True),
+    (LETTERING, ME, (LETTERING,) * 3, True), (PANE, ME, (PANE,) * 3, True), (DIALOG, ME, (DIALOG,) * 3, False)],
+    ids=["the viewer", "a popup of the viewer's", "another program", "nothing", "the hidden window", "the lettering",
+         "a side pane", "a dialog, the editor, the place entry, a box or a menu of TASlation's"])
+def test_a_press_on_the_page_makes_the_viewer_the_foreground_window_unless_it_or_a_dialog_of_taslations_is(
+        front, pid, tops, woken):
+    own = frozenset({ROOT_HWND, LETTERING, PANE})
+    assert cs.wakes_viewer(front, pid, tops, VIEWER, ME, own) is woken
+    assert cs.wakes_viewer(front, pid, tops, 0, ME, own) is False  # (no viewer followed)
+
+
+class User32:
+    """The calls `SeeThrough._wake_viewer` makes, a fake's: the window in front and the processes of the windows."""
+
+    def __init__(self, front, pids):
+        self.front, self.pids = front, pids
+
+    def GetForegroundWindow(self):
+        return self.front
+
+    def GetWindowThreadProcessId(self, hwnd, ref):
+        ref._obj.value = self.pids.get(hwnd, 0)
+        return 1
+
+    def GetAncestor(self, hwnd, how):
+        return hwnd
+
+    def SetCapture(self, hwnd):  # (the press's capture: nothing of the system's)
+        return 0
+
+    def ReleaseCapture(self):
+        return 1
+
+    def GetCapture(self):
+        return 0
+
+
+def _layer(monkeypatch, front, gives=True):
+    """A see-through window's state as editing has it (no thread, no window), the window in front *front*, the
+    foreground given (or refused) by a fake."""
+    from taslation.capture import windows
+
+    over = cs.SeeThrough()
+    over.hwnd, over.panes, over._viewer, over._root = LETTERING, {"left": PANE}, VIEWER, ROOT_HWND
+    over._edit_takes, over._last_look = True, (None,) * 6 + ((400, 300),)
+    over._marks_live = SimpleNamespace(adding=False, locked=False, key=1, boxes=((10, 10, 60, 60),), serial=1)
+    over._edit_redraw = lambda: None
+    fake = User32(front, {VIEWER: 999, 900: 555, LETTERING: ME, PANE: ME, ROOT_HWND: ME, DIALOG: ME})
+    given = []
+
+    def give(hwnd):
+        given.append(hwnd)
+        fake.front = hwnd if gives else fake.front
+        return gives
+
+    monkeypatch.setattr(cs, "_user32", fake)
+    monkeypatch.setattr(windows, "give_foreground", give)
+    monkeypatch.setattr(cs.st, "edit_grip",
+                        lambda marks, point, reach, left_out: (0, "move") if point[0] < 60 else None)
+    monkeypatch.setattr(cs, "IS_WINDOWS", True)
+    return over, fake, given
+
+
+def _lp(x, y):
+    return (y & 0xFFFF) << 16 | (x & 0xFFFF)
+
+
+@pytest.mark.parametrize("message, wparam", [
+    (cs.WM_LBUTTONDOWN, 1), (cs.WM_RBUTTONDOWN, 2), (cs.WM_MBUTTONDOWN, 16), (cs.WM_XBUTTONDOWN, 1 << 16),
+    (cs.WM_MOUSEWHEEL, 120 << 16), (cs.WM_MOUSEHWHEEL, 120 << 16)],
+    ids=["left button", "right button", "middle button", "side button", "wheel", "tilt wheel"])
+def test_each_press_on_the_lettering_while_editing_with_another_program_in_front_gives_the_viewer_the_foreground(
+        monkeypatch, message, wparam):
+    over, fake, given = _layer(monkeypatch, 900)
+    over._edit_message(message, wparam, _lp(30, 30))
+    assert given == [VIEWER] and fake.front == VIEWER and over.counts["woke"] == 1
+    assert [n for n in over.notes if n["ev"] == "woke"][-1]["ok"] == 1
+    assert over._edit_message(cs.WM_MOUSEACTIVATE, 0, 0) == cs.MA_NOACTIVATE  # (and the layer is never activated)
+    over._edit_message(message, wparam, _lp(30, 30))  # (the viewer in front now: nothing more)
+    assert given == [VIEWER]
+
+
+def test_after_the_viewer_is_given_the_foreground_a_press_on_a_box_does_what_it_does_one_on_the_ground_nothing(
+        monkeypatch):
+    over, fake, given = _layer(monkeypatch, 900)
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(30, 30))  # (on the box)
+    assert given == [VIEWER] and over._press is not None and over._press["index"] == 0
+    over._edit_message(cs.WM_LBUTTONUP, 0, _lp(30, 30))
+    assert [e["kind"] for e in over.take_edits()] == ["click"]
+    fake.front = 900
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(200, 200))  # (on the empty ground: the way back to the book)
+    assert given == [VIEWER, VIEWER] and over._press is None
+    over._edit_message(cs.WM_MOUSEMOVE, 1, _lp(260, 260))
+    over._edit_message(cs.WM_LBUTTONUP, 0, _lp(260, 260))
+    assert over.take_edits() == [] and any(n["ev"] == "woke_only" for n in over.notes)
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(200, 200))  # (the viewer in front: a drag on the ground draws)
+    assert over._press is not None and over._press.get("draw")
+
+
+@pytest.mark.parametrize("front", [VIEWER, DIALOG], ids=["the viewer", "a dialog of TASlation's"])
+def test_a_press_leaves_the_foreground_where_it_is_with_the_viewer_or_a_dialog_of_taslations_in_front(monkeypatch,
+                                                                                                    front):
+    over, fake, given = _layer(monkeypatch, front)
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(200, 200))
+    assert given == [] and fake.front == front and over._press is not None and over.counts["woke"] == 0
+
+
+@pytest.mark.parametrize("front", [ROOT_HWND, LETTERING, 0], ids=["the hidden window", "the lettering", "nothing"])
+def test_a_press_with_taslations_hidden_window_or_nothing_in_front_gives_the_viewer_the_foreground(monkeypatch, front):
+    over, fake, given = _layer(monkeypatch, front)
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(30, 30))
+    assert given == [VIEWER]
+
+
+def test_a_refused_hand_over_is_counted_and_the_press_goes_on(monkeypatch):
+    over, fake, given = _layer(monkeypatch, 900, gives=False)
+    over._edit_message(cs.WM_LBUTTONDOWN, 1, _lp(30, 30))
+    assert given == [VIEWER] and over.counts["woke_failed"] == 1 and over.counts["woke"] == 0
+    assert over._press is not None  # (on a box: held all the same)
+
+
+def test_a_press_or_the_wheel_on_a_side_pane_gives_the_viewer_the_foreground_first(monkeypatch):
+    woken = []
+    monkeypatch.setitem(cs._pane_wakes, 4242, lambda why: woken.append(why))
+    monkeypatch.setitem(cs._pane_clicks, 4242, lambda x, y: woken.append(("click", x, y)))
+    assert cs._pane_proc(4242, cs.WM_MOUSEACTIVATE, 0, 0) == cs.MA_NOACTIVATE and woken == []
+    cs._pane_proc(4242, cs.WM_LBUTTONDOWN, 1, _lp(5, 6))
+    cs._pane_proc(4242, cs.WM_LBUTTONUP, 0, _lp(5, 6))
+    assert woken == ["pane", ("click", 5, 6)]  # (then the click acted on as ever)
+    assert cs._pane_proc(4242, cs.WM_MOUSEWHEEL, 120 << 16, 0) == 0 and woken[-1] == "pane"
+
+
+def test_in_reader_mode_the_lettering_is_click_through_and_a_click_reaches_the_viewer_itself():
+    assert cs.EX_STYLE & cs.WS_EX_TRANSPARENT and cs.EX_STYLE & cs.WS_EX_NOACTIVATE
+    assert cs._proc(0, cs.WM_NCHITTEST, 0, 0) == cs.HTTRANSPARENT  # (no Edit: no hit, the viewer below takes it)
+    reader = SimpleNamespace(_edit_takes=False)
+    assert cs.SeeThrough._edit_message(reader, cs.WM_LBUTTONDOWN, 1, 0) is None  # (nothing taken, nothing woken)
 
 
 # ------------------------------------------------------------------ who gets the keys

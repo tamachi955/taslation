@@ -171,7 +171,7 @@ def test_the_report_keeps_its_sections_and_keys(tmp_path):
                                   "viewer_in_front", "viewer_covered", "tab", "capture_route", "frame_size",
                                   "frames_per_s", "frame_states", "capture_area", "page_at_rest", "steady_band", "bars")
     assert report.PANES_KEYS == ("left", "right", "lettering_window", "lettering", "takes_mouse", "insert_key",
-                                 "foreground", "foreground_line", "hidden_root")
+                                 "foreground", "foreground_line", "keys_guard", "hidden_root")
     assert report.PROGRAM_KEYS == ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_language",
                                    "target_language", "mode", "translator", "ocr", "layout_model", "inpainting",
                                    "server", "offline_guard", "settings_changed", "last_error")

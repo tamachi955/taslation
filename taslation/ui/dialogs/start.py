@@ -19,7 +19,7 @@ from ...notes import TEMPORARY_STAMP
 from .. import theme
 from ..banner import break_lines
 from ..book_fields import BookFields, refused_line
-from ..layout import dialog_keys, place_by_book, show_by_itself
+from ..layout import place_by_book, show_by_itself
 
 WRAP = 470  # pixels: the dialog's text is broken into lines this wide
 HINTS = ("recognised", "several", "colophon", "last")  # what the start dialog says of the names it offers
@@ -43,16 +43,18 @@ class StartDialog(tk.Toplevel):
     make; ``entry`` is the Series field, a list of whole names with several *matches*): a name given is split into
     them, and a volume that is none keeps the dialog from answering, with a line that says why.
 
-    *first*: the session's first one, a dialog of the start - it takes the keys as ever while TASlation's window has
-    them (`layout.dialog_keys`); a later one (a new book opened during the session) came by itself and is shown
-    without taking the foreground while the person is in the book (`layout.show_by_itself`)."""
+    *first*: the session's first one, a dialog of the start; a later one is a new book opened during the session.
+    Either is shown by `layout.show_by_itself` once placed: with the keys while TASlation's own window has them, and
+    without taking the foreground while the person is in the book or in another program (it waits in sight above the
+    book; a click gives it the keys) - the first one too, which comes once Auto has found the first page, when the
+    person may be reading already (shown as ever, ``wm deiconify`` took the foreground from the book). Answered or
+    closed, it gives the foreground back to the viewer in the same call (`seethrough.closing`)."""
 
     def __init__(self, master: tk.Misc, name: str, generic: bool, on_answer: Callable[[str | None, str], None],
                  matches: Sequence[str] = (), hint: str = "", first: bool = True):
         super().__init__(master)
         self.first = first
-        if not first:
-            self.withdraw()  # (shown by `show_by_itself` once placed: `place_window` leaves it withdrawn)
+        self.withdraw()  # (shown by `show_by_itself` once placed: `place_window` leaves it withdrawn)
         self.title("TASlation")
         self.transient(master)
         self.resizable(False, False)
@@ -110,13 +112,11 @@ class StartDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._close())
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Map>", self._on_map, add="+")
-        self._keys_given = not first
         place_by_book(self, master)  # where the reader looks: over a book full screen on another monitor too
         self.entry.icursor("end")
         if first:
             self.entry.focus_set()
-        else:
-            show_by_itself(self, master, self.entry)
+        show_by_itself(self, master, self.entry)
 
     def name(self) -> str:
         return self.temporary if self.from_colophon.get() else " ".join(self.name_var.get().split())
@@ -136,17 +136,23 @@ class StartDialog(tk.Toplevel):
             button.configure(state=state)
 
     def _on_map(self, event: tk.Event) -> None:
-        """On the screen: modal over the window; the keys only when TASlation had them (Auto may find the page while
-        the reader is in the book: then the dialog waits in sight above it for a click, `dialog_keys`)."""
+        """On the screen: modal over the window (the keys: `layout.show_by_itself`)."""
         if event.widget is not self:
             return
         try:
             self.grab_set()
         except tk.TclError:
             pass
-        if not self._keys_given:
-            self._keys_given = True
-            dialog_keys(self, self.master, self.entry)
+
+    def _back(self) -> None:
+        """The foreground to the viewer in the same call that answers or closes the dialog (`seethrough.closing`:
+        only while the dialog, or TASlation's hidden window, has it)."""
+        from .. import seethrough
+
+        try:
+            seethrough.closing(self._root(), self)
+        except Exception:  # noqa: BLE001 - (the foreground comes back to the viewer as ever: `hand_back`)
+            pass
 
     def _refused(self, text: str) -> None:
         """The Volume field held no volume: said under the fields, which wait for one."""
@@ -167,6 +173,7 @@ class StartDialog(tk.Toplevel):
             self.entry.focus_set()
             return
         self.answered = True
+        self._back()
         self.destroy()
         self.on_answer(answer, name)
 
@@ -175,6 +182,7 @@ class StartDialog(tk.Toplevel):
             return
         self.answered = True
         name = self.name()
+        self._back()
         self.destroy()
         self.on_answer(None, name)
 

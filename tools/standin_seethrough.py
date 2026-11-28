@@ -85,6 +85,7 @@ EDIT_ACT_S = 10.0  # (with *edit*) what a press does on the Tk side - a region c
 EDIT_DRAG = (24, 12)  # px (at 100 %) the region's box is dragged by
 EDIT_MIN_BOX = 24  # px: the least side of a box the measure takes
 EDITOR_TITLE = "Edit region"  # (the region editor's title, the window's language being English in a run)
+WAKE_PART = 0.2  # (with *edit*) the tool's other program's window lies over the stand-in's left so much (`_edit_wake`)
 # (with *add*) adding text areas: the rectangle drawn on the page's empty space, px at 100 %, and how far from every
 # region's box and from the rectangles drawn before; the messages posted to TASlation's own windows
 ADD_BOX, ADD_CLEAR = (90, 50), 14
@@ -219,6 +220,30 @@ _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 _user32.EnumWindows.argtypes = [ENUMPROC, wintypes.LPARAM]
+DIALOG_CLASSES = ("TkTopLevel", "#32770")  # (a Tk window of TASlation's own - a dialog, the place entry - a box)
+
+
+def _class_of(hwnd: int) -> str:
+    """The class of the window *hwnd* (no title is read)."""
+    name = ctypes.create_unicode_buffer(64)
+    _user32.GetClassNameW(hwnd, name, 64)
+    return name.value
+
+
+def _own_dialogs_shown(pid: int, besides: set[int]) -> bool:
+    """Whether a window of the process *pid* of a dialog's class (`DIALOG_CLASSES`) is on the screen, but those in
+    *besides* (TASlation's hidden window, the lettering, the side panes)."""
+    found: list[int] = []
+
+    def each(hwnd, _lparam):  # type: ignore[no-untyped-def]
+        if (int(hwnd) not in besides and window_pid(hwnd) == pid and _user32.IsWindowVisible(hwnd)
+                and _class_of(hwnd) in DIALOG_CLASSES):
+            found.append(int(hwnd))
+            return False
+        return True
+
+    _user32.EnumWindows(ENUMPROC(each), 0)
+    return bool(found)
 
 
 class Activations:
@@ -483,6 +508,10 @@ class SeeWatch:
         self.lock = threading.Lock()
         self.frames: list[float] = []
         self.fronts: list[tuple[float, str]] = []
+        # (ms since the epoch, `_front_kind`) at each change, every 10 ms: TASlation's hidden window, its dialogs and
+        # its menus told apart (`standin_e2e.keys_report`); the hidden window's Tk child, read on the Tk thread
+        self.front_kinds: list[tuple[float, str]] = []
+        self.root_child = 0
         self.hits: Counter[str] = Counter()
         self.cpu: list[tuple[float, float, bool]] = []
         self.screens: dict[int, Any] = {}  # set key -> screen
@@ -503,6 +532,10 @@ class SeeWatch:
         from taslation.ui import seethrough as ui
 
         wgc.add_listener(self._frame)
+        try:
+            self.root_child = int(self.app.winfo_id())  # (its top-level, `_front_kind`: read from it with no Tk call)
+        except Exception:  # noqa: BLE001 - (no window: no hidden window told apart)
+            self.root_child = 0
         import standin_monitors
 
         standin_monitors.watch_pane_whys(self)  # (why a side pane is not on the screen: `_pane_watch`)
@@ -630,10 +663,32 @@ class SeeWatch:
             return "pane"
         return "own" if window_pid(hwnd) == self.own_pid else "other"
 
+    def _front_kind(self, hwnd: int) -> str:
+        """The window in front as the keys' look tells it (`standin_e2e.keys_report`): "standin", "root" (TASlation's
+        hidden window), "overlay", "pane", "dialog" (a Tk window of TASlation's own - a dialog, the region editor, the
+        place entry - or a message box), "menu", "own" (another window of TASlation's), "other" or "none"; a window of
+        TASlation's but a dialog or a menu while a dialog of its own is on the screen gets "+dialog". Handles and
+        classes only (no title, no Tk call: the watch's thread)."""
+        who = self._who(hwnd)
+        if who not in ("own", "overlay", "pane"):
+            return who
+        root = int(_user32.GetAncestor(self.root_child, GA_ROOT) or 0) if self.root_child else 0
+        kind = who
+        if who == "own":
+            name = _class_of(hwnd)
+            kind = "root" if root and hwnd == root else "menu" if name == "#32768" else (
+                "dialog" if name in DIALOG_CLASSES else "own")
+        if kind in ("dialog", "menu"):
+            return kind
+        over = self.over()
+        panes = [int(h) for h in (getattr(over, "panes", {}) or {}).values()]
+        mine = {root, int(getattr(over, "hwnd", 0) or 0), *panes}
+        return kind + "+dialog" if _own_dialogs_shown(self.own_pid, mine) else kind
+
     def _run(self) -> None:
         next_hit = next_cpu = next_copy = 0.0
         next_gpu = time.monotonic() + GPU_EVERY_S
-        last_front = None
+        last_front = last_kind = None
         while not self.stop.wait(0.01):
             now = time.monotonic()
             front = int(_user32.GetForegroundWindow() or 0)
@@ -641,6 +696,10 @@ class SeeWatch:
             if who != last_front:
                 self.fronts.append((time.time() * 1000, who))
                 last_front = who
+            kind = self._front_kind(front)
+            if kind != last_kind:
+                self.front_kinds.append((time.time() * 1000, kind))
+                last_kind = kind
             self.over()  # (kept)
             if now >= next_cpu:
                 at = time.time() * 1000
@@ -1397,6 +1456,7 @@ class SeeWatch:
             else:
                 drag["resize"] = why
         self._edit_more(over, origin, size, wait, lp, out)
+        self._edit_wake(over, origin, size, wait, lp, out)
         kinds = Counter(n["ev"] for n in list(over.notes)
                         if n["ev"] in ("edit", "press", "edit_click", "edit_double", "edit_move", "edit_resize",
                                        "edit_add", "edit_draw", "edit_ground", "edit_plate", "press_given_up",
@@ -1588,6 +1648,88 @@ class SeeWatch:
         newest = app.history.done[-1] if len(app.history.done) > steps else None
         delete["change"] = None if newest is None else [newest.kind, newest.state]
         delete["key_let_go_ms"] = wait(lambda: not over.delete_held(), 5.0)
+
+    def _edit_wake(self, over: Any, origin: tuple[int, int], size: tuple[int, int],
+                   wait: Callable[[Callable[[], bool], float], float | None], lp: Callable[[int, int], int],
+                   out: dict[str, Any]) -> None:
+        """(`_edit_measure`, last) A press on the page while another program has the keys: a small window of a process
+        of the tool's own (`standin_cover.py`, over the stand-in's left WAKE_PART; another program's to TASlation) given
+        the foreground while the stand-in has it, then a click posted to the lettering's window - on a region's box,
+        then (the cover given the foreground again) on the empty ground: how long until the stand-in is the window in
+        front again, whether its page said it had the keys again, and whether the press was handed over (on the box:
+        a click; on the ground: nothing, the press only brought the book back). The cover goes after, the foreground
+        back to the stand-in if it holds it."""
+        import subprocess
+
+        from taslation import seethrough as st
+
+        wake: dict[str, Any] = {}
+        out["wake"] = wake
+        settled = wait(lambda: over._marks_live is not None and over._press is None, 10.0)
+        marks = over._marks_live if settled is not None else None
+        panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+
+        def free(x: int, y: int) -> bool:
+            sx, sy = origin[0] + x, origin[1] + y
+            return not any(p[0] <= sx < p[2] and p[1] <= sy < p[3] for p in panes)
+
+        spots: dict[str, tuple[int, int]] = {}
+        for i, b in enumerate(marks.boxes if marks is not None else ()):
+            middle = ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+            big = b[2] - b[0] >= EDIT_MIN_BOX and b[3] - b[1] >= EDIT_MIN_BOX
+            if (i not in over._left_out and big and free(*middle)
+                    and st.edit_grip(marks, middle, st.scaled(st.GRIP_PX, over._dpi), over._left_out) is not None):
+                spots["box"] = middle
+                break
+        ground = self._spot(over, origin, size, [])
+        if ground is not None and free(ground[0] + 4, ground[1] + 4):
+            spots["ground"] = (ground[0] + 4, ground[1] + 4)
+        if not spots or int(_user32.GetForegroundWindow() or 0) != self.hwnd:
+            wake["skipped"] = "no spot" if not spots else "the stand-in not in front"
+            return
+        argv = [sys.executable, "-I", str(Path(__file__).with_name("standin_cover.py")), "--over", str(self.hwnd),
+                "--part", str(WAKE_PART)]
+        cover = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            ready = (cover.stdout.readline() if cover.stdout else "").split()
+            hwnd = int(ready[1]) if len(ready) > 1 and ready[0] == "ready" else 0
+            wake["cover"] = bool(hwnd)
+            for name, (x, y) in spots.items():
+                press: dict[str, Any] = {"posted": False}
+                wake[name] = press
+                wait(lambda: not getattr(self.app, "busy", False) and over._press is None, 30.0)
+                if int(_user32.GetForegroundWindow() or 0) != self.hwnd or cover.stdin is None:
+                    press["why"] = "the stand-in not in front"
+                    continue
+                cover.stdin.write("front\n")
+                cover.stdin.flush()
+                press["cover_took"] = (cover.stdout.readline() if cover.stdout else "").strip()
+                press["other_in_front"] = int(_user32.GetForegroundWindow() or 0) == hwnd != 0
+                if not press["other_in_front"]:
+                    continue
+                said_from = len(self.standin_said()) if self.standin_said is not None else None
+                serial, t = over._edit_serial, time.monotonic()
+                _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(x, y))
+                _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(x, y))
+                press["posted"] = True
+                press["standin_in_front_ms"] = wait(lambda: int(_user32.GetForegroundWindow() or 0) == self.hwnd, 1.5)
+                press["handed"] = wait(lambda: over._edit_serial > serial, 0.5) is not None
+                press["handed_as"] = next((n["ev"] for n in reversed(list(over.notes)) if n["ev"].startswith("edit_")
+                                           and n["ev"] != "edit" and n["t"] >= t), None)
+                press["woke"] = [n.get("ok") for n in list(over.notes) if n["ev"] == "woke" and n["t"] >= t]
+                if said_from is not None:  # (the page's own word: a key would reach it now)
+                    keys = [w.get("on") for _t, w in self.standin_said()[said_from:] if w.get("ev") == "keys"]
+                    press["page_keys"] = keys[-1] == "1" if keys else None
+        finally:
+            try:
+                if cover.stdin is not None:
+                    cover.stdin.write("end\n")
+                    cover.stdin.flush()
+                    cover.stdin.close()
+                cover.wait(5.0)
+            except Exception:  # noqa: BLE001 - (gone already)
+                cover.kill()
 
     def _add_safe(self) -> None:
         try:
@@ -1925,6 +2067,11 @@ class SeeWatch:
         if app is None or not getattr(app, "_see_hidden", False) and not getattr(app, "_see_root_hwnd", 0):
             return None
         looks ={k.split(":", 1)[1]: v for k, v in self.own_states.items() if k.startswith("hidden:")}
+        over = getattr(app, "_see_through", None)
+        try:
+            counts = dict(over.counts) if over is not None else {}
+        except Exception:  # (a window that could not be made: no counts)
+            counts = {}
         dialogs = Counter({k.split(":", 1)[1]: v for k, v in self.own_states.items() if k.startswith("dialogs shown:")})
         return {"looks": looks, "looks_off": looks.get("off", 0), "looks_not_off": sum(
                     v for k, v in looks.items() if k not in ("off", "no handle yet", "not shown")),
@@ -1940,7 +2087,11 @@ class SeeWatch:
                 "foreground_notes": int(getattr(app, "_see_front_notes", 0) or 0),
                 "foreground_polled": int(getattr(app, "_see_front_polled", 0) or 0),
                 "foreground_hooked": bool(getattr(getattr(app, "_see_fronts", None), "hooked", False)),
-                "closing_gave_back": int(getattr(app, "_see_closing", 0) or 0)}
+                "closing_gave_back": int(getattr(app, "_see_closing", 0) or 0),
+                # (the guard of the keys, by what was in front: `seethrough.guard`; and a press on the lettering or
+                # a pane that made the viewer the foreground window: `SeeThrough._wake_viewer`)
+                "guarded": dict(getattr(app, "_see_guarded", {}) or {}),
+                "woke": {k: int(counts.get(k, 0) or 0) for k in ("woke", "woke_failed")}}
 
     def _viewer_frame(self) -> np.ndarray | None:
         """The viewer's newest captured frame, cut to its client area as the see-through window lies on it (RGB)."""

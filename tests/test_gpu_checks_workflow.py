@@ -234,10 +234,11 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
     import standin_e2e
 
     groups = _groups()
-    covered, editing, measured, picked = [], [], [], []
+    covered, editing, measured, picked, keyed = [], [], [], [], []
     for group, spec in groups.items():
         assert sorted(spec) == ["measure", "role", "scenarios", "size"], group
-        assert spec["role"] in ("reader", "editing") and spec["measure"] in ("", "edit", "pick", "pick-plain"), group
+        assert spec["role"] in ("reader", "editing") and spec["measure"] in ("", "edit", "pick", "pick-plain",
+                                                                            "keys"), group
         names = standin_e2e.wanted(spec["scenarios"])
         # (the group says what the tool runs, a pair comes along, and an editing group says so - the one that
         # measures editing on the page too; a pick says which other tab was in front)
@@ -245,8 +246,8 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
                   else "-editing" if spec["role"] == "editing" else "")
         assert group == "-".join(names) + suffix, group
         assert spec["measure"] != "edit" or spec["role"] == "editing", group
-        into = (measured if spec["measure"] == "edit" else picked if spec["measure"]
-                else editing if spec["role"] == "editing" else covered)
+        into = (measured if spec["measure"] == "edit" else keyed if spec["measure"] == "keys"
+                else picked if spec["measure"] else editing if spec["role"] == "editing" else covered)
         into.extend(names)
     # every scenario of "all" once, and scenario k's three paces (never in "all") once; of those by their names only,
     # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized, the
@@ -272,6 +273,13 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         assert line in run, measure
         assert standin_e2e.parse(["--chooser", "--standin-start-tab", tab, "--scenario", "tab0"]).chooser
     assert not set(covered) & set(standin_e2e.M_STEPS)  # (a second monitor: none on a runner)
+    # and the foreground after the start (the viewer chooser, the book's name asked) and a turn (fg, by its name only),
+    # in editing, where the lettering takes the mouse, at the tool's size
+    assert keyed == ["fg"] and "fg" in standin_e2e.NAMED_ONLY
+    assert [(s["role"], s["size"]) for s in groups.values() if s["measure"] == "keys"] == [("editing", "")]
+    assert "if ($env:MEASURE -eq 'keys') { $arguments += @('--chooser', '--book-asked') }" in run
+    keys = standin_e2e.parse(["--chooser", "--book-asked", "--editing", "--scenario", "fg"])
+    assert keys.chooser and keys.book_asked and keys.editing
     behind = "if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }"
     assert behind in _step("standin", "Run: tools/standin_e2e.py")["run"]
     # the groups whose criteria look at the side panes: a stand-in with room for them beside a spread (the tool's own
@@ -953,11 +961,37 @@ def _edit(**parts) -> dict:
             "draw": {"handed_as": "edit_draw", "stored_ms": 5100.0},
             "delete": {"chosen_ms": 35.0, "key_held_ms": 80.0, "dropped_ms": 700.0, "change": ["drop", "done"],
                        "key_let_go_ms": 50.0},
+            "wake": {"cover": True,
+                     "box": {"posted": True, "other_in_front": True, "standin_in_front_ms": 12.0, "handed": True,
+                             "page_keys": True},
+                     "ground": {"posted": True, "other_in_front": True, "standin_in_front_ms": 9.0, "handed": False,
+                                "page_keys": True}},
             "fronts_meanwhile": ["own", "standin"]}
     for name, value in parts.items():
         edit[name] = value if not isinstance(value, dict) or not isinstance(edit.get(name), dict) else {
             **edit[name], **value}
     return edit
+
+
+def test_the_foreground_after_the_start_and_each_turn_is_judged_in_scenario_fg_alone():
+    s = _summarise()
+
+    def failed(keys, names=("fg",)) -> list[str]:
+        found: list[tuple[str, bool]] = []
+        s._keys_correctness({"keys": keys}, list(names),
+                            lambda _scenario, criterion, ok, seen=None: found.append((criterion, bool(ok))))
+        return [c for c, ok in found if not ok]
+
+    good = {"page_said_keys": True, "moments": [
+        {"what": "start", "in_front": ["standin"], "standin_without_keys_ms": 0, "ok": True},
+        {"what": "turn 1", "in_front": ["standin", "dialog"], "standin_without_keys_ms": 30, "ok": True}]}
+    assert failed(good) == [] and failed(good, ("c",)) == [] and failed(None) == []
+    lost = {**good, "moments": [good["moments"][0], {**good["moments"][1], "in_front": ["standin", "root"],
+                                                     "ok": False}]}
+    assert failed(lost) == ["after the start and each page turn the window in front was the viewer's, its page with "
+                            "the keys, unless a dialog of TASlation's was open"]
+    assert failed({**good, "moments": good["moments"][:1]}) == ["the start and a page turn were looked at"]
+    assert failed({**good, "page_said_keys": False}) == ["the stand-in's page said where its keys were"]
 
 
 def test_editing_on_the_page_is_judged_on_what_a_press_does_and_its_jobs_times_are_reported(tmp_path):
@@ -969,10 +1003,11 @@ def test_editing_on_the_page_is_judged_on_what_a_press_does_and_its_jobs_times_a
                             lambda _scenario, criterion, ok, seen=None: found.append((criterion, bool(ok))))
         return [c for c, ok in found if not ok], len(found)
 
-    assert failed(_edit()) == ([], 8)
+    assert failed(_edit()) == ([], 9)
     assert failed(None) == ([], 0)  # (no --see-edit: nothing judged)
+    assert failed({k: v for k, v in _edit().items() if k != "wake"}) == ([], 8)  # (a tool before it: not looked at)
     # (the corner's drag where the box had no room for it, no plate free of the panes: the page's layout, not a fault)
-    assert failed(_edit(drag={"resize": "no room"}, plate={"region": None, "handed_as": None})) == ([], 8)
+    assert failed(_edit(drag={"resize": "no room"}, plate={"region": None, "handed_as": None})) == ([], 9)
     faults = {
         "a region of a page done was found to edit on": _edit(region=None),
         "the see-through window took the mouse over the region": _edit(hit_box="standin"),
@@ -985,14 +1020,21 @@ def test_editing_on_the_page_is_judged_on_what_a_press_does_and_its_jobs_times_a
         "the Delete key's message dropped the region chosen, as a change Undo takes back":
             _edit(delete={"dropped_ms": None}),
         "the Delete key was let go of after": _edit(delete={"key_let_go_ms": None}),
+        "a press on the page with another program in front made the stand-in the window in front, and one on the "
+        "empty ground did nothing else": _edit(wake={"box": {"posted": True, "standin_in_front_ms": None}}),
     }
+    wake = "a press on the page with another program in front made the stand-in the window in front, and one on the " \
+           "empty ground did nothing else"
+    assert failed(_edit(wake={"ground": {"posted": True, "handed": True}}))[0] == [wake]  # (the ground press did more)
+    assert failed(_edit(wake={"skipped": "the stand-in not in front", "box": None, "ground": None}))[0] == [wake]
+    assert failed(_edit(wake={"ground": None})) == ([], 9)  # (no empty ground free of the panes: the box alone)
     for criterion, edit in faults.items():
         assert failed(edit)[0] == [criterion], (criterion, failed(edit))
     assert failed(_edit(error="KeyError"))[0] == ["a region of a page done was found to edit on"]
     # the jobs after a press are the computer's speed: reported, never judged
     slow = _edit(drag={"stored_ms": None}, plate={"done_ms": None}, draw={"stored_ms": None},
                  delete={"key_held_ms": None})  # (Delete held only with the stand-in really in front)
-    assert failed(slow) == ([], 8)
+    assert failed(slow) == ([], 9)
     report = {**_report(modes={"rows": [[0.1, "translator"]]}), "role_kept": "translator"}
     report["run"]["see_through"] = {"edit": _edit()}
     out = s.standin(report, "", {}, "g-see-edit", 600, "editing")

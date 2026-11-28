@@ -466,8 +466,11 @@ rows' languages.
   first shows it; once shown it stays shown in Windows' sense, since Tk's dialogs need a master in its normal state -
   every look "off" (or "not shown") is expected, with what `keep_hidden` put back, how often the foreground went
   back to the viewer (and how often a dialog's closing gave it back at once, `closing_gave_back`), the log of the
-  foreground's counts and newest lines (`foreground`, `foreground_lines`: kinds only; `foreground_notes` the changes
-  the hook brought, `foreground_polled` those first seen at a tick), what the window being in front gave instead (`front`: a dialog brought up, the chooser, the
+  foreground's counts and newest lines (`foreground`, `foreground_lines`: kinds only, a line to a window of TASlation's
+  ending in what it did just before; `foreground_notes` the changes the hook brought, `foreground_polled` those first
+  seen at a tick; `guarded`: how often the guard of the keys gave the foreground back, by what was in front, and
+  `woke`: how often a press on the lettering or a pane made the viewer the foreground window), what the window being
+  in front gave instead (`front`: a dialog brought up, the chooser, the
   Menu at the pointer, the viewer - after a click on its taskbar button, which only the owner's own click makes),
   how many dialogs of the process were on a monitor at each look, and when the viewer chooser and the banner's
   dialog came and went). The tools choose the stand-in with `App(settings, window_query=browser.token, ...)`, as
@@ -488,7 +491,13 @@ rows' languages.
   TASlation is in front - over a window the person uses meanwhile nothing is raised, the cover only goes). Scenario
   `h` (by its name only) is two turns once it is back. `--chooser` names no viewer: the viewer chooser comes and the
   driver answers it through its own object, first giving it the foreground (only while the stand-in or the cover is
-  in front). `--standin-bars-held MS` has a stand-in with a profile come with its bars up for MS ms (with
+  in front). Scenario `fg` (by its name only) is the start and one turn, then 20 s with nothing done, for where the
+  keys are (`run.keys`, `keys_report`): from KEYS_GRACE_MS after the start (the chooser answered, or the window
+  ready) and after each turn's first frame until the next, the windows that were in front (looked at every 10 ms)
+  and the longest spell of the stand-in in front without its page having the keys (the stand-in's page says so by
+  itself every KEYS_LOOK_MS, `keys on=`: nothing is pressed for it); a moment is ok when only the stand-in, a dialog
+  or a menu of TASlation's - or anything while a dialog of TASlation's is on the screen - was in front and the page
+  never without its keys for KEYS_LAG_MS. `--standin-bars-held MS` has a stand-in with a profile come with its bars up for MS ms (with
   `--standin-option bar_key_hide=0` its turns leave them up). The side panes are looked at every 0.25 s (wanted,
   shown, visible, topmost, above the stand-in; their ground and the room beside the page; the lettering; the windows
   over the viewer; who is in front) and `run.behind` keeps them as they changed, with the time from back in sight to
@@ -515,7 +524,12 @@ rows' languages.
   editor, no change, nothing chosen after it) and a rectangle drawn there (a "draw": a region of the reader's at the
   rectangle, and the others still in the order typed); last, that region chosen by a click and the Delete key's
   WM_HOTKEY POSTED to the lettering's own window (`delete`: the ms until the key is TASlation's, until the region is
-  dropped, the change in the history, and until the key is let go of after). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
+  dropped, the change in the history, and until the key is let go of after); then, with another program in front - a
+  small window of the tool's own over a fifth of the stand-in (`tools/standin_cover.py --part 0.2`, its word "front"
+  made the foreground window only while the stand-in has it) -, a press and its release POSTED to the lettering's
+  window on a box and on the empty ground (`wake`: per spot whether the other program was in front, the ms until the
+  stand-in is the window in front, whether the press was handed over and as what - the one on the ground as nothing -,
+  the layer's "woke" notes, and whether the stand-in's page had the keys after it). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
   presses, clicks - none expected, the whole client area being the overlay's - and its turns). In every run the
   right pane's foot rows are looked at once a second (`panes.foot`: their tops in the client area, one per frame
   size, `constant`). `--editing` keeps the role as editing as `--see-edit` does, but does nothing on the page (the
@@ -728,7 +742,7 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then eleven stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+Then twelve stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
 three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
 shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as the tool may on a runner,
 `GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor;
@@ -737,7 +751,9 @@ first page done, then g's one page held long; and tab0-pick and tab0-pick-plain,
 viewer chooser while the stand-in's other tab is in front - made-up Japanese lines, grey bars -, judged on nothing of
 that tab read or learnt and the right pane's line that it shows no page of a book (both tabs are pale pages the window
 waits out as pages still loading, so the line comes after PICK_NOTHING_S, and tab0 begins no sooner after the pick:
-`Director.pick_waited`); each with `--wait-done`, which
+`Director.pick_waited`); and fg-keys, scenario fg in editing with `--chooser --book-asked` (the viewer chooser and
+the start's dialog for the book's name answered as a person would, then a turn), judged on where the keys were; each
+with `--wait-done`, which
 holds no rest of k; seven at a time).
 Each group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where
 TASlation starts for a new book), judged as a criterion of its own -, the stand-in's size - the tool's 1300 x 900
@@ -768,7 +784,10 @@ stand-in was back in sight, and there they stayed; with `--see-edit` a region of
 taking the mouse over it, a click choosing it with no editor, a double click opening its editor on it, the drags,
 the plate and the rectangle handed over as what they are, a click on the empty ground choosing, opening and
 changing nothing, the Delete key's message dropping the region chosen as a change of the history and the key let
-go of after, ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page,
+go of after, a press on the page with another program in front making the stand-in the window in front and one on the
+empty ground doing nothing else; in fg the start and the turn looked at, after each the window in front the viewer's,
+its page with the keys, unless a dialog of TASlation's was open, and the stand-in's page saying where its keys were,
+...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page,
 holds at their cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first
 bubble, the time the backlog took to empty; editing's times, `edit_figures`: the jobs a drag, a place typed or a
 rectangle start, the Delete key held, which needs the stand-in really in front), with what each scenario was meant

@@ -6,7 +6,8 @@ taking every click and key itself.
   hit-test: every click, wheel and pointer move goes to the window under it, and ``WindowFromPoint`` never gives it) |
   WS_EX_NOACTIVATE (never the foreground) | WS_EX_TOPMOST | WS_EX_TOOLWINDOW (no taskbar button, not in Alt+Tab); its
   window procedure answers WM_NCHITTEST with HTTRANSPARENT and WM_MOUSEACTIVATE with MA_NOACTIVATE besides. It
-  sends, posts and presses nothing, and never moves the foreground.
+  sends, posts and presses nothing, and moves the foreground only to the viewer, at a press of the person's on it or
+  on a side pane (see Editing).
 * It lies on the viewer's client area as it is captured (`windows._client_box`, cut from the frame with
   `wgc.crop_box`): its pixel (x, y) is the captured frame's pixel (x, y), at every scale - the process is per-monitor
   DPI aware (`windows.enable_dpi_awareness`), so the client rectangle, the frame and this window are all in the screen's
@@ -62,7 +63,12 @@ taking every click and key itself.
   patches whatever the frame says; the one whose original is shown has none. A press the window holds is no press
   on the viewer (`pressing`: frames go on being taken). The thread then waits for its messages too
   (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its own window), so a drag follows the pointer at once. It
-  sends, posts and presses nothing to another window.
+  sends, posts and presses nothing to another window. Since a click on the page never reaches the viewer then, a
+  press (a button, the wheel) on the lettering's window or on a side pane while the viewer is not the window in
+  front - another program has the keys, or none, or TASlation's hidden window; not a dialog, the region editor, the
+  place entry, a box or a menu of TASlation's - first makes the viewer the foreground window (`wakes_viewer`,
+  `_wake_viewer`: the process has just received the input), then does what it does; one on the empty ground does
+  nothing else. In Reader mode the lettering's window is click-through, and a click reaches the viewer itself.
 * The Insert key (`set_add_key`: ``Settings.add_area_key``; the Tk thread's Add area, `ui.see_edit`) and the Delete
   key (`set_delete_key`: wanted only while editing with a region chosen; the Tk thread drops it) are the keys
   TASlation takes: hot keys of the lettering's window (``RegisterHotKey``, each alone - Shift+Insert, Ctrl+Insert,
@@ -503,7 +509,29 @@ def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
     return _user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
 
+GA_ROOTOWNER = 3
+WAKES = frozenset({WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN, WM_MOUSEWHEEL, WM_MOUSEHWHEEL})
+
+
+def wakes_viewer(front: int, pid: int, tops: tuple[int, ...], viewer: int, own_pid: int, own: frozenset[int]) -> bool:
+    """Whether a press of the person's (a button pressed, the wheel turned) that the lettering's window or a side pane
+    has just received makes the viewer's window *viewer* the foreground window first: it is not in front - neither it
+    nor a popup of its is the window in front *front* (*tops*: that window, its root and its root owner) -, and the
+    window in front is no window of this process's (*own_pid*) the person types in: it is another program's (*pid*),
+    none, or one of *own* (the hidden window, the lettering's, the panes'), never a dialog, the region editor, the place
+    entry, a message box nor a menu of TASlation's. In editing the lettering's window takes the mouse over the
+    viewer's whole page and is never activated (MA_NOACTIVATE): a click on the page would otherwise leave the keys
+    with the program that had them before, which the person left for the book."""
+    if not viewer:
+        return False
+    if front and viewer in tops:
+        return False
+    return not (front and pid == own_pid and front not in own)
+
+
 _pane_clicks: dict[int, Any] = {}  # a left pane's window -> what takes its clicks: (x, y) in its own pixels
+_pane_wakes: dict[int, Any] = {}  # a side pane's window -> what makes the viewer the foreground window at a press on it
+# (`SeeThrough._wake_viewer`)
 # a side pane's window -> when the left button was pressed on it (`_pane_proc`): a release is a click only after a
 # press on the pane itself, so that a press that began on the viewer - a page dragged with the pointer - and ends on a
 # pane's control fires nothing; one whose release went elsewhere is forgotten (`SeeThrough._pane_presses`)
@@ -514,6 +542,12 @@ PRESS_STALE_S = 0.25  # a press on a pane is forgotten once the button is up, th
 def _pane_proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
     if message == WM_MOUSEACTIVATE:
         return MA_NOACTIVATE  # (a click is taken, the window never activated: the viewer keeps the keyboard)
+    if message in WAKES:  # (another program in front: the viewer made the foreground window first, `wakes_viewer`)
+        wake = _pane_wakes.get(int(hwnd or 0))
+        if wake is not None:
+            wake("pane")
+        if message in (WM_MOUSEWHEEL, WM_MOUSEHWHEEL):
+            return 0
     if message == WM_LBUTTONDOWN:
         _pane_downs[int(hwnd or 0)] = time.monotonic()
         return 0
@@ -665,6 +699,7 @@ class SeeThrough:
         self.hwnd = 0
         self.panes: dict[str, int] = {}  # "left", "right" -> the side pane's window
         self._viewer = 0
+        self._root = 0  # (the Tk thread's, `set_root`) TASlation's own hidden window
         self._on = True
         self._lock = threading.Lock()
         self._store = st.SetStore()
@@ -679,7 +714,7 @@ class SeeThrough:
                        "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
                        "clicks": 0, "hovers": 0, "keys": 0, "key_registered": 0, "key_released": 0,
                        "key_failed": 0, "deletes": 0, "delete_registered": 0, "delete_released": 0,
-                       "delete_failed": 0}
+                       "delete_failed": 0, "woke": 0, "woke_failed": 0}
         # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels, the boxes of
         # its plates that take a click) or None, from the Tk thread; what shows of each, (serial, screen origin, size)
         # or None, the window thread's own
@@ -950,6 +985,11 @@ class SeeThrough:
         """The see-through windows: the lettering's and the side panes'."""
         return frozenset(h for h in (self.hwnd, *self.panes.values()) if h)
 
+    def set_root(self, hwnd: int) -> None:
+        """TASlation's own hidden window (the Tk thread's, every tick): in front, it takes no key of the person's -
+        a press on the page makes the viewer the foreground window then too (`wakes_viewer`)."""
+        self._root = int(hwnd or 0)
+
     def set_edit(self, marks: st.Marks | None) -> None:
         """the editing marks on the page (`seethrough.Marks`), or None: Reader mode (the lettering's window click-through
         again, a press held given up). The same marks handed again change nothing."""
@@ -1096,6 +1136,35 @@ class SeeThrough:
                     self._arrived.pop(old, None)
             self._poke()
 
+    def _wake_viewer(self, why: str) -> bool:
+        """(the window thread, a press of the person's on the lettering's window or a side pane just received:
+        `_edit_message`, `_pane_proc`) The viewer's window made the foreground window when `wakes_viewer` says so - this
+        process received the input, so Windows lets it hand the foreground on -, before the press does what it does.
+        Counted ("woke"; "woke_failed" when Windows kept it elsewhere) and noted ("woke": *why*, whether it holds it
+        now). Whether it was asked for."""
+        viewer = self._viewer
+        if not IS_WINDOWS or not viewer:
+            return False
+        from . import windows
+
+        try:
+            front = int(_user32.GetForegroundWindow() or 0)
+            pid = wintypes.DWORD(0)
+            tops: tuple[int, ...] = ()
+            if front:
+                _user32.GetWindowThreadProcessId(front, ctypes.byref(pid))
+                tops = (front, int(_user32.GetAncestor(front, GA_ROOT) or 0),
+                        int(_user32.GetAncestor(front, GA_ROOTOWNER) or 0))
+            if not wakes_viewer(front, int(pid.value), tops, viewer, os.getpid(),
+                                self.own_windows() | ({self._root} if self._root else set())):
+                return False
+            ok = windows.give_foreground(viewer)
+        except (OSError, RuntimeError, AttributeError):
+            ok = False
+        self.counts["woke" if ok else "woke_failed"] += 1
+        self._note("woke", why=why, ok=int(bool(ok)))
+        return True
+
     def _clicked(self, side: str, x: int, y: int) -> None:
         """(the window thread, from a side pane's window procedure) a click on the pane, kept for the Tk thread."""
         self._clicks.append((side, int(x), int(y), time.monotonic()))
@@ -1115,6 +1184,7 @@ class SeeThrough:
                 if pane:
                     self.panes[side] = pane
                     _pane_clicks[pane] = lambda x, y, s=side: self._clicked(s, x, y)
+                    _pane_wakes[pane] = self._wake_viewer
         self._ready.set()
         if not self.hwnd:
             return
@@ -1142,6 +1212,7 @@ class SeeThrough:
             self._free_dib()
             for pane in self.panes.values():
                 _pane_clicks.pop(pane, None)
+                _pane_wakes.pop(pane, None)
                 _user32.DestroyWindow(pane)
             self.panes = {}
             _user32.DestroyWindow(self.hwnd)
@@ -1553,6 +1624,7 @@ class SeeThrough:
         if message == WM_SETCURSOR:
             self._set_cursor()
             return 1
+        woke = message in WAKES and self._wake_viewer("press")  # (another program in front: the viewer first)
         if message in SWALLOWED:
             return 0
         if message in SIDE_BUTTONS:
@@ -1560,7 +1632,7 @@ class SeeThrough:
         if message in (WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN):
             point = (ctypes.c_short(int(lparam) & 0xFFFF).value, ctypes.c_short((int(lparam) >> 16) & 0xFFFF).value)
             if message == WM_LBUTTONDOWN:
-                self._edit_press(point, bool(int(wparam or 0) & MK_SHIFT))
+                self._edit_press(point, bool(int(wparam or 0) & MK_SHIFT), woke)
             elif message == WM_MOUSEMOVE:
                 self._edit_move(point)
             elif message == WM_LBUTTONUP:
@@ -1581,14 +1653,16 @@ class SeeThrough:
         look = self._last_look
         return (int(look[6][0]), int(look[6][1])) if look is not None else None
 
-    def _edit_press(self, point: tuple[int, int], shift: bool) -> None:
+    def _edit_press(self, point: tuple[int, int], shift: bool, woke: bool = False) -> None:
         """A press on the page while editing: on a box (or its number plate) it takes hold of it - a corner to resize it,
         the plate to type its place (or move the box), else the box to move it, or a click (`Marks.locked`: a click
         only; the second press of a double click, "double", without Shift: on the box the last click was on, within
         the system's double-click time and reach of it, `double_click`) -; with a region to add, it begins the
         rectangle; on the empty ground - or on a page with no marks of its own - it begins a rectangle drawn to add a
         region ("draw"; a click only while presses only click). The capture is the window's until it is let go: the
-        next moves are the window's whatever the pointer passes over."""
+        next moves are the window's whatever the pointer passes over. A press on the empty ground that made the
+        viewer the foreground window (*woke*: another program had the keys, `_wake_viewer`) does nothing else - it
+        was the person's way back to the book ("woke_only")."""
         marks = self._marks_live
         if self._edit_size() is None or (marks is None and not self._edit_takes):
             return
@@ -1597,6 +1671,10 @@ class SeeThrough:
         else:
             grip = (st.edit_grip(marks, point, st.scaled(st.GRIP_PX, self._dpi), self._left_out)
                     if marks is not None else None)
+            if grip is None and woke:
+                self._last_click = None
+                self._note("woke_only", x=point[0], y=point[1])
+                return
             if grip is None:
                 press = {"draw": marks is None or not marks.locked, "start": point, "now": point, "moved": False,
                          "marks": marks, "key": marks.key if marks is not None else int(self._look_key or 0)}

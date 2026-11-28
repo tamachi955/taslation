@@ -879,10 +879,11 @@ CAPTION_CHILD_CLASS = "InputNonClientPointerSource"  # WinUI's child over the ti
 
 
 def give_foreground(hwnd: int) -> bool:
-    """Give the foreground to *hwnd*, a window of this program that is on the screen, from whichever window has it
-    (the viewer, say). No key is pressed for it (an ALT tap, the usual way to be let through, would reach the
-    viewer: Chrome takes a lone ALT for its menu, and the reader's next key would go there): for a moment this
-    thread shares its input with the foreground window's, which is what lets Windows hand the foreground over.
+    """Give the foreground to *hwnd*, a window on the screen - one of this program's, or the viewer's -, from
+    whichever window has it (the viewer, another program). No key is pressed for it (an ALT tap, the usual way to
+    be let through, would reach the viewer: a browser takes a lone ALT for its menu, and the reader's next key would
+    go there): for a moment this thread shares its input with the foreground window's, which is what lets Windows
+    hand the foreground over.
     Returns whether *hwnd* has it now; a minimised or hidden window is left as it is."""
     _require_windows()
     if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):

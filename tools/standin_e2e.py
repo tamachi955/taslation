@@ -292,6 +292,10 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "g": ("one page held long", ["n", "w90000"]),
     # (by its name only; with --start-behind) the first turns once the stand-in, out of sight at the start, is back
     "h": ("turns after a start behind other windows", ["n", "w6000", "n", "w6000"]),
+    # (by its name only; best with --chooser) the start and one turn, then 20 s with no other: who is in front and
+    # whether the stand-in's page has the keys, every 10 ms (`standin_seethrough.SeeWatch`'s fronts and the page's
+    # focus and blur)
+    "fg": ("the foreground after the start and one turn", ["n", "w20000"]),
     # (by their names only, "m" asks for m0-m4) the stand-in's window over this computer's monitors
     # (`standin_monitors`): each place taken while the window is at rest, then every dialog and menu of the window's
     # opened there and measured (`standin_monitors.Tour`), then a turn
@@ -332,7 +336,7 @@ R_STEPS = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # what "resize" asks
 WINDOW_STEPS = (*M_STEPS, *R_STEPS)
 TAB_STEPS_ASKED = ("tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # what "tab" asks for (tab0 only by its name)
 TAB_SCENARIOS = ("tab0", *TAB_STEPS_ASKED)  # (tab6 moves the book into a window of its own: always the last)
-NAMED_ONLY = ("q", "f3", "s", "g", "h", *WINDOW_STEPS, *TAB_SCENARIOS)  # scenarios never in "all", by their names
+NAMED_ONLY = ("q", "f3", "s", "g", "h", "fg", *WINDOW_STEPS, *TAB_SCENARIOS)  # scenarios never in "all", by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 RELEASE = re.compile(r"o\d*")  # its release ("oN": the stand-in's answer drawn N ms after it)
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
@@ -5486,7 +5490,66 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                                         for e in events if e["ev"] in PROFILE_EVENTS]}
            if getattr(director.args, "standin_profile", "") else {}),
         "rested_pages": rested_pages(rows),
+        "keys": keys_report(director, events, offset, turns, ended, rel),
     }
+
+
+KEYS_GRACE_MS = 1000  # a moment's first ms left out of the keys' look: a dialog's closing hands the foreground back
+# within HAND_BACK_WAIT_S and a tick, and the stand-in's page says its keys within its KEYS_LOOK_MS
+KEYS_LAG_MS = 200  # ... and a spell of the stand-in in front without its page's keys shorter than this is the
+# looks' lag
+KEYS_FINE = ("standin", "dialog", "menu")  # in front after a moment: the viewer, or a dialog or a menu of TASlation's
+KEYS_KEPT = 200  # the changes kept in the report, the first
+
+
+def keys_report(director: Any, events: list[dict[str, Any]], offset: float, turns: list[dict[str, Any]],
+                ended: float, rel: Callable[[float | None], float | None]) -> dict[str, Any] | None:
+    """After the start and each page turn (``moments``: the viewer chooser answered - or the window ready - and each
+    turn's first draw), from KEYS_GRACE_MS on until the next one (the last until the stand-in's script ends): which
+    windows were in front (`standin_seethrough.SeeWatch.front_kinds`, looked at every 10 ms: the stand-in's,
+    TASlation's hidden window, a dialog or a menu of its own...) and the longest spell of the stand-in in front without
+    its page having the keyboard focus (its page's ``keys on=`` looks: nothing is pressed for them). A moment is ok
+    when nothing but the stand-in, a dialog or a menu of TASlation's - or anything while a dialog of TASlation's is on
+    the screen ("+dialog") - was in front and the stand-in never without its keys for KEYS_LAG_MS (a page that says
+    nothing of its keys: not judged on them). None without the watch."""
+    see = getattr(director, "see", None)
+    if see is None:
+        return None
+    kinds = [(float(t), str(k)) for t, k in list(getattr(see, "front_kinds", []) or [])]
+    page = [(float(e["t"]) + offset, e.get("on") == "1") for e in events if e.get("ev") == "keys"]
+    end = next((float(e["t"]) + offset for e in events if e.get("ev") == "end"), ended)
+    answered = [r["answered_t"] for r in getattr(director, "chooser_rows", []) if r.get("answered_t") is not None]
+    notes = getattr(director, "notes", None)
+    ready = next((e["t"] for e in getattr(notes, "app_events", []) if e.get("kind") == "ready"), None)
+    start = answered[0] if answered else ready
+    moments: list[tuple[str, float]] = [("start", float(start))] if start is not None else []
+    moments += [(f"turn {k}", float(t["soft_t"])) for k, t in
+                enumerate((t for t in turns if t.get("why") in ("next", "previous", "jump")), 1)]
+
+    def at(series: list[tuple[float, Any]], t: float) -> Any:
+        before = [v for when, v in series if when <= t]
+        return before[-1] if before else None
+
+    rows = []
+    for k, (what, t) in enumerate(moments):
+        lo, hi = t + KEYS_GRACE_MS, moments[k + 1][1] if k + 1 < len(moments) else end
+        if hi <= lo:
+            continue
+        cuts = sorted({lo, hi, *[w for w, _k in kinds if lo < w < hi], *[w for w, _v in page if lo < w < hi]})
+        seen: list[str] = []
+        longest = spell = 0.0
+        for a, b in zip(cuts, cuts[1:]):
+            kind, keys = at(kinds, a), at(page, a)
+            if kind is not None and kind not in seen:
+                seen.append(kind)
+            spell = spell + (b - a) if kind == "standin" and keys is False else 0.0
+            longest = max(longest, spell)
+        bad = [s for s in seen if s not in KEYS_FINE and not s.endswith("+dialog")]
+        rows.append({"what": what, "t_s": rel(t), "until_s": rel(hi), "in_front": seen,
+                     "standin_without_keys_ms": round(longest), "ok": not bad and longest < KEYS_LAG_MS})
+    return {"moments": rows, "page_said_keys": bool(page),
+            "page_keys": [[rel(w), int(v)] for w, v in page][:KEYS_KEPT],
+            "front_kinds": [[rel(w), k] for w, k in kinds][:KEYS_KEPT]}
 
 
 def capture_route(notes: Notes) -> dict[str, Any]:

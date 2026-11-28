@@ -597,14 +597,26 @@ class ViewerDialog(_Dialog):
             return
         self.app.window_box.current(found)
         self.app._on_window_selected(picked=True)
+        self._back()
         self.destroy()
 
     def close(self) -> None:
         """Quit while no viewer is followed (TASlation ends, as the left pane's Quit ends it), else Close."""
         quits = getattr(self.app, "selected", None) is None
+        if not quits:
+            self._back()
         self.destroy()
         if quits:
             self.app._on_close()
+
+    def _back(self) -> None:
+        """The foreground to the viewer now, in the same call that closes the chooser (`seethrough.closing`): not
+        some 350 ms later through the hidden window, which Windows gives it to meanwhile (a key then goes to
+        TASlation). Not while another dialog of TASlation's holds the person (the book's name at the start)."""
+        try:
+            seethrough.closing(self.app, self)
+        except Exception:  # noqa: BLE001 - (the foreground comes back to the viewer as ever: `hand_back`)
+            pass
 
     def _gone(self, event: tk.Event) -> None:
         if event.widget is not self:
