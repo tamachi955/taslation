@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from .. import analysis
 from ..regions import TextRegion, box_iou
 from .bubbles import fill_holes
 
@@ -414,6 +415,7 @@ class TextBlockDetector:
     def __init__(self, config: TextBlockConfig | None = None):
         self.cfg = config or TextBlockConfig()
 
+    @analysis.timed("text_blocks")
     def detect(self, rgb: np.ndarray, inverted: bool = False, taken: Sequence[TextRegion] = (),
                scale: float = 1.0) -> list[TextRegion]:
         """Find text blocks; ``inverted=True`` finds light lettering on dark areas (kind "text-dark").

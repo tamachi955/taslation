@@ -72,6 +72,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from . import analysis
 from . import fingerprint as fp
 from . import linememo
 from . import locate_large
@@ -604,6 +605,7 @@ class PageFill:
         self.pipeline = pipeline
         self.rgb = rgb
         self.emit = emit
+        self.analysed = analysis.current()  # (the page's record in the analysis log: its drafts timed on it)
         self.regions: list[TextRegion] = []  # the announced regions (held, so their ids stay theirs)
         self.index: dict[int, int] = {}  # id(region) -> its index
         self.shown: dict[int, str] = {}  # index -> the text lettered on the working copy
@@ -691,6 +693,10 @@ class PageFill:
 
     def _draft(self, region: "TextRegion | ScannedRegion", text: str) -> None:
         """`draft`, done."""
+        with analysis.adopt(self.analysed):
+            self._drafted(region, text)
+
+    def _drafted(self, region: "TextRegion | ScannedRegion", text: str) -> None:
         try:
             i = self.index.get(id(region))
             text = balance_marks((text or "").strip())
@@ -764,6 +770,7 @@ class PageFill:
         assert self.work is not None
         x0, y0, x1, y1 = box
         patch = Image.fromarray(self.work[y0:y1, x0:x1].copy())
+        analysis.lettered(self.analysed)
         self.emit("translated", {"index": i, "text": text, "box": box, "patch": patch})
 
     # --- the drafts layer: lines answered before their unit was read to its end (`streaming.LineStream`) -----------
@@ -1408,6 +1415,7 @@ class ReadBeside:
         self.sizes = _HeldSizes(pipeline._book_sizes)
         self.cancel, self.stop = cancel, threading.Event()
         self.error: BaseException | None = None
+        self.analysed = analysis.current()  # (the page's record in the analysis log: this reading timed on it)
         self.thread = threading.Thread(target=self._run, name="taslation-read-beside", daemon=True)
 
     def start(self) -> "ReadBeside":
@@ -1423,8 +1431,10 @@ class ReadBeside:
             pass
         _SIZES.held = self.sizes
         try:
-            self.pipeline._ocr_regions(self.rgb, self.regions, lambda m: self.held.append(("report", m)), self.fill,
-                                       _Either(self.cancel, self.stop), unit_box=self.unit.box)  # type: ignore[arg-type]
+            with analysis.adopt(self.analysed):
+                self.pipeline._ocr_regions(self.rgb, self.regions, lambda m: self.held.append(("report", m)),
+                                           self.fill, _Either(self.cancel, self.stop),  # type: ignore[arg-type]
+                                           unit_box=self.unit.box)
         except BaseException as e:  # noqa: BLE001 - raised in the unit's turn
             self.error = e
         finally:
@@ -1568,6 +1578,10 @@ class Pipeline:
         self.shown_pages = ShownPages()
         self.erased_regions = ErasedRegions()
         self.stage_times = StageTimes()  # the seconds of each stage on the last pages lettered (Settings > System)
+        # developer measuring (`taslation.devmeasure`, a source checkout only): every page read, translated, erased and
+        # lettered afresh - no cache read or written by `process`, no page lettered ahead, no erase of this session's
+        # taken again (`_render`)
+        self.measuring = False
         self.art_eraser: artwork.ArtEraser | None = None
         self.layout: LayoutModel | None = None
         self._warming: threading.Thread | None = None  # `warm_page_models`, while it loads
@@ -2115,6 +2129,30 @@ class Pipeline:
                 progress: ProgressFn | None = None, complete: bool = False,
                 events: EventFn | None = None, cancel: threading.Event | None = None,
                 on_slow: SlowFn | None = None, reuse: bool = True, timed: bool = True) -> PageResult:
+        """`_process`, its line in the session's analysis log written round it (`taslation.analysis`: numbers only,
+        while the log is on). With developer measuring on (`measuring`) the cache is neither read nor written."""
+        if self.measuring:
+            use_cache = False
+        page = analysis.begin(None, self.settings.margins, ahead=not timed)
+        if page is None:
+            return self._process(image, use_cache=use_cache, translate=translate, progress=progress,
+                                 complete=complete, events=events, cancel=cancel, on_slow=on_slow, reuse=reuse,
+                                 timed=timed)
+        try:
+            result = self._process(image, use_cache=use_cache, translate=translate, progress=progress,
+                                   complete=complete, events=events, cancel=cancel, on_slow=on_slow, reuse=reuse,
+                                   timed=timed)
+        except BaseException as e:
+            analysis.end(page, None, outcome=type(e).__name__.lower())
+            raise
+        result.analysis_n = page.n
+        analysis.end(page, result)
+        return result
+
+    def _process(self, image: Image.Image, *, use_cache: bool = True, translate: bool = True,
+                 progress: ProgressFn | None = None, complete: bool = False,
+                 events: EventFn | None = None, cancel: threading.Event | None = None,
+                 on_slow: SlowFn | None = None, reuse: bool = True, timed: bool = True) -> PageResult:
         """Translate one capture. Every text region found goes to a page unit (`unit_for`), a region below or beside
         a unit that stops short of its page too; only what lies outside the capture area is left out. A unit the
         cache does not hold as it is found now is looked for as the capture reads at another window size first
@@ -2145,6 +2183,7 @@ class Pipeline:
         report = progress or (lambda _msg: None)
         original = image.convert("RGB")
         rgb = np.asarray(original)
+        analysis.frame(rgb, s.margins)  # (the analysis log: the page's coarse look)
         result = PageResult(image=original, original=original, regions=[])
         fill = PageFill(self, rgb, events) if events is not None else None
 
@@ -2423,8 +2462,9 @@ class Pipeline:
         the very page it would letter. Nothing is done when the page is not in the cache whole, is kept already, or
         its next reading adds to its cache entry (`_shown_key` is none); its stage times are not counted. The page
         job's own detection of *image* is taken in place of one (`_detect_held`). *cancel* set (a new page, Stop) ends
-        it where `process` stops, and nothing is kept; so does a failure. Whether the page is kept now."""
-        if self.cache is None:
+        it where `process` stops, and nothing is kept; so does a failure. Whether the page is kept now. Nothing while
+        measuring (`measuring`: every showing is read afresh)."""
+        if self.cache is None or self.measuring:
             return False
         try:
             check_cancel(cancel)
@@ -2935,6 +2975,7 @@ class Pipeline:
                 room = artwork.closed_room(rgb, r.after, scale)
                 if room is not None:
                     r.after.mask = room
+                    analysis.acted(r, "closed_room")
         return [*model, *classical]
 
     def _detect_classical(self, rgb: np.ndarray, cancel: threading.Event | None = None) -> list[TextRegion]:
@@ -4391,9 +4432,12 @@ class Pipeline:
             r.ocr_split = reading.split
             r.ocr_confidence = min(reading.score, SPLIT_CONFIDENCE) if reading.split else reading.score
             r.status = status
+            analysis.note(r, "readings", {"readings": list(reading.readings or (reading.text,)),
+                                          "score": float(reading.score), "settled": reading.text})
             if fill is not None:
                 fill.read(r)
 
+    @analysis.timed("sound_word")
     def _sound_word(self, r: TextRegion, reading: CharspotReading, status: str) -> tuple[CharspotReading, str]:
         """The reading of lettering set on the page (`LOOSE_KINDS`: nothing round it, on the drawing) as a sound word
         (`taslation.soundwords`), with its status: where a reading to translate is short kana
@@ -4428,6 +4472,7 @@ class Pipeline:
         r.sound = "corrected"
         return replace(reading, text=found.text), status
 
+    @analysis.timed("slant_doubtful")
     def _doubtful_slant(self, rgb: np.ndarray, r: TextRegion, box: Box, view: np.ndarray | None = None) -> None:
         """A doubtful slant (`Tilt.doubtful`: a short word's, or one the long lines' search is unsure of that one
         glyph-sized piece alone gives) stands only where the reading of *box* turned upright is surer than as cut
@@ -5260,6 +5305,7 @@ class Pipeline:
         self._order_read(rgb, unit.box, regions)  # (the translations among themselves, as a fresh page's)
         return regions
 
+    @analysis.timed("erase")
     def _erase(self, out: np.ndarray, region: TextRegion, quick: bool = False) -> tuple[int, int, int]:
         """Erase *region* on the page *out*, by the inpainting model on the art (unless *quick*: an early look, soon
         replaced by the finished page), and return its paper's colour. With no model (LaMa not set to run here, as on
@@ -5303,6 +5349,7 @@ class Pipeline:
             bg = erase_region(image, region, mode, white_threshold, dark_threshold, dark)
             if extra is not None:  # in the bubble's own paper colour (the outline guard would take a big glyph for a line)
                 image[region.y0:region.y1, region.x0:region.x1][extra] = bg
+                analysis.acted(region, "left_out")
             return bg
         q = copy.copy(region)
         q.kind = "text-dark" if dark else "text"  # lettering on the page: its strokes and the ground right round them
@@ -5319,7 +5366,11 @@ class Pipeline:
             mask[max(0, y0 - grow - region.y0):max(0, y1 + grow - region.y0),
                  max(0, x0 - grow - region.x0):max(0, x1 + grow - region.x0)] = 255
         if region.char_boxes:
+            before = cv2.countNonZero(mask) if analysis.on() else 0
             mask = Pipeline._whole_glyphs(image, region, mask, dark_threshold, dark)
+            if analysis.on() and cv2.countNonZero(mask) > before:
+                analysis.acted(region, "whole_glyphs")
+                analysis.count("whole_glyphs.px", cv2.countNonZero(mask) - before)
         q.mask = mask if region.char_boxes else region.mask
         if region.char_boxes and region.kind in ("bubble", "dark-bubble") and artwork.on_paper(image, region):
             # a bubble with paper under its lettering after all: the lettering its text box holds that the reading's
@@ -5335,10 +5386,11 @@ class Pipeline:
         kept = (artwork._keep_lines(image, region, dark, dark_threshold)
                 if region.kind in ("bubble", "dark-bubble") and artwork.on_art(image, region) else None)
         bg = erase_region(image, q, mode, white_threshold, dark_threshold, dark)
-        artwork._put_back(image, kept)
+        artwork._put_back(image, kept, region)
         return bg
 
     @staticmethod
+    @analysis.timed("whole_glyphs")
     def _whole_glyphs(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark_threshold: int = 140,
                       dark: bool = False) -> np.ndarray:
         """*mask* (uint8, the region's box: the reading's characters grown) with the rest of each dark piece it holds
@@ -5466,6 +5518,7 @@ class Pipeline:
                 lettering = make_lettering(spec, str(s.fonts_dir), lettering.italic, lettering.bold)
         return lettering.formatted(style.italic, style.bold, style.letter_spacing), flags
 
+    @analysis.timed("letter")
     def _set_text(self, image: Image.Image, region: TextRegion, text: str, background: tuple[int, int, int],
                   style: RegionStyle | None, scaled: bool = True, part: Any = OWN_PART) -> Lettered:
         """Letter *text* in *region* on *image* (erased already, *background* its colour): the one place a region's
@@ -5479,6 +5532,7 @@ class Pipeline:
         the region's own when *text* is its translation; None: none; none at all with ``size_emphasis`` off), the rest
         never under the readable size nor under `render.emphasis.BASE_SHARE` of its size without the part."""
         s = self.settings
+        own = region  # (the region as given: the fit taken is counted on it, `analysis.acted`)
         colour, outline, outline_colour = ink_of(style, self.kind_lettering(region.tag))
         lettering, flags = self.region_lettering(text, region.tag, style)
         if part is OWN_PART:
@@ -5509,6 +5563,12 @@ class Pipeline:
                            background, False, s.target_language, outline, fmt=fmt, direction=direction,
                            color=ink_rgb(colour), outline_color=ink_rgb(outline_colour), large=part,
                            floor=s.readable_font_size, tries=s.fit_tries)
+        if image is not None and analysis.on():  # (what the fit took: `typeset.letter_text`'s frame and layout)
+            for name, took in (("fit_turned", done.frame == "turned"), ("fit_overrun", done.frame == "overrun"),
+                               ("fit_condensed", "+condensed" in done.won), ("fit_hyphenated", "+hyphens" in done.won),
+                               ("fit_box", done.won.startswith("box"))):
+                if took:
+                    analysis.acted(own, name)
         return Lettered(done.size, flags + done.flags, done.won, done.frame)
 
     def _scaled_top(self, region: TextRegion, text: str, lettering: Any, top: int, background: tuple[int, int, int],
@@ -5536,6 +5596,7 @@ class Pipeline:
         usual = float(np.median(sizes)) if sizes else 0.0
         return LARGE_LETTERING * max(usual, s.readable_font_size, s.min_font_size)
 
+    @analysis.timed("page_caps")
     def cap_sizes(self, regions: Sequence[TextRegion], texts: Sequence[str],
                   cancel: threading.Event | None = None, measured: dict[int, Any] | None = None) -> None:
         """Keep the sizes of a page alike: each of *regions* gets the largest size it may be set at (`page_caps`) from
@@ -5611,6 +5672,7 @@ class Pipeline:
         each erase kept is whole."""
         s = self.settings
         backgrounds: dict[int, tuple[int, int, int]] = {}
+        analysis.traced(regions)
         self.share_rooms(regions, (out.shape[1], out.shape[0]), among)
         todo = [i for i, r in enumerate(regions) if erases(r)]
         keys = [self.erase_key(out, regions[i]) for i in todo]
@@ -5619,7 +5681,7 @@ class Pipeline:
             if i in place:
                 check_cancel(cancel)
                 n = place[i]
-                kept = self.erased_regions.take(keys[n], out)
+                kept = self.erased_regions.take(keys[n], out) if not self.measuring else None
                 if kept is not None:  # erased so before this session: the same erase
                     kept.settle(r)
                     backgrounds[i] = kept.background
@@ -5633,6 +5695,7 @@ class Pipeline:
                         r.letter_flags, r.fitted = (), ""
             elif record:
                 r.letter_flags, r.fitted = (), ""
+        analysis.erased(out)  # (developer measuring: the page erased, before its lettering)
         if not backgrounds:
             return
         if record and recap:

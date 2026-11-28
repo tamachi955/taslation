@@ -11,7 +11,8 @@ hosts the dialogs), in places of their own.
   the left pane had it as a row before) and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
   Copy a report (and, while editing with regions chosen, Copy a report of the chosen regions and, with one, Copy a
-  report with this region's text: `report.menu_entries`, the clipboard alone), TASlation's language, and Help (How to
+  report with this region's text: `report.menu_entries`, the clipboard alone), in a source checkout alone the cascade
+  Developer measuring (`measure.menu_entries`), TASlation's language, and Help (How to
   use..., Legal notice..., Check for updates..., About TASlation). While the
   page is being edited (Reader mode off), the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the
   page's tools and what acts on the regions chosen, then Review..., My corrections..., Lines to review..., Find
@@ -157,6 +158,9 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
     from . import report
 
     report.menu_entries(app, menu)  # (Copy a report...: the clipboard alone, no dialog)
+    from . import measure
+
+    measure.menu_entries(app, menu, lambda command: _asking(app, command))  # (a source checkout only)
     menu.add_separator()
     for code, name in UI_LANGUAGES.items():
         language.add_radiobutton(label=name, value=code, variable=app.ui_lang_var,

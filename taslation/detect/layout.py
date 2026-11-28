@@ -29,6 +29,7 @@ from typing import Any, Sequence
 import cv2
 import numpy as np
 
+from .. import analysis
 from ..config import LAYOUT_MODEL
 from ..regions import Box, TextRegion
 from .bubbles import OPEN, BubbleDetector, DetectorConfig, Sides, fill_holes, sides_of
@@ -146,6 +147,7 @@ class LayoutModel:
                 for a, b, c, d, s, i in zip((cx - bw / 2) * w, (cy - bh / 2) * h, (cx + bw / 2) * w, (cy + bh / 2) * h,
                                             scores, ids) if int(i) in CLASSES]
 
+    @analysis.timed("layout_model")
     def detect(self, rgb: np.ndarray) -> list[Detection]:
         """The boxes of one page unit, in its coordinates. With the GPU full (loading or running: `place.out_of_memory`)
         it goes on on the CPU for the rest of the session (`place.failed`); the failed step's tensors are let go first

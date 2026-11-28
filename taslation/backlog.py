@@ -1405,10 +1405,13 @@ def backlog_of(window: Any, make: bool = True) -> Backlog | None:
 
 
 def tracking_for(window: Any, image: Any, gate: Any, again: Any = None, replace_edited: bool = False) -> Tracking | None:
-    """(the worker, a page job of *window* starting) Its `Tracking`: None for "Translate again"."""
+    """(the worker, a page job of *window* starting) Its `Tracking`: None for "Translate again", and while developer
+    measuring is on (`Pipeline.measuring`: every page is read afresh, so what the backlog read would be thrown away)."""
     if again is not None or replace_edited:
         return None
     pipeline = getattr(window, "pipeline", None)
+    if getattr(pipeline, "measuring", False):
+        return None
     backlog = backlog_of(window)
     if pipeline is None or backlog is None:
         return None

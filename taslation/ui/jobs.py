@@ -1208,6 +1208,9 @@ class JobsMixin:
             order_gone = getattr(self, "_ordering", None) is not None and data["result"] is not self.last_result
             if order_gone:
                 self._end_order()
+            from . import measure
+
+            measure.on_result(self, data["result"])  # (the analysis log: what was seen of the page before)
             self.last_result = data["result"]
             pick_read = getattr(self, "_pick_read", None)  # (a browser window picked, on trial: `viewers`)
             if pick_read is not None:

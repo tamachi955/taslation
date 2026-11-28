@@ -180,6 +180,90 @@ entry only where the model's own answer is wrong: run `words` and `renderings` a
 changes, judge the answers by eye, and add or drop entries; `rendering` looks a reading up by its `long_form` (the
 lengthening kept: ガン is a clang, ガーン a shock), so two entries must not share one.
 
+## The analysis log
+
+`taslation/analysis.py` writes one JSON line per page read or shown from the cache to `<state dir>/analysis.jsonl`
+(4 MB, then it starts again, the one before kept as `analysis.1.jsonl`), and lines of what the person saw (`"type":
+"ui"`, written by `ui/measure.py` as the next page comes) and of each change they made (`"type": "edit"`, from the
+history's steps). **Numbers only**: no page text, no reading, no translation, no title, no file or window name, no
+pixel. Every key and every string value is one of the program's own names (lowercase ASCII, `analysis.NAME`); anything
+else becomes "other" as it is written (`analysis.clean`), and `tests/test_analysis_log.py` puts random marker texts,
+titles and names into every field of random pages and checks that none reaches the file.
+
+It is on by default when TASlation runs from a source checkout (a `.git` beside the package) and off in an installed
+copy (the release's ZIP has no `.git`); `analysis_log = "on"` or `"off"` in taslation.toml forces either. It is in no
+dialog. The stand-in's runs write it too (`tools/standin_e2e.py` copies it into its `--out` folder with its tables,
+`analysis.txt`). A page's line holds its stages' and helpers' times (`analysis.timed`, `analysis.timing`), what the
+helpers counted, how many regions each helper CHANGED the outcome for (`analysis.acted`: not how often it ran), the
+regions counted by status, kind, tier, fit and flag, the page's coarse look on a 64 x 64 grid of its pixels (colour,
+ink, dark ground, drawn), the time to its first lettering, the GPU's free memory where torch has CUDA up already, and
+what the log itself cost (`self_ms`). Measured on the made-up screens on the processor (pages of about 95 ms): about
+1 ms a page, all of it counted, the writing of the line included; on a real page of one to several seconds that is
+well under 1 %.
+
+Every defect the log counts carries its level, the owner's scale of how bad it is for the reader (`analysis.LEVELS`);
+how often it happens is what the log measures, and nothing that prevents an S1 or S2 defect is removed for being
+rare:
+
+| Level | What | Found by the log |
+|---|---|---|
+| S1 reading fails | a bubble not translated, its original shown where a translation exists, a translation on the wrong page, keys or panes keeping the person from reading, a page over 15 s with a GPU (45 s without) | `not_translated`, `bubble_left_as_drawn` (read as Japanese with confidence in a bubble, left as drawn), `patch_not_shown` (the window: a lettered region not on show for no meant reason), `keys_not_back`, `page_slow`; the person's own changes: a region added (`edit_add`), one with no translation given one |
+| S2 content lost or damaged | a translation cut, covered or out of sight; the drawing destroyed by an erase; a false region lettered over the art | `lettering_cut`, `unsure_lettered_on_art`; a translation retyped, the page asked again, a region deleted that had been lettered over the art |
+| S3 readable but hard | under the readable size, hyphenated, specks or ghosts, an outline or a line cut, lettering over an outline | `small`, `hyphenated`, `overrun`, `unsure_left_as_drawn`, the review flags; a region moved, resized or deleted |
+| S4 cosmetic | a slant, a face, a size a little off, a pane a little far | `turned`, the lettering's checks, a region's kind or direction changed |
+
+S1 and S2 cases are written one by one with their numbers (the region's index, box, kind, tier, confidence and the
+helpers that acted on it), S3 and S4 counted. `python tools/analysis_summary.py [FILE or FOLDER]` prints the tables:
+the defects by level first (S1 and S2 case by case with the page's number in the session, S3 and S4 with their rates),
+then the stages and helpers (total, share, median and 95th percentile per page), the slowest pages with their facts,
+the regions each helper changed, the counts, the window's lines and the edits. Copy a report gets the same tables as an
+`[analysis]` section while the log is on.
+
+## Developer measuring
+
+A switch on top of the analysis log, for the owner's own measurements on their own computer, and the one exception to
+"no page image and no page text on disk": Menu > Developer measuring > Measure (`ui/measure.py`,
+`taslation/devmeasure.py`). It exists only in a source checkout: an installed copy has no entry for it and
+`devmeasure.Session` refuses to start there (`devmeasure.Refused`; tested on a folder with no `.git`). Its words are
+English and Japanese only, never put into the 16 languages: no reader of an installed copy sees them. It is off at
+every start and never remembered; switched on, it asks once, in a plain box that says what is kept and where; while it
+is on the right pane's lasting rows begin with "DEV".
+
+While it is on, under `<state dir>/dev-measure/<the session's start>/` (outside the repository; a `README.txt` beside
+the sessions says what they hold and that they are private), for every page read: `pNNNN-frame.png` (the frame as
+captured), `pNNNN-erased.png`, `pNNNN-lettered.png` (the whole lettered page: the frame with every patch composed in,
+as seen over the viewer), `pNNNN.json` (every region: its boxes, kind, tier, each reader's reading and charspot's
+confidence - nar and cpt give none -, the settled reading, the translation, the flags, the helpers that acted, the fit
+taken; the page's analysis line; the requests made for it), each later finished state after an edit or Ask again
+(`pNNNN-sK-lettered.png`, `pNNNN-sK.json`); `requests.jsonl` (the prompt's parts, the prompt and the raw answer of each
+request), the session's `analysis.jsonl`, `log.txt` (the session's lines of the program's log) and `input.jsonl`.
+
+* **No cache.** Every page is read, translated, erased and lettered afresh (`Pipeline.measuring`): the normal cache is
+  neither read nor written - the pipeline gets a cache of the session's own, deleted when the mode ends -, no line is
+  reused, nothing is read ahead (the backlog's work would be thrown away), and the series sheet and the book's marks
+  are read and never written (`devmeasure.ReadOnly`: a change made to them while measuring lasts until the mode ends).
+* **The input record** (`input.jsonl`): which page the person asked for and when (ms), so that `tools/analysis_summary.py
+  SESSION_FOLDER` can time each turn from the press to its first lettering and to its end (median, 90th percentile, the
+  10 slowest with their page's facts). Its limits are not negotiable: keys are recorded only while the viewer's window
+  or one of TASlation's is the foreground window, and only their kind (left, right, up, down, space, page up, page
+  down, home, end, enter, escape, Insert, Delete; every other key "other", with nothing of which it was) - never a
+  character, never while another program is in front; of the mouse, the presses on TASlation's lettering and side
+  panes with their place and button, and the wheel's ticks over the viewer. They are seen through Windows' low-level
+  hooks (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`), installed on a thread of their own with a message loop only while the mode
+  is on and the viewer or TASlation is in front (looked at every 100 ms) and removed otherwise; each event is looked at
+  again against the window in front when it comes. Their cost: while installed, every key and mouse event of the
+  desktop passes through a few microseconds of Python (the window in front looked at, the kind appended,
+  `CallNextHookEx`), plus the wait for Python's interpreter lock where another thread holds it (handed over every 5 ms);
+  nothing at all while they are not installed.
+* **Never read again, never sent, never exported.** The program never reads the folder afterwards; the offline guard
+  holds as ever; an export of the books never includes it (`backup.NEVER_EXPORTED`; tested). The tools never open the
+  kept pictures or texts: `tools/analysis_summary.py` reads `analysis.jsonl` and `input.jsonl` alone.
+* Menu > Developer measuring > Open the folder, and Delete all sessions... (asked first; the session under way stays);
+  `python tools/dev_measure.py list | delete NAME... | delete --all | open` does the same from a shell.
+* `tools/standin_e2e.py --dev-measure` switches it on at the start with nothing asked (the stand-in's made-up pages
+  only) and moves the session's folder into its `--out` folder. Its turns are posted to the stand-in, never typed, so
+  the hooks see none of them and such a session has no turns to time (the summary says so).
+
 ## A setting in the Settings dialog
 
 Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:

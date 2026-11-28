@@ -42,6 +42,8 @@ from dataclasses import dataclass, replace
 import cv2
 import numpy as np
 
+from .. import analysis
+
 DEAD_ZONE = 3.0  # degrees: a slant this small or smaller counts as none (other manga tools snap at 3 too; the OCR takes 5)
 MAX_TILT = 45.0  # degrees either way searched (past 45 a row is a column turned the other way)
 COARSE_STEP = 1.0  # degrees between the angles of the first search ...
@@ -131,6 +133,7 @@ def _search(points: np.ndarray, lo: float, hi: float, step: float) -> list[tuple
     return [(lo + k * step, *_sharpness(points, lo + k * step)) for k in range(count)]
 
 
+@analysis.timed("slant")
 def lettering_tilt(ink: np.ndarray, glyph: float = 0.0) -> Tilt:
     """The slant of the lettering whose ink is *ink* (bool, the region's text box; only its glyph-sized pieces count,
     `glyph_ink`; *glyph*: their usual size, 0 = measured here): `_measure`'s, *doubtful* where its slant is one the

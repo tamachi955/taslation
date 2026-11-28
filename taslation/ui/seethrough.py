@@ -1313,10 +1313,15 @@ def foot_rows(app: Any) -> list[pn.Row]:
         if total:
             progress = _(PROGRESS).format(done=fill.filled, total=total)
     rows = [pn.Row("", progress, "text", lines=FOOT_LINES, alike=(_(PROGRESS).format(done=888, total=888),))]
+    from . import measure
+
+    dev = f"{measure.word('dev')} · " if measure.on(app) else ""  # (developer measuring on: `ui.measure`)
     if hidden(app):
         editing, reading = _(MODE_EDITING), _(see_edit.READER_MODE)
-        rows.append(pn.Row("", reading if see_edit.reader_mode(app) else editing, "text", lines=FOOT_LINES,
-                           alike=(editing, reading)))
+        rows.append(pn.Row("", dev + (reading if see_edit.reader_mode(app) else editing), "text", lines=FOOT_LINES,
+                           alike=(editing, reading, dev + editing, dev + reading)))
+    elif dev:
+        rows.append(pn.Row("", measure.word("dev"), "text", lines=FOOT_LINES))
     where, readers = getattr(app, "_compute_where", ""), _readers_at(app)
     if where in TRANSLATOR_AT:
         text = _(TRANSLATOR_READERS_AT.get((where, readers)) or TRANSLATOR_AT[where])
@@ -1818,10 +1823,16 @@ def ask_bubble(app: Any, result: Any, region: Any) -> bool:
         try:
             if not str(getattr(region, "source_text", "") or "").strip():
                 pipeline.read_source(result, region)
+            from copy import copy
+
+            before = copy(region)  # (the session's analysis log: the region as it was asked again)
             text = pipeline.ask_again(result, region)
             if not text:
                 app._post("status", key="The model gave no other translation.")
             elif pipeline.set_translation(result, region, text, edited=False):
+                from .. import analysis
+
+                analysis.edited("ask", result, [(before, region)])
                 app._post("result", result=result, edited=True, quiet=True)
             else:
                 app._post("status", key="Could not keep the translation: give the book a name first (Menu > Series and Volume...).")
@@ -2477,6 +2488,8 @@ def _clear_of_page(app: Any, settled: tuple[Any, Any] | None, boxes: tuple[Any, 
         if why and said.get(side) != why:
             log.info("see-through: the %s pane at %s hidden: %s (%s)", side, tuple(int(v) for v in box), why,
                      "no page box" if page is None else f"page box {tuple(int(v) for v in page)}")
+            hid = app.__dict__.setdefault("_see_pane_hid", {})  # (counted by why: the analysis log, `ui.measure`)
+            hid[why] = hid.get(why, 0) + 1
         said[side] = why
         out.append(None if why else box)
     return out[0], out[1]

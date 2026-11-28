@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from .. import analysis
 from .beyond import lettering_beyond
 from .panels import find_panels, order_panels, panel_of
 from ..regions import Box, TextRegion
@@ -276,6 +277,7 @@ class BubbleDetector:
     def __init__(self, config: DetectorConfig | None = None):
         self.cfg = config or DetectorConfig()
 
+    @analysis.timed("bubbles")
     def detect(self, rgb: np.ndarray, inverted: bool = False, scale: float = 1.0,
                closed: Sides = OPEN) -> list[TextRegion]:
         """Find bubbles in an RGB uint8 image. Returned regions are not yet ordered.

@@ -99,6 +99,10 @@ class TextRegion:
     # right: another reader's, or one kana changed), "unsure" (each reader read another thing and none is a sound word:
     # left as drawn), "none" (two readers read alike, no sound word). Memory only
     sound: str = ""
+    # what the session's analysis log knows of it (`taslation.analysis.acted`, `taslation.analysis.note`): the helpers
+    # that changed its outcome and, with developer measuring on, what each reader read. None while the log is off.
+    # Memory only; shared by the copies a change keeps (`ui.history.snapshot`)
+    trace: Any = None
 
     @property
     def reused(self) -> bool:
@@ -222,6 +226,7 @@ class PageResult:
     fingerprints: list[str] = field(default_factory=list)  # one per page unit, the page read first first
     units: list[Any] = field(default_factory=list)  # the page units (fingerprint.PageUnit), memory only
     error: str = ""  # e.g. Ollama unreachable; regions are then left untranslated
+    analysis_n: int = 0  # its page's number in the session's analysis log (`taslation.analysis`; 0: none), memory only
 
     @property
     def translated(self) -> list[TextRegion]:

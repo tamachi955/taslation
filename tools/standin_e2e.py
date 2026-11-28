@@ -4967,12 +4967,42 @@ def run(args: argparse.Namespace) -> int:
         report["server_started"] = stop_started(url, state)
     run_ = report.get("run") or {}
     keep = run_.get("failed") or run_.get("frame_stalls") or run_.get("no_answer") or (out / "stacks.txt").exists()
+    report["analysis"] = keep_analysis(state, out)  # (the session's analysis log, before the state folder goes)
     report["cleanup"] = cleanup(report, closed, state, standin_dir, mode, url if mode == "real" else "", ps_before,
                                 out / "app_log" if keep else None)
     path = out / "report.json"
     path.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     print_table(report, path)
     return 0 if not report["run"].get("failed") else 1
+
+
+def keep_analysis(state: Path, out: Path) -> dict[str, Any]:
+    """The run's analysis log (`taslation.analysis`: numbers only) copied into *out* (``analysis.jsonl``) with its
+    tables (``analysis.txt``), and a developer measuring session's folder of the run (--dev-measure: the stand-in's
+    made-up pages) moved to ``out/dev-measure``; what was kept."""
+    import shutil
+
+    from taslation import analysis, devmeasure
+
+    kept: dict[str, Any] = {"lines": 0, "sessions": 0}
+    source = state / analysis.FILE_NAME
+    lines = analysis.read_lines(source)
+    if lines:
+        shutil.copyfile(source, out / analysis.FILE_NAME)
+        (out / "analysis.txt").write_text("\n".join(analysis.summary_lines(lines)) + "\n", encoding="utf-8")
+        kept["lines"] = len(lines)
+        pages = [ln for ln in lines if ln.get("type") == "page"]
+        kept["pages"] = len(pages)
+        kept["self_ms"] = round(sum(float(p.get("self_ms") or 0) for p in pages), 1)
+        kept["page_ms"] = round(sum(float(p.get("ms") or 0) for p in pages), 1)
+        kept["s1"] = sum(1 for ln in lines for c in (ln.get("cases") or []) if c.get("level") == analysis.S1)
+        kept["s2"] = sum(1 for ln in lines for c in (ln.get("cases") or []) if c.get("level") == analysis.S2)
+    for folder in devmeasure.sessions(state):
+        target = out / devmeasure.FOLDER / folder.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(folder), str(target))
+        kept["sessions"] += 1
+    return kept
 
 
 def start_other_tab(browser: sv.StandinBrowser, standin_dir: Path, seconds: float = 10.0) -> bool:
@@ -5115,6 +5145,10 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                       state_of=lambda image: notes.shown(image).state())
     see.install()
     see.start()
+    if getattr(args, "dev_measure", False):  # (developer measuring from the start, nothing asked: `ui.measure`)
+        from taslation.ui import measure
+
+        report["dev_measure"] = measure.switch_on(app, ask=False)
     queue_put = app._events.put
 
     def tagged(item: Any, *a: Any, **k: Any) -> Any:
@@ -6415,6 +6449,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--behind-s", type=float, default=BEHIND_S, metavar="S",
                     help="--start-behind: seconds from the window's choice of the stand-in to its being back in sight "
                          "(default %(default)s)")
+    ap.add_argument("--dev-measure", action="store_true",
+                    help="developer measuring on from the start (`ui.measure.switch_on`, nothing asked): every page "
+                         "read afresh and kept with its pictures; the session's folder moved to <out>/dev-measure "
+                         "(the stand-in's made-up pages only)")
     ap.add_argument("--chooser", action="store_true",
                     help="the window names no viewer (no window_query): its viewer chooser comes at the start, and "
                          "the driver chooses the stand-in in it through the dialog's own object (run.behind.chooser)")

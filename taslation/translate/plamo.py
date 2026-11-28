@@ -91,6 +91,7 @@ import threading
 from collections import deque
 from typing import Any, Callable, Sequence
 
+from .. import analysis
 from ..messages import Cancelled, Message
 from ..ocr import place as ocr_place
 from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, SentPair, TranslationError
@@ -616,6 +617,11 @@ class PlamoTranslator(OllamaTranslator):
         got = self._generate(prompt, max_tokens, self._draw(source), cancel, on_slow)
         wrote = getattr(self._wrote, "text", None)
         self._wrote.text = wrote if isinstance(wrote, str) else got  # (a stand-in for the model keeps none: its answer)
+        analysis.request(lambda: {"translator": "plamo", "source": source, "target": target, "speaker": speaker,
+                                  "hint": hint, "following": list(following), "notes": notes,
+                                  "history": [list(pair) for pair in history], "glossary": [list(g) for g in glossary],
+                                  "prompt": prompt, "raw": self._wrote.text, "answer": got,
+                                  "stats": dict(getattr(self, "last_stats", None) or {})})
         return got if "\n" in source else " ".join(got.split())
 
     def _computed(self, history: list[tuple[str, str]], source: str, computed: list[tuple[str, str]] | None) -> None:

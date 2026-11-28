@@ -88,6 +88,32 @@ class Step:
         self.state = "pending"  # until its job is done; then "done", "empty" (it changed nothing) or "failed"
 
     @property
+    def state(self) -> str:
+        return self._state
+
+    @state.setter
+    def state(self, value: str) -> None:
+        """The change's state; the first time it is "done", the session's analysis log gets its line (`_logged`)."""
+        self._state = value
+        if value == "done" and not getattr(self, "_logged", False):
+            self._logged = True
+            self.logged()
+
+    def logged(self) -> None:
+        """The change in the session's analysis log (`analysis.edited`: its kind and the regions it touched, numbers
+        and kinds only), while the log is on; never in the way of the change."""
+        from .. import analysis
+
+        if not analysis.on():
+            return
+        try:
+            analysis.edited(self.kind, self.result, [(t.before if t.at_before is not None else None,
+                                                      t.after if t.at_after is not None else None)
+                                                     for t in self.touched])
+        except Exception:  # noqa: BLE001 - the log never stops a change
+            pass
+
+    @property
     def result(self) -> Any:
         """The page the change was made on, while the window still holds it (else None)."""
         return self._result()

@@ -59,6 +59,11 @@ protected for the Windows user who saved them, on that computer (`protect.py`), 
 nowhere else. It is written with `write_atomic` as it is, its passphrase its only protection; an import is saved
 through the stores, and so protected like every file of theirs.
 
+An export holds only what the stores give of the books named: it lists no folder of the state folder. What else lies
+there is never exported (`NEVER_EXPORTED`): the session's analysis log (``analysis.jsonl``, numbers only) and above
+all developer measuring's sessions (``dev-measure``: pages of the books as pictures, their readings and translations,
+kept for the developer's own measurements on that computer alone, `taslation.devmeasure`).
+
 An import (`open_export`, then `plan_import` to see what it would do, then `apply_import`) takes all of a file or the
 books chosen of it. A book's pages join its cache here the way saves merge (the file's page in place of the same page
 here, the others kept), but a translation a person wrote here (`CachedBubble.edited`) stays where the file's line for
@@ -112,6 +117,8 @@ MAGIC = b"TASLATION-CACHE-1"
 OLD_MAGICS = (b"SELFTRANS-CACHE-1",)  # the same format under the project's former name: still read, never written
 _MAGIC_ANY = re.compile(rb"TASLATION-CACHE-([0-9]{1,9})")  # the first line of any version's export
 SUFFIX = ".stcache"  # what the window suggests for an export file
+# what lies in the state folder and never goes into an export (see the module's notes; tests/test_analysis_log.py)
+NEVER_EXPORTED = ("dev-measure", "analysis.jsonl", "analysis.1.jsonl")
 KDF: dict[str, Any] = {"name": "scrypt", "n": 2 ** 17, "r": 8, "p": 1}  # 128 MiB, about half a second
 MIN_PASSPHRASE = 12
 PASSPHRASE_ENV = "TASLATION_PASSPHRASE"  # the command line takes the passphrase from here when set (scripts)

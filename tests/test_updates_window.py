@@ -382,8 +382,10 @@ def test_a_look_under_way_ends_with_the_window(state):
 
 # ---------------------------------------------------------------- the Help menu
 def test_check_for_updates_is_in_the_help_menu_before_about(tmp_path, hidden_root, state, monkeypatch):
+    from taslation import devmeasure
     from taslation.ui import see_menu
 
+    monkeypatch.setattr(devmeasure, "available", lambda root=None: False)  # (an installed copy's cascades)
     called = []
     app = SimpleNamespace(settings=Settings(state_dir=state), ui_lang_var=tk.StringVar(hidden_root),
                           _update_known=("0.9.0", "2026-11-25"))

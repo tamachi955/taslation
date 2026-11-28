@@ -337,6 +337,26 @@ def real_saved_files_left_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def analysis_log_off(monkeypatch):
+    """No test writes the session's analysis log by the setting's "auto" (in this checkout it would be on: a window a
+    test makes would start it, and the next tests would find it on): the log starts only where a test starts it
+    itself with "on" - never in this machine's own state folder -, and it is ended before and after every test."""
+    from taslation import analysis
+
+    real_start = analysis.start
+
+    def start(state_dir, setting="auto", root=None):
+        if setting != "on" or (state_dir is not None and _real_state_folder(state_dir)):
+            return analysis.log()
+        return real_start(state_dir, setting, root)
+
+    monkeypatch.setattr(analysis, "start", start)
+    analysis.stop()
+    yield
+    analysis.stop()
+
+
+@pytest.fixture(autouse=True)
 def classical_unless_asked(request, monkeypatch):
     """A test's pipeline detects and erases the classical way, whatever the models folder holds and whatever GPU this
     machine has (art_erase "auto", the default, runs LaMa where torch has CUDA: here torch's answer is no); one that is

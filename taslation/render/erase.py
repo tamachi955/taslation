@@ -25,6 +25,7 @@ from collections.abc import Callable
 import cv2
 import numpy as np
 
+from .. import analysis
 from ..detect.beyond import big_dark, rings_on_dark
 from ..detect.bubbles import fill_holes
 from ..regions import Box, TextRegion
@@ -302,6 +303,7 @@ def paper_surface(crop: np.ndarray, paper: np.ndarray) -> np.ndarray:
     return terms(gx, gy) @ coef
 
 
+@analysis.timed("fill_paper")
 def fill_paper(crop: np.ndarray, mask: np.ndarray, colour: tuple[int, int, int], dark: bool = False,
                whole: bool = True) -> None:
     """Paint *mask* (bool) in *crop* with its paper as it is there.
@@ -476,6 +478,7 @@ def stray_pieces(gray: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: i
     return pieces
 
 
+@analysis.timed("stray_erase")
 def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
                 white_threshold: int = 225, accept: PieceTest | None = None,
                 keep: np.ndarray | None = None, scale: float = 1.0) -> int:
@@ -515,6 +518,7 @@ def erase_stray(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: in
     return painted
 
 
+@analysis.timed("ring_erase")
 def erase_rings(crop: np.ndarray, mask: np.ndarray, box: Box, dark_threshold: int = 140,
                 white_threshold: int = 225, accept: Callable[[np.ndarray], bool] | None = None,
                 scale: float = 1.0) -> int:
@@ -559,6 +563,7 @@ RING_LIGHT, RING_SAME = 190, 12  # ... whose light pixels (its ring) are that gr
 # to its: the page's white round lettering set on it, not a ring to take out (`erase_strokes`)
 
 
+@analysis.timed("erase_strokes")
 def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None = None,
                   dark: bool = False) -> tuple[int, int, int]:
     """Lettering on the drawing erased without a model, in place: its strokes alone, with a pixel of anti-aliasing,
@@ -652,6 +657,7 @@ def lines_through(image: np.ndarray, region: TextRegion, dark_threshold: int = 1
     return lines[region.y0 - wy0:region.y1 - wy0, region.x0 - wx0:region.x1 - wx0]
 
 
+@analysis.timed("line_pixels")
 def line_pixels(image: np.ndarray, region: TextRegion, dark_threshold: int = 140
                 ) -> tuple[Box, np.ndarray] | None:
     """The straight lines of the drawing that run into the box of lettering set on the page from beyond it, within it
@@ -733,6 +739,7 @@ def _local_box(region: TextRegion) -> Box:
     return (tb[0] - region.x0, tb[1] - region.y0, tb[2] - region.x0, tb[3] - region.y0)
 
 
+@analysis.timed("paper_fill")
 def erase_region(image: np.ndarray, region: TextRegion, mode: str = "fill", white_threshold: int = 225,
                  dark_threshold: int = 140, dark: bool = False) -> tuple[int, int, int]:
     """Erase the text inside *region* in place, and the lettering that ran past a bubble's interior onto the
@@ -747,6 +754,7 @@ def erase_region(image: np.ndarray, region: TextRegion, mode: str = "fill", whit
     mask = region.mask
     if crop.shape[:2] != mask.shape:
         mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
+    analysis.acted(region, "paper_fill")
     if mode != "classic":
         return _erase(image, crop, region, mask, mode, white_threshold, dark_threshold, dark)
     bg = bubble_background(crop, mask, white_threshold, dark)
@@ -773,10 +781,16 @@ def _erase(image: np.ndarray, crop: np.ndarray, region: TextRegion, mask: np.nda
         scale = pagescale.of(region)
         judge = StrayJudge(crop, kept, _glyph(region), bg, dark_threshold, white_threshold, dark, region.from_model,
                            scale)
-        erase_stray(crop, kept, local, dark_threshold, white_threshold, accept=judge.piece, keep=judge.drawing,
-                    scale=scale)
+        painted = erase_stray(crop, kept, local, dark_threshold, white_threshold, accept=judge.piece,
+                              keep=judge.drawing, scale=scale)
+        if painted:
+            analysis.acted(region, "stray_erase")
+            analysis.count("stray_erase.n", painted)
         if not dark:
-            erase_rings(crop, kept, local, dark_threshold, white_threshold, accept=judge.ring, scale=scale)
+            painted = erase_rings(crop, kept, local, dark_threshold, white_threshold, accept=judge.ring, scale=scale)
+            if painted:
+                analysis.acted(region, "ring_erase")
+                analysis.count("ring_erase.n", painted)
     if mode == "inpaint":
         _inpaint(crop, inside.astype(np.uint8) * 255, dark_threshold, dark)
     elif region.kind in MANUAL_KINDS:

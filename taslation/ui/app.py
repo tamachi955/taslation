@@ -107,7 +107,7 @@ from .progress import (
     status_word,
 )
 from .scaling import DpiWatch, apply_scale
-from . import area, ime, seethrough, shortcuts, theme, updates
+from . import area, ime, measure, seethrough, shortcuts, theme, updates
 from .. import devices
 from . import side
 from .side import SideMixin
@@ -248,6 +248,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self._waiting = False  # the viewer window shows another tab; Auto mode is holding back
         self.annotation_store = AnnotationStore(settings.annotations_dir)
         self.glossary_store = GlossaryStore(settings.glossary_dir)
+        measure.start(self)  # the analysis log as the settings say; developer measuring off at every start
         self._drag_start: tuple[int, int] | None = None
         self._drag_rect: int | None = None
         self._ordering: list[Any] | None = None  # translator mode: regions clicked so far while setting the reading order
@@ -712,6 +713,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         try:
             last_save(pipeline, self)
         finally:
+            measure.close(self)  # (the analysis log's last window line; developer measuring's session ended)
             self.destroy()
 
 

@@ -124,6 +124,7 @@ import urllib.request
 from typing import Any, Callable, Iterable, Iterator, Sequence
 from urllib.parse import urlparse
 
+from .. import analysis
 from ..health import is_default_model, pull_command
 from ..messages import Cancelled, Message
 from ..netguard import is_loopback_host
@@ -716,7 +717,10 @@ class OllamaTranslator:
         self._answered(self.model)
         self.last_stats = {k: data.get(k) for k in ("prompt_eval_count", "eval_count", "prompt_eval_duration", "eval_duration",
                                                     "total_duration", "done_reason")}
-        return str(data.get("message", {}).get("content", ""))
+        content = str(data.get("message", {}).get("content", ""))
+        analysis.request(lambda: {"translator": "chat", "messages": [dict(m) for m in messages], "raw": content,
+                                  "stats": dict(self.last_stats)})  # (developer measuring alone)
+        return content
 
     def _chat_once(self, payload: dict[str, Any], timeout: float | None = None, cancel: threading.Event | None = None,
                    on_slow: Callable[[float], None] | None = None,

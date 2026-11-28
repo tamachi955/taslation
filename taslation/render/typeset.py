@@ -110,6 +110,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from PIL import Image
 
 from ..config import DEFAULT_FIT_TRIES, FIT_TRIES  # noqa: F401 - (FIT_TRIES' names: `fitted_frame`'s tries)
+from .. import analysis
 from ..regions import Box, TextRegion
 from . import breaks
 from .fonts import NO_SPACE_SCRIPTS, RTL_SCRIPTS, FontT, drawable, script_of
@@ -2025,6 +2026,7 @@ def _rect_holds(text: str, font: FontT, lines: list[str], line_h: float, box_w: 
             and all(_display_width(font, ln, script) <= box_w for ln in lines))
 
 
+@analysis.timed("fit_rescue")
 def _rescue(mask: np.ndarray, text: str, font_path: str | Lettering | None, base: Fit, hi: int, line_spacing: float,
             bold_variation: bool, script: str, centre: tuple[float, float] | None, rects: list[Box], fmt: TextFormat,
             keep_blank: bool, hyphenate: bool, condense: bool, bodies: list[_Body] | None = None,
@@ -2199,6 +2201,7 @@ def gains(size: int, base: int) -> bool:
     return size >= base * TURN_GAIN and size - base >= TURN_GAIN_PX
 
 
+@analysis.timed("fit_frames")
 def fitted_frame(tries: Sequence[str], sized: Any, floor: int, min_size: int, frames: Sequence[str]) -> str:
     """The room a bubble's automatic lettering takes, by the *tries* in their order (names of `FIT_TRIES`): "" its
     own, across, where the lettering across with every set try (`SET_TRIES`: what would be drawn) is not `poor`;
@@ -2571,6 +2574,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     text = text.strip()
     if not text:
         return Lettered(0)
+    analysis.count("fit.probe" if image is None else "fit.draw")  # (the analysis log: the tries made, drawn or not)
     if large is not None:
         large = (large[0] - lead, large[1] - lead, large[2])
     if tries is not None:

@@ -291,8 +291,11 @@ def entries(menu):
 
 
 def test_the_menu_has_the_windows_entries_that_still_mean_something_and_each_is_asked_for(hidden_root, monkeypatch):
+    from taslation import devmeasure
     from taslation.ui import gpu_release
 
+    monkeypatch.setattr(devmeasure, "available", lambda root=None: False)  # (an installed copy: test_analysis_log has
+    # the checkout's Developer measuring)
     app = menu_app(hidden_root)
     opened = []
     monkeypatch.setattr(sm, "open_viewer", lambda a, by_itself=False: opened.append(("viewer", a._see_asked)))

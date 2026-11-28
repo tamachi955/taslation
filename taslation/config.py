@@ -320,6 +320,9 @@ class Settings:
     # for updates... asks, when it is chosen) or "daily" (at most once a day, by check_update.py in a process of its
     # own, which asks GitHub for one small file; the window's own process stays offline). install.ps1 asks once.
     update_check: str = "off"
+    # the session's analysis log, numbers only (`taslation.analysis`: <state dir>/analysis.jsonl): "auto" (the default:
+    # written when TASlation runs from a source checkout, never in an installed copy), "on" or "off". In no dialog.
+    analysis_log: str = "auto"
     debug: bool = False
 
     # --- where these came from (never keys of the file: `INTERNAL_FIELDS`) ---
@@ -419,6 +422,8 @@ class Settings:
             raise ConfigError("role must be 'reader' or 'translator'")
         if self.update_check not in ("off", "daily"):
             raise ConfigError("update_check must be 'off' or 'daily'")
+        if self.analysis_log not in ("auto", "on", "off"):
+            raise ConfigError("analysis_log must be 'auto', 'on' or 'off'")
         delay = self.hover_delay_ms
         if (not isinstance(delay, int) or isinstance(delay, bool)
                 or not HOVER_DELAY_RANGE[0] <= delay <= HOVER_DELAY_RANGE[1]):

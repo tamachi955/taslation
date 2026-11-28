@@ -89,4 +89,5 @@ see_through_indicators = true # the pane at the right edge of the viewer's area 
 hover_delay_ms = 450          # how long the pointer rests on a bubble's lettering before it gives way to the original under it (0-3000; 0: at once)
 follow = "events"             # "events": the viewer is captured every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
 update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... in the Menu asks, when you choose it; also Settings...
+analysis_log = "auto"         # the session's analysis log in the state folder (analysis.jsonl: what each page cost and what each step changed, numbers only - no text, no titles, no pictures): "auto" writes it when TASlation runs from a source checkout and never in an installed copy; "on" or "off" force either
 debug = false

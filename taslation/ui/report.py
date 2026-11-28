@@ -7,7 +7,9 @@ The text is plain, in a fence so that it pastes cleanly, in sections of ``key = 
 every language of the window and stay as they are (the ``*_KEYS`` below; a key may come more than once, a line for each
 monitor, region, line of the foreground or kind of problem), the most important first: the reported regions in full
 (a region's report: that region first), the page and a line for each of its regions, the screen and the viewer's
-window, the side panes and the lettering's window, the program, the log's warnings and errors. MAX_LINES at the most.
+window, the side panes and the lettering's window, the program, the log's warnings and errors. MAX_LINES at the most;
+then, while the session's analysis log is on (`taslation.analysis`, a source checkout by default), its tables
+(`analysis_lines`: the defects by level first, the stages' and helpers' times, ...), ANALYSIS_LINES at the most.
 
 Numbers and states only: no text of the page, no title (of the book, of the viewer's window), no name of a file of
 the reader's, no pixels; every value passes `errorlog.scrub` (characters beyond ASCII as ``…``, paths as ``<path>``),
@@ -73,7 +75,9 @@ PROGRAM_KEYS = ("version", "commit", "python", "tk", "os", "torch", "gpu", "ui_l
                 "translator", "ocr", "layout_model", "inpainting", "server", "offline_guard", "settings_changed",
                 "last_error")
 LOG_KEYS = ("problem",)
-SECTIONS = ("region", "page", "screen", "panes", "program", "log")
+ANALYSIS_KEYS = ("table", "cut")
+SECTIONS = ("region", "page", "screen", "panes", "program", "log", "analysis")
+ANALYSIS_LINES = 80  # the [analysis] section's lines at the most (`analysis_lines`), beyond MAX_LINES
 
 
 # ------------------------------------------------------------------ small pieces
@@ -690,7 +694,25 @@ def report_text(app: Any, regions: Iterable[Any] | None = None, with_text: bool 
         cut = [n for n, line in enumerate(lines) if line.startswith("region = ")][-over:]
         lines = [line for n, line in enumerate(lines) if n not in set(cut)]
         lines = lines[:MAX_LINES - 1] + [f"cut = {over} line(s) left out"]
-    return "\n".join([FENCE, *lines, FENCE])
+    return "\n".join([FENCE, *lines, *(_get(analysis_lines, []) or []), FENCE])
+
+
+def analysis_lines() -> list[str]:
+    """The [analysis] section, while the session's analysis log is on (`taslation.analysis`; none while it is off):
+    its tables over the lines kept in memory (`analysis.summary_lines`: numbers and the program's own names alone),
+    ANALYSIS_LINES at the most, after the rest's MAX_LINES."""
+    from .. import analysis
+
+    records = analysis.records()
+    if not records:
+        return []
+    lines = _Lines("analysis", ANALYSIS_KEYS)
+    table = [t for t in analysis.summary_lines(records, slowest=5) if t.strip()]
+    for text in table[:ANALYSIS_LINES]:
+        lines.add("table", errorlog.scrub(text).replace("\n", " "), safe=False)  # (its columns kept)
+    if len(table) > ANALYSIS_LINES:
+        lines.add("cut", f"{len(table) - ANALYSIS_LINES} line(s) left out")
+    return lines.lines
 
 
 def line_count(text: str) -> int:

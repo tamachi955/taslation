@@ -56,6 +56,7 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
+from .. import analysis
 from ..config import LAMA_MODEL
 from ..detect.bubbles import fill_holes, sides_of
 from ..regions import TextRegion
@@ -211,6 +212,7 @@ def box_of(image: np.ndarray, region: TextRegion) -> tuple[int, int, int, int]:
     return max(0, b[0]), max(0, b[1]), min(w, b[2]), min(h, b[3])
 
 
+@analysis.timed("on_art")
 def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> bool:
     """Whether *region* is lettering on the page whose ground, in a ring round its box, is not one flat colour; a
     bubble the classical detectors could not close, and a rectangle of the reader's (`drawn_on_art`), are judged as
@@ -280,6 +282,7 @@ def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
     return float(np.percentile(np.abs(ground - np.median(ground)), 90)) >= flat
 
 
+@analysis.timed("closed_interior")
 def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: bool = False, scale: float = 1.0,
                     bounds: tuple[int, int, int, int] | None = None
                     ) -> tuple[tuple[int, int, int, int], np.ndarray, np.ndarray] | None:
@@ -298,10 +301,14 @@ def closed_interior(image: np.ndarray, box: tuple[int, int, int, int], dark: boo
     inside it, and paper that reaches its edge there is closed by it, as by an outline."""
     found, open_ = _closed_at(image, box, dark, scale, CLOSED_REACH, bounds)
     if found is None and open_:
-        found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE, bounds)
+        with analysis.timing("closed_interior.wide"):
+            found, _open = _closed_at(image, box, dark, scale, CLOSED_WIDE, bounds)
+        if found is not None:  # (the wide look closed what the first left open: the analysis log's count)
+            analysis.acted_box("closed_interior.wide", box)
     return found
 
 
+@analysis.timed("closed_room")
 def closed_room(image: np.ndarray, region: TextRegion, scale: float = 1.0) -> np.ndarray | None:
     """The room of a model bubble with no shape of its own (tier 3, whose mask is its plain box), as a mask of its
     box: the paper closed round its lettering (`closed_interior`), its holes (the lettering) filled, within the box,
@@ -375,6 +382,7 @@ def _char_hole(region: TextRegion, shape: tuple[int, ...], x0: int, y0: int, gro
     return hole
 
 
+@analysis.timed("see_through")
 def see_through(image: np.ndarray, region: TextRegion,
                 closed: tuple[tuple[int, int, int, int], np.ndarray, np.ndarray]) -> bool:
     """Whether the drawing shows through the paper closed round a model bubble's lettering (*closed*, from
@@ -407,9 +415,13 @@ def see_through(image: np.ndarray, region: TextRegion,
     joined = np.unique(parts[hole & ink])
     on = np.isin(parts, joined[joined > 0]) & core & ~_char_hole(region, gray.shape, wx0, wy0,
                                                                   max(2, int(THROUGH_GROW * glyph)))
-    return int(on.sum()) >= THROUGH_SHARE * int(hole.sum())
+    through = int(on.sum()) >= THROUGH_SHARE * int(hole.sum())
+    if through:
+        analysis.acted(region, "see_through")
+    return through
 
 
+@analysis.timed("art_mask")
 def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
     """The lettering of *region* as a boolean mask of the page; None when its box holds too little of it. Its strokes
     are found in the box (`ringed`), and past the box (by `reach_of`) what continues a stroke it took: a glyph-sized
@@ -511,6 +523,7 @@ def _ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] 
     return crop, part, band, paper_surface(crop, band)
 
 
+@analysis.timed("ground_fill")
 def fill_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None = None,
                 scale: float = 1.0) -> bool:
     """Paint *hole* (bool, the page) in place with its plain ground as `plain_ground` judged it (within *box*): the
@@ -524,6 +537,7 @@ def fill_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, i
     return True
 
 
+@analysis.timed("tone_look")
 def tone_shifts(image: np.ndarray, hole: np.ndarray, scale: float = 1.0
                 ) -> tuple[tuple[int, int, int, int], list[tuple[int, int]]] | None:
     """The shifts at which the ground round *hole* (bool, the page) repeats itself, as (the window looked at, the
@@ -592,6 +606,7 @@ def _closed(hole: np.ndarray) -> np.ndarray:
     return fill_holes(hole.astype(np.uint8) * 255) > 0
 
 
+@analysis.timed("tone_fill")
 def fill_tone(image: np.ndarray, hole: np.ndarray, scale: float = 1.0) -> bool:
     """Paint *hole* (bool, the page) in place from the pattern round it, when that ground repeats itself
     (`tone_shifts`): each pixel of the hole takes the pixel at the nearest shift the pattern repeats at that is ground
@@ -799,6 +814,7 @@ def available(models_dir: Path, setting: str = "auto", cuda: bool | None = None)
 Kept = tuple[tuple[int, int, int, int], np.ndarray, np.ndarray]
 
 
+@analysis.timed("keep_lines")
 def _keep_lines(image: np.ndarray, region: TextRegion, dark: bool, dark_threshold: int) -> Kept | None:
     """The straight lines of the drawing that run through the box of lettering set on the page (`erase.line_pixels`:
     a bubble's tail crossing it) and their pixels as they are, to be put back (`_put_back`) after a fill that took
@@ -820,9 +836,16 @@ def _keep_lines(image: np.ndarray, region: TextRegion, dark: bool, dark_threshol
     return (x0, y0, x1, y1), lines, image[y0:y1, x0:x1][lines].copy()
 
 
-def _put_back(image: np.ndarray, kept: Kept | None) -> None:
+def _put_back(image: np.ndarray, kept: Kept | None, region: TextRegion | None = None) -> None:
+    """The lines `_keep_lines` kept put back on *image*; the pixels that differed from the fill counted for the
+    analysis log (*region*: the one whose erase it follows)."""
     if kept is not None:
         (x0, y0, x1, y1), lines, pixels = kept
+        if region is not None and analysis.on():
+            back = int(np.any(image[y0:y1, x0:x1][lines] != pixels, axis=-1).sum())
+            if back:
+                analysis.acted(region, "keep_lines")
+                analysis.count("keep_lines.px", back)
         image[y0:y1, x0:x1][lines] = pixels
 
 
@@ -851,6 +874,7 @@ def tone_erase(image: np.ndarray, region: TextRegion, dark: bool = False) -> tup
         return None
     if not fill_tone(image, _hole(image, region, judged, full), scale):
         return None
+    analysis.acted(region, "tone_fill")
     return paper_colour(*ArtEraser._crop_mask(image, region), dark)
 
 
@@ -912,6 +936,7 @@ class ArtEraser:
         except Exception as e:  # noqa: BLE001 - out of memory, a broken file: not worth a page
             return None, type(e).__name__
 
+    @analysis.timed("lama")
     def _fill(self, part: np.ndarray, hole: np.ndarray) -> np.ndarray | None:
         """*part* with *hole* filled; None when LaMa cannot do it. A failure on the GPU, loading or running, moves it
         to the CPU for the rest of the session (`ocr.place.failed`); a failure on the CPU leaves the paper fill for the
@@ -920,6 +945,12 @@ class ArtEraser:
             if self.failed:
                 return None
             device = self._model.device if self._model is not None else self._device()
+            if analysis.on():  # (the analysis log: LaMa's windows, their pixels and hole, those on the GPU)
+                analysis.count("lama.windows")
+                analysis.count("lama.window_px", int(part.shape[0] * part.shape[1]))
+                analysis.count("lama.hole_px", int(np.count_nonzero(hole)))
+                if device != "cpu":
+                    analysis.count("lama.gpu_windows")
             filled, why = self._try(device, part, hole)
             if filled is not None and device != "cpu":
                 give_back_idle()
@@ -964,7 +995,8 @@ class ArtEraser:
                 if full is not None and plain_ground(image, full, scale=scale):
                     kept = _keep_lines(image, region, dark, dark_threshold)
                     fill_ground(image, full, scale=scale)
-                    _put_back(image, kept)
+                    analysis.acted(region, "ground_fill")
+                    _put_back(image, kept, region)
             return app()
         if on_paper(image, region):
             self.counts["ground"] += 1
@@ -978,12 +1010,14 @@ class ArtEraser:
             if GROUND_FILL:
                 kept = _keep_lines(image, region, dark, dark_threshold)
                 fill_ground(image, full, scale=scale)  # (strokes, ring and all; the paper fill takes what is left)
-                _put_back(image, kept)
+                analysis.acted(region, "ground_fill")
+                _put_back(image, kept, region)
             return app()
         full = _hole(image, region, judged, full)  # (the model's text box too)
         if TONE_FILL and fill_tone(image, full, scale):  # a screentone, a hatching: painted on from round the hole
             self.counts["tone"] += 1
             region.toned = True
+            analysis.acted(region, "tone_fill")
             return paper_colour(*self._crop_mask(image, region), dark)
         x0, y0, x1, y1 = box_of(image, region)
         wx0, wy0, wx1, wy1 = window(image.shape, x0, y0, y1 - y0, x1 - x0)
@@ -1000,6 +1034,7 @@ class ArtEraser:
             where, pixels = paste(part, filled, hole)
             region.inpainted = (key, pixels, where)
         self.counts["art"] += 1
+        analysis.acted(region, "lama")
         part[where] = pixels
         return paper_colour(*self._crop_mask(image, region), dark)
 
