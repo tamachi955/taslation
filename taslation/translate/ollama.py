@@ -89,9 +89,10 @@ and never released (`never_unloads`); a model found loaded as asked and kept for
 looked at then.
 
 Every request to the model (`_chat`, PLaMo's `_generate`) runs within `taslation.ocr.place.translating`, a streamed
-one to its end: the OCR readers that are on the GPU read on the CPU meanwhile, for on a GPU the model computes on
-they wait (0.7 s a crop instead of 0.13). A load moves nothing: a crop on the GPU during a load reads as fast as on an
-idle GPU.
+one to its end: an OCR reader on the GPU without its CUDA graphs reads on the CPU meanwhile, for its many small steps
+wait on a GPU the model computes on (0.7 s a crop instead of 0.13); one with its graphs stays there (a replay is one
+launch: 19 to 39 ms a crop through the requests). A load moves nothing: a crop on the GPU during a load reads as fast
+as on an idle GPU.
 
 A load is checked afterwards: a model that came up partly on the CPU (`gpu_share`) is said to the reader
 (``ollama.partly_on_gpu``), and nothing else is done. What else holds GPU memory did not change Ollama's share when
@@ -693,7 +694,7 @@ class OllamaTranslator:
             payload["think"] = False
 
         def send() -> dict[str, Any]:
-            with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
+            with ocr_place.translating():  # (the OCR without graphs on the CPU while the model computes, to its end)
                 if stream:
                     return self._stream("/api/chat", payload, on_text or _ignore, cancel, on_slow,
                                         first=self._no_answer_after(), between=self._silent_after())

@@ -191,6 +191,40 @@ def test_one_read_replays_graphs_at_a_time():
     assert order == ["this", "other"] and not graphs._lock.locked()
 
 
+def test_the_analysis_log_counts_the_plain_passes_and_the_waits_for_the_graphs_of_the_unit_read(tmp_path):
+    """A crop with no graph of its shape and an input not of the graph's go by the plain pass on the GPU: counted
+    for the page unit read on the thread, and so is a read's wait for another's graphs (its ms)."""
+    from taslation import analysis
+
+    held, _graph, _mine = _with_graph()
+    analysis.start(tmp_path, "on")
+    try:
+        page = analysis.begin(None, None)
+        with analysis.unit_span(1, beside=True):
+            held.run(("dense", 48, 64), _plain, FakeTensor((1, 3, 48, 64)))
+            held.run(("dense", 32, 64), _plain, FakeTensor((1, 3, 32, 64), dtype="uint8"))
+            held.run(("dense", 32, 64), _plain, FakeTensor((1, 3, 32, 64)))  # (replayed: not counted)
+            inside, go = threading.Event(), threading.Event()
+
+            def other():
+                with graphs.held(held):
+                    inside.set()
+                    go.wait(5)
+
+            holder = threading.Thread(target=other)
+            holder.start()
+            inside.wait(5)
+            threading.Timer(0.05, go.set).start()
+            with graphs.held(held):
+                pass
+            holder.join(5)
+        (unit,) = analysis.end(page, None)["read_units"]
+    finally:
+        analysis.stop()
+    assert unit["readers"]["charspot"]["plain"] == 2 and unit["readers"]["charspot"]["calls"] == 0
+    assert unit["waits"] == 1 and unit["wait_ms"] >= 30
+
+
 def test_the_readers_need_their_graphs_where_they_capture_them(monkeypatch):
     assert place.readers_graphs() == place.READERS_GRAPHS_MIB
     monkeypatch.setattr(graphs, "ENABLED", False)

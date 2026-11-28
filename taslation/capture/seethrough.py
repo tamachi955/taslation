@@ -301,6 +301,34 @@ if IS_WINDOWS:
     _user32.GetForegroundWindow.argtypes = []
     _user32.GetForegroundWindow.restype = wintypes.HWND
 
+    try:  # (`same_rows`: the C library's memcmp, called without the GIL)
+        _memcmp: Any = ctypes.CDLL("msvcrt").memcmp
+        _memcmp.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+        _memcmp.restype = ctypes.c_int
+    except (OSError, AttributeError):  # pragma: no cover - numpy compares instead
+        _memcmp = None
+else:
+    _memcmp = None
+
+
+def same_rows(a: np.ndarray, b: np.ndarray, top: int, bottom: int) -> bool:
+    """Whether the frames *a* and *b* ((H, W, channels)) hold the very same bytes in their rows *top* to *bottom*
+    (every column of them): frames of another shape or type are not the same. The same frame is; C-contiguous frames
+    (the capture's own copies) are compared by memcmp, 1.3 ms for a frame of 1920 x 1032 (`visible` of three sets
+    there: 18 ms where the newest is on show, 36 where none is), others by numpy."""
+    if a is b:
+        return True
+    if a.shape != b.shape or a.dtype != b.dtype:
+        return False
+    top, bottom = max(0, int(top)), min(int(a.shape[0]), int(bottom))
+    if bottom <= top:
+        return True
+    x, y = a[top:bottom], b[top:bottom]
+    if _memcmp is not None and x.flags.c_contiguous and y.flags.c_contiguous:
+        return int(_memcmp(x.ctypes.data, y.ctypes.data, x.nbytes)) == 0
+    return bool(np.array_equal(x, y))
+
+
 MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 0, 2, 0
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
 WS_EX_APPWINDOW, LWA_ALPHA = 0x00040000, 0x2
@@ -712,7 +740,8 @@ class SeeThrough:
         self._arrived: dict[int, float] = {}  # frame count -> when the capture told of it
         self.notes: deque[dict[str, Any]] = deque(maxlen=LOG_KEPT)
         self.counts = {"frames": 0, "looks": 0, "draws": 0, "hides": 0, "moves": 0, "errors": 0,
-                       "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
+                       "compare_ms": 0.0, "compares": 0, "same": 0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0,
+                       "pane_hides": 0,
                        "clicks": 0, "hovers": 0, "keys": 0, "key_registered": 0, "key_released": 0,
                        "key_failed": 0, "deletes": 0, "delete_registered": 0, "delete_released": 0,
                        "delete_failed": 0, "woke": 0, "woke_failed": 0}
@@ -752,6 +781,9 @@ class SeeThrough:
         self._look_facts: dict[str, Any] = {}
         self._why: dict[str, Any] = {}
         self._frame_since: tuple[int, float] = (-1, 0.0)  # (the frame count the last full look had, since when)
+        # (`_decide`) the frame the last compare was made on, the client area's box in it and the DPI, what `visible`
+        # gave, and the sets it was given: a frame of the same bytes there is decided alike
+        self._compared: tuple[np.ndarray, tuple[Any, ...], tuple[Any, ...], tuple[Any, ...]] | None = None
         self._right_takes = False  # the right pane takes clicks now (the pointer on one of its plates)
         self._dpi = st.BASE_DPI  # the viewer's (`viewer_dpi`), at each change of its place or size
         self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, `Seen`, frame, ms)
@@ -1299,9 +1331,7 @@ class SeeThrough:
         if new_frame:
             self.counts["frames"] += 1
         started = time.perf_counter()
-        view = frame.bgra[box[1]:box[3], box[0]:box[2]]
-        chosen, shown, seen = st.visible(sets, view, st.scaled(st.BAR_REACH, self._dpi),
-                                         st.scaled(st.MARGIN, self._dpi), least=st.scaled(st.STRIP_PX, self._dpi))
+        chosen, shown, seen = self._decide(sets, frame.bgra, box)
         compare_ms = (time.perf_counter() - started) * 1000
         self.counts["compare_ms"] += compare_ms
         valid = shown
@@ -1313,6 +1343,27 @@ class SeeThrough:
                             "frame_at": self._frame_since[1]}
         self._last_look = (chosen, shown, seen, frame.seq, compare_ms, origin, size, bool(sets))
         self._show_look(*self._last_look)
+
+    def _decide(self, sets: list[st.PatchSet], frame: np.ndarray, box: st.Box
+                ) -> tuple[st.PatchSet | None, tuple[int, ...], st.Seen]:
+        """(a full look) What shows over the viewer's frame *frame* (BGRA, its client area at *box*): `visible` of
+        *sets* there - but for a frame whose rows of the client area hold the very bytes of the one compared last
+        (`same_rows`, every column of them), with the very same sets (the same objects: a set is frozen, one put again
+        is a new one), the same box and the same DPI: all `visible` decides from, so it is decided as that one was,
+        with no compare ("same" counted, else "compares"). A viewer that sends frames while its page stands still
+        costs a memcmp a frame; any change of a byte there is compared as before, at the frame that shows it."""
+        inputs = (tuple(box), self._dpi)
+        held = self._compared
+        if held is not None and held[1] == inputs and len(held[3]) == len(sets) and \
+                all(a is b for a, b in zip(held[3], sets)) and same_rows(held[0], frame, box[1], box[3]):
+            self.counts["same"] += 1
+            return held[2]
+        view = frame[box[1]:box[3], box[0]:box[2]]
+        decided = st.visible(sets, view, st.scaled(st.BAR_REACH, self._dpi), st.scaled(st.MARGIN, self._dpi),
+                             least=st.scaled(st.STRIP_PX, self._dpi))
+        self.counts["compares"] += 1
+        self._compared = (frame, inputs, decided, tuple(sets))
+        return decided
 
     @staticmethod
     def _facts_of(chosen: st.PatchSet | None, valid: tuple[int, ...], shown: tuple[int, ...], seen: st.Seen,

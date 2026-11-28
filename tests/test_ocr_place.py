@@ -637,6 +637,48 @@ def test_while_the_translator_computes_they_read_on_the_cpu_and_keep_the_gpu_s_c
     assert place._translating == 0 and m.read() == "x read with net@cuda"
 
 
+class GraphedModels(FakeModels):
+    """A fake reader whose GPU copy holds its CUDA graphs (one kept), as charspot's and nar's do."""
+
+    def _copy_to(self, device):
+        from taslation.ocr import graphs
+
+        self.graphs = graphs.Graphs(self.name, None)
+        self.graphs._graphs["pass"] = ("graph", (), (), lambda: ())
+        return (f"net@{device}", self.graphs)
+
+
+def test_a_copy_with_its_cuda_graphs_reads_on_the_gpu_while_the_translator_computes_and_one_without_on_the_cpu(
+        given_back, tmp_path):
+    """A graph's replay is one launch, which takes its turn on the GPU beside the translator's work: the copy with
+    graphs stays on the GPU through a request; one whose graphs were dropped (a replay failed) or were never captured
+    (the plan left them off) reads on the CPU meanwhile, as before. The analysis log counts each read by device, those
+    on the CPU for a request under way apart."""
+    from taslation import analysis
+
+    m = GraphedModels("charspot")
+    m.to("cuda")
+    assert place.graphed(m._gpu[1]) and not place.graphed(("net@cuda", None))
+    analysis.start(tmp_path, "on")
+    try:
+        page = analysis.begin(None, None)
+        with analysis.unit_span(1, beside=True):
+            with place.translating():
+                assert m.read() == "x read with net@cuda"
+                m.graphs.drop()  # (a replay failed: the plain pass from now on)
+                assert not place.graphed(m._gpu[1]) and m.read() == "x read with net@cpu"
+            assert m.read() == "x read with net@cuda"
+        (unit,) = analysis.end(page, None)["read_units"]
+        counted = unit["readers"]["charspot"]
+        assert (counted["gpu"], counted["cpu"], counted["cpu_translating"]) == (2, 1, 1)
+    finally:
+        analysis.stop()
+    plain = FakeModels("nar")
+    plain.to("cuda")
+    with place.translating():
+        assert plain.read() == "x read with net@cpu"  # (no graphs: on the CPU while the model computes)
+
+
 def test_a_copy_that_cannot_be_made_leaves_it_on_the_cpu_for_the_session(given_back):
     told = []
     m = FakeModels()

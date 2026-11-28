@@ -556,3 +556,80 @@ def test_the_words_of_developer_measuring_are_english_and_japanese_only(monkeypa
     assert measure.word("menu") == "Developer measuring"  # (any other language: English)
     for catalog in i18n.CATALOGS.values():
         assert "Developer measuring" not in catalog  # (in no catalog: the window's language test never asks for it)
+
+
+# ------------------------------------------------------------------ a spread's units, the readers, the watch
+def test_a_spread_s_units_are_timed_apart_with_each_reader_s_calls_and_the_translator_s_requests(tmp_path):
+    """Unit 0 read and translated on the page's thread, unit 1 read beside on a thread of its own (adopting the page),
+    waited for and translated: each unit's reading, wait and translation from the page's start, its readers' calls
+    by device (on the processor for a request under way apart), passes with no graph and waits for the graphs, and the
+    translator's requests in the page's time; the summary tables unit 0 against unit 1 and the spread's gap."""
+    import threading
+    import time
+
+    analysis.start(tmp_path, "on")
+    analysis.reader("charspot", 0.5)  # (no page timed: nothing)
+    page = analysis.begin(None, None)
+    with analysis.unit_span(0):
+        analysis.reader("charspot", 0.010, "cuda")
+        analysis.reader("charspot", 0.030, "cuda:0")
+        analysis.reader("nar", 0.020, "cuda")
+        analysis.reader_plain("charspot")
+        analysis.waited(0.004)
+
+    def beside():
+        with analysis.adopt(page), analysis.unit_span(1, beside=True):
+            analysis.reader("charspot", 0.080, "cpu", translating=True)
+            analysis.reader("cpt", 0.300, "cpu")
+
+    with analysis.unit_span(0, "translate"):
+        t = time.perf_counter()
+        analysis.requested(t, t + 0.050)
+        thread = threading.Thread(target=beside)
+        thread.start()
+        thread.join()
+    with analysis.unit_span(1, "wait"):
+        pass
+    analysis.reader("nar", 0.002)  # (a read outside any unit's)
+    with analysis.unit_span(1, "translate"):
+        t2 = time.perf_counter()
+        analysis.requested(t2, t2 + 0.040)
+    analysis.requested(page.t0 - 5, page.t0 - 4)  # (a request before the page: not its)
+    line = analysis.end(page, _result([]))
+    units = {u["unit"]: u for u in line["read_units"]}
+    assert sorted(units) == [-1, 0, 1]
+    zero, one = units[0], units[1]
+    assert zero["beside"] is False and one["beside"] is True and zero["crops"] == 2 and one["crops"] == 1
+    assert zero["readers"]["charspot"]["gpu"] == 2 and zero["readers"]["charspot"]["cpu"] == 0
+    assert zero["readers"]["charspot"]["max_ms"] == pytest.approx(30.0) and zero["readers"]["charspot"]["plain"] == 1
+    assert zero["readers"]["nar"]["gpu_ms"] == pytest.approx(20.0) and zero["waits"] == 1
+    assert zero["wait_ms"] == pytest.approx(4.0)
+    assert one["readers"]["charspot"]["cpu_translating"] == 1 and one["readers"]["cpt"]["cpu_ms"] == pytest.approx(300)
+    assert zero["read_end_ms"] <= zero["translate_start_ms"] <= one["read_start_ms"] <= one["read_end_ms"]
+    assert one["read_end_ms"] <= zero["translate_end_ms"] <= one["wait_start_ms"] <= one["translate_start_ms"]
+    assert units[-1]["readers"]["nar"]["calls"] == 1 and "read_ms" not in units[-1]
+    assert [ms for _start, ms in line["requests"]] == [pytest.approx(50.0), pytest.approx(40.0)]
+    assert all(isinstance(s, str) and analysis.NAME.fullmatch(s) for s in _strings(line))
+    summary = analysis.summary_lines(analysis.records())
+    at = summary.index(next(s for s in summary if s.startswith("page units read (1 pages)")))
+    assert summary[at + 1].lstrip().startswith("unit 0   n   1 (beside   0)")
+    assert any(s.lstrip().startswith("unit 1   n   1 (beside   1)") for s in summary)
+    assert any("charspot" in s and "1 for a request under way" in s for s in summary)
+    assert any(s.lstrip().startswith("spreads 1:") for s in summary)
+    gap = analysis._spread_gap(line)
+    assert gap["first_ms"] == pytest.approx(line["requests"][1][0])
+    assert gap["idle_ms"] == pytest.approx(line["requests"][1][0] - line["requests"][0][0] - 50.0, abs=0.2)
+
+
+def test_the_summary_gives_the_watch_s_duty_from_the_window_s_counts():
+    lines = [{"type": "ui", "t": 1000, "counts": {"over.compare_ms": 999, "over.frames": 99}},  # (its start unknown)
+             {"type": "ui", "t": 6000, "counts": {"over.compare_ms": 400.0, "over.looks": 200, "over.frames": 200,
+                                                  "over.compares": 20, "over.same": 180}},
+             {"type": "ui", "t": 11000, "counts": {"over.compare_ms": 100.0, "over.looks": 50, "over.frames": 50,
+                                                   "over.compares": 5, "over.same": 45}}]
+    (said,) = analysis.watch_lines(lines)
+    assert said.startswith("the see-through watch over 10 s (2 ui lines): compare 50.0 ms a second (5.0 % of a thread)")
+    assert "looks 25.0 a second, frames 25.0 a second, 20.0 ms a compare (compares)" in said
+    assert said.endswith("unchanged frames not compared 225")
+    assert analysis.watch_lines(lines[:1]) == [] and analysis.unit_lines(lines) == []
+    assert any(s.startswith("the see-through watch over 10 s") for s in analysis.summary_lines(lines))

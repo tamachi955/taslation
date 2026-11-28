@@ -179,16 +179,20 @@ class Graphs:
         """The outputs of *forward*(*inputs*): the graph of *key* replayed on them where there is one (its outputs,
         good until the next replay: read them before the read gives the graphs back, `held`), else the plain pass.
         A replay that fails drops the reader's graphs and reads by the plain pass."""
+        from .. import analysis
+
         held = self._graphs.get(key)
         if held is None:
-            if not self.dropped:
+            if not self.dropped:  # (said once in the log; every such pass counted in the analysis log)
                 self._say("shape", "the OCR reader %s read a crop by the plain pass: no CUDA graph of its shape %s",
                           key)
+                analysis.reader_plain(self.name)
             return forward(*inputs)
         graph, mine, outputs, _forward = held
         if len(mine) != len(inputs) or any(a.shape != b.shape or a.dtype != b.dtype for a, b in zip(mine, inputs)):
             self._say("input", "the OCR reader %s read a crop by the plain pass: its input is not the CUDA graph's %s",
                       key)
+            analysis.reader_plain(self.name)
             return forward(*inputs)
         try:
             for to, value in zip(mine, inputs):
@@ -219,8 +223,16 @@ def held(graphs: Graphs | None) -> Iterator[Graphs | None]:
     if graphs is None or graphs.dropped:
         yield None
         return
-    with _lock:
+    if not _lock.acquire(blocking=False):  # (another read replays: the wait counted in the analysis log)
+        from .. import analysis
+
+        began = time.perf_counter()
+        _lock.acquire()
+        analysis.waited(time.perf_counter() - began)
+    try:
         yield graphs
+    finally:
+        _lock.release()
 
 
 def run(graphs: Graphs | None, key: Hashable, forward: Callable[..., Sequence[Any]], *inputs: Any) -> Sequence[Any]:

@@ -20,6 +20,11 @@ One JSON line per page read or shown from the cache (`begin` / `end` round `Pipe
   the distinct lettering boxes, where a helper sees a box and no region: `acted_box`) - not how often it ran;
 * ``regions``: how many, by status, kind, tier, fit taken (``fitted``, ``won``), sound word, review flag and lettering
   flag, those found by the layout model, those read with low confidence and left as drawn (``low_as_drawn``);
+* ``read_units``: each page unit's reading (`unit_span`, `unit_facts`) - read beside the unit before or not, its
+  reading's, its wait's and its translation's start, end and ms from the page's start, the crops read, each OCR
+  reader's calls, ms and longest call on the GPU and on the processor (those on the processor while a request to the
+  translator ran: ``cpu_translating``), its passes with no CUDA graph, and the ms waited for the readers' graphs -,
+  and ``requests``: the translator's requests that began in the page's time, [start, ms] each (`requested`);
 * ``first_letter_ms`` (ms from the start to its first lettering told to the window), ``gpu_free_mb`` (before, after:
   only where torch has CUDA up already, never started for it) and ``self_ms``, what the log itself cost;
 * ``cases``: each defect of level S1 or S2 found on the page itself (`page_defects`), one by one with its numbers - the
@@ -80,6 +85,9 @@ COLOUR_SPREAD = 24  # a pixel whose channels are so far apart, or more, is colou
 INK_LEVEL = 80  # grey under it: ink
 DARK_LEVEL = 32  # grey under it: dark ground
 PAPER_LEVEL = 230  # grey under it: drawn (not paper)
+REQUESTS_KEPT = 512  # the translator's requests kept for the pages to take theirs (`requested`)
+PAGE_REQUESTS = 120  # a page's line holds so many of them at the most
+READERS = ("charspot", "nar", "cpt")  # the OCR readers whose calls a unit's reading counts (`reader`)
 
 from .budget import PAGE_BUDGET_CPU_S, PAGE_BUDGET_S  # noqa: E402 - s: a page slower is too slow to use (S1)
 S1, S2, S3, S4 = "s1", "s2", "s3", "s4"
@@ -263,6 +271,9 @@ class Log:
         self.loose_counts: Counter[str] = Counter()
         self.failed = False
         self.wrote = 0.0  # s the last line's writing took (counted in the next page's ``self_ms``)
+        # (`requested`) the translator's requests as perf_counter (start, end) pairs, whatever thread made them: a page
+        # takes those within its own time (``requests``)
+        self.requests: deque[tuple[float, float]] = deque(maxlen=REQUESTS_KEPT)
 
     def next_page(self) -> int:
         with self.lock:
@@ -375,6 +386,7 @@ class Page:
         self.counts: Counter[str] = Counter()
         self.boxes: dict[str, set[tuple[int, ...]]] = {}
         self.first_letter: float | None = None
+        self.units: dict[Any, dict[str, Any]] = {}  # (`unit_read`, `reader`) each page unit's reading, by its place
         self.lock = threading.Lock()
         # developer measuring: what it keeps of the page (`taslation.devmeasure`)
         self.keep: dict[str, Any] | None = None
@@ -468,6 +480,145 @@ def count(name: str, n: float = 1) -> None:
     if current_log is not None:
         with current_log.lock:
             current_log.loose_counts[name] += n
+
+
+# ------------------------------------------------------------------ a page unit's reading and the translator's requests
+def _unit(page: Page, unit: Any) -> dict[str, Any]:
+    """(under *page*'s lock) The record of the reading of *unit* (its place in the page's reading order; None: a read
+    outside any unit's)."""
+    entry = page.units.get(unit)
+    if entry is None:
+        entry = page.units[unit] = {"readers": {}, "wait_ms": 0.0, "waits": 0}
+    return entry
+
+
+@contextmanager
+def unit_span(unit: int, part: str = "read", beside: bool = False) -> Iterator[None]:
+    """The block is the *part* ("read"; "wait": for its reading beside to end; "translate") of the page unit *unit*
+    (its place in the page's reading order), on the page timed on this thread: its start and end from the page's
+    start and its wall time kept (the first
+    start, the last end; a part run twice adds up); while "read" runs, the readers' calls on this thread count for the
+    unit (`reader`). *beside*: read on a thread of its own beside the unit before (`pipeline.ReadBeside`). Nothing
+    while no page is timed."""
+    page = getattr(_TL, "page", None)
+    if page is None:
+        yield
+        return
+    before = getattr(_TL, "unit", None)
+    if part == "read":
+        _TL.unit = int(unit)
+    t = time.perf_counter()
+    try:
+        yield
+    finally:
+        end = time.perf_counter()
+        if part == "read":
+            _TL.unit = before
+        with page.lock:
+            entry = _unit(page, int(unit))
+            start_ms, end_ms = 1000 * (t - page.t0), 1000 * (end - page.t0)
+            entry[part + "_start_ms"] = min(entry.get(part + "_start_ms", start_ms), start_ms)
+            entry[part + "_end_ms"] = max(entry.get(part + "_end_ms", end_ms), end_ms)
+            entry[part + "_ms"] = entry.get(part + "_ms", 0.0) + 1000 * (end - t)
+            if part == "read":
+                entry["beside"] = bool(beside) or bool(entry.get("beside"))
+
+
+def _reader(page: Page, name: str) -> dict[str, Any]:
+    readers = _unit(page, getattr(_TL, "unit", None))["readers"]
+    got = readers.get(name)
+    if got is None:
+        got = readers[name] = {"calls": 0, "ms": 0.0, "max_ms": 0.0, "gpu": 0, "gpu_ms": 0.0, "cpu": 0,
+                               "cpu_ms": 0.0, "cpu_translating": 0, "plain": 0}
+    return got
+
+
+def reader(name: str, seconds: float, device: str = "cpu", translating: bool = False) -> None:
+    """One call of the OCR reader *name* (`READERS`) that took *seconds* on *device* ("cpu", or the GPU's "cuda..."),
+    counted for the unit read on this thread (`unit_span`) of the page timed on it; *translating*: on the processor
+    for a request to the translator under way while its copy on the GPU waits (`ocr.place.translating`)."""
+    page = getattr(_TL, "page", None)
+    if page is None:
+        return
+    ms = 1000 * seconds
+    gpu = str(device).startswith("cuda")
+    with page.lock:
+        got = _reader(page, name)
+        got["calls"] += 1
+        got["ms"] += ms
+        got["max_ms"] = max(got["max_ms"], ms)
+        got["gpu" if gpu else "cpu"] += 1
+        got["gpu_ms" if gpu else "cpu_ms"] += ms
+        if translating and not gpu:
+            got["cpu_translating"] += 1
+
+
+def reader_plain(name: str) -> None:
+    """A pass of the reader *name* on the GPU by the plain pass, with no CUDA graph of its input's shape
+    (`ocr.graphs`), counted as `reader` counts its calls."""
+    page = getattr(_TL, "page", None)
+    if page is None:
+        return
+    with page.lock:
+        _reader(page, name)["plain"] += 1
+
+
+def waited(seconds: float) -> None:
+    """A wait of the reading on this thread for a lock or a gate it takes (the readers' CUDA graphs, `ocr.graphs.held`),
+    counted for its unit as `reader` counts."""
+    page = getattr(_TL, "page", None)
+    if page is None:
+        return
+    with page.lock:
+        entry = _unit(page, getattr(_TL, "unit", None))
+        entry["wait_ms"] += 1000 * seconds
+        entry["waits"] += 1
+
+
+def requested(start: float, end: float) -> None:
+    """A request to the translator ran from *start* to *end* (perf_counter s), on any thread: kept for the pages
+    whose time it lies in (``requests``); nothing while the log is off."""
+    current_log = _LOG
+    if current_log is None:
+        return
+    with current_log.lock:
+        current_log.requests.append((float(start), float(end)))
+
+
+def _page_requests(page: Page, now: float) -> list[list[float]]:
+    """The requests to the translator that began within *page*'s time: [start, ms] each, ms from its start."""
+    current_log = _LOG
+    if current_log is None:
+        return []
+    with current_log.lock:
+        mine = [(a, b) for a, b in current_log.requests if page.t0 <= a <= now]
+    return [[round(1000 * (a - page.t0), 1), round(1000 * (b - a), 1)] for a, b in sorted(mine)[:PAGE_REQUESTS]]
+
+
+def unit_facts(page: Page) -> list[dict[str, Any]]:
+    """Each page unit's reading as the page's line keeps it (``read_units``), in the order of their places: its place
+    (``unit``; -1 for reads outside any unit's), read beside the one before or not, its reading's and its translation's
+    start, end and wall ms from the page's start, the crops read (charspot's calls: one a crop, the memo aside), each
+    reader's calls, ms, longest call, calls and ms on the GPU and on the processor, those on the processor for a
+    request under way, passes with no CUDA graph, and the ms waited for a lock or a gate."""
+    out: list[dict[str, Any]] = []
+    with page.lock:
+        units = {k: v for k, v in page.units.items()}
+        for key in sorted(units, key=lambda k: -1 if k is None else int(k)):
+            entry = units[key]
+            line: dict[str, Any] = {"unit": -1 if key is None else int(key), "beside": bool(entry.get("beside"))}
+            for part in ("read", "wait", "translate"):
+                for what in ("start_ms", "end_ms", "ms"):
+                    if part + "_" + what in entry:
+                        line[part + "_" + what] = round(float(entry[part + "_" + what]), 1)
+            readers = entry.get("readers") or {}
+            line["crops"] = int((readers.get("charspot") or {}).get("calls", 0))
+            line["readers"] = {name: {k: (round(v, 1) if isinstance(v, float) else int(v)) for k, v in got.items()}
+                               for name, got in sorted(readers.items())}
+            line["wait_ms"] = round(float(entry.get("wait_ms", 0.0)), 1)
+            line["waits"] = int(entry.get("waits", 0))
+            out.append(line)
+    return out
 
 
 def traced(regions: Iterable[Any]) -> None:
@@ -661,6 +812,12 @@ def page_line(page: Page, result: Any, outcome: str, timings: dict[str, float] |
         boxes = {k + ".boxes": len(v) for k, v in page.boxes.items()}
     if page.first_letter is not None:
         line["first_letter_ms"] = round(1000 * page.first_letter, 1)
+    units_read = unit_facts(page)
+    if units_read:
+        line["read_units"] = units_read
+    requests = _page_requests(page, now)
+    if requests:
+        line["requests"] = requests
     if result is not None:
         units = list(getattr(result, "units", None) or [])
         line["units"] = len(units)
@@ -969,8 +1126,134 @@ def summary_lines(lines: Sequence[dict[str, Any]], slowest: int = 10) -> list[st
     if pages:
         out += _time_lines(pages, slowest, total_ms)
         out += [""] + risk_lines(lines)
+    units = unit_lines(lines, slowest)
+    if units:
+        out += [""] + units
+    watch = watch_lines(lines)
+    if watch:
+        out += [""] + watch
     out += _count_lines(lines, pages, total_ms)
     return out
+
+
+def _spread_gap(page: dict[str, Any]) -> dict[str, float] | None:
+    """For a page of two units or more with its requests (``requests``): from the last request of the units before the
+    last one's translation began (those that began before it) to the first request of that unit - ``gap_ms`` from
+    that last one's start, ``idle_ms`` from its end (the translator idle meanwhile) -, and when that first one began
+    (``first_ms``, from the page's start); None without them."""
+    units = [u for u in page.get("read_units") or [] if isinstance(u, dict) and int(u.get("unit", -1)) >= 0]
+    requests = [r for r in page.get("requests") or [] if isinstance(r, list) and len(r) == 2]
+    if len(units) < 2 or not requests:
+        return None
+    last = max(units, key=lambda u: int(u["unit"]))
+    begins = last.get("translate_start_ms")
+    if begins is None:
+        return None
+    before = [r for r in requests if float(r[0]) < float(begins)]
+    after = [r for r in requests if float(r[0]) >= float(begins)]
+    if not before or not after:
+        return None
+    end_before = max(float(r[0]) + float(r[1]) for r in before)
+    start_before = max(float(r[0]) for r in before)
+    first = min(float(r[0]) for r in after)
+    return {"gap_ms": first - start_before, "idle_ms": first - end_before, "first_ms": first,
+            "last_before_ms": start_before}
+
+
+def unit_lines(lines: Sequence[dict[str, Any]], slowest: int = 10) -> list[str]:
+    """The page units' readings (``read_units``) by their place in the page's reading order (unit 0 against unit 1 of a
+    spread): over the pages read, the reading's wall ms, its start and end from the page's start, the crops and the ms
+    a crop, and per reader its calls, ms a page, its longest call, its calls on the processor (those for a request to
+    the translator under way apart) and its passes with no CUDA graph, the ms waited for a lock; then, for the spreads,
+    the time from the last request of the unit before to the first of the next (`_spread_gap`) with its slowest pages.
+    Empty without such lines."""
+    pages = [ln for ln in lines if ln.get("type") == "page" and not ln.get("cached") and ln.get("read_units")]
+    if not pages:
+        return []
+    by: dict[int, list[dict[str, Any]]] = {}
+    for p in pages:
+        for u in p.get("read_units") or []:
+            if isinstance(u, dict) and "read_ms" in u:
+                by.setdefault(int(u.get("unit", -1)), []).append(u)
+    out = [f"page units read ({len(pages)} pages): ms med / p95 / most, start and end med, crops med, ms a crop med, "
+           f"lock wait ms med / most"]
+    for key in sorted(by):
+        mine = by[key]
+        read = [float(u["read_ms"]) for u in mine]
+        starts = [float(u.get("read_start_ms") or 0.0) for u in mine]
+        ends = [float(u.get("read_end_ms") or 0.0) for u in mine]
+        crops = [int(u.get("crops") or 0) for u in mine]
+        per = [float(u["read_ms"]) / c for u, c in zip(mine, crops) if c]
+        waits = [float(u.get("wait_ms") or 0.0) for u in mine]
+        beside = sum(1 for u in mine if u.get("beside"))
+        name = f"unit {key}" if key >= 0 else "outside"
+        out.append(f"  {name:8} n {len(mine):3d} (beside {beside:3d}): {_median(read):7.0f} / "
+                   f"{_quantile(read, 0.95):7.0f} / {max(read):7.0f} ms; start {_median(starts):6.0f}, end "
+                   f"{_median(ends):6.0f}; crops {_median(crops):4.0f}; {_median(per) if per else 0:6.1f} ms a crop; "
+                   f"wait {_median(waits):5.1f} / {max(waits):6.1f}")
+        for reader_name in sorted({r for u in mine for r in (u.get("readers") or {})}):
+            got = [(u.get("readers") or {}).get(reader_name) or {} for u in mine]
+            calls = sum(int(g.get("calls", 0)) for g in got)
+            ms = [float(g.get("ms", 0.0)) for g in got]
+            cpu = sum(int(g.get("cpu", 0)) for g in got)
+            cpu_ms = sum(float(g.get("cpu_ms", 0.0)) for g in got)
+            gpu_ms = sum(float(g.get("gpu_ms", 0.0)) for g in got)
+            gpu = sum(int(g.get("gpu", 0)) for g in got)
+            out.append(f"    {reader_name[:9]:9} calls {calls:5d}, {_median(ms):7.0f} ms a page (p95 "
+                       f"{_quantile(ms, 0.95):.0f}), longest {max(float(g.get('max_ms', 0.0)) for g in got):6.0f} ms; "
+                       f"gpu {gpu} ({gpu_ms / max(1, gpu):.0f} ms a call), cpu {cpu} ({cpu_ms / max(1, cpu):.0f} ms a "
+                       f"call; {sum(int(g.get('cpu_translating', 0)) for g in got)} for a request under way); "
+                       f"no graph {sum(int(g.get('plain', 0)) for g in got)}")
+    gaps = [(p, g) for p in pages if (g := _spread_gap(p)) is not None]
+    if gaps:
+        idle = [g["idle_ms"] for _p, g in gaps]
+        gap = [g["gap_ms"] for _p, g in gaps]
+        out.append(f"  spreads {len(gaps)}: last request of the unit before -> first of the last unit: from its start "
+                   f"{_median(gap):.0f} ms med, p95 {_quantile(gap, 0.95):.0f}, most {max(gap):.0f}; from its end "
+                   f"(the translator idle) {_median(idle):.0f} ms med, p95 {_quantile(idle, 0.95):.0f}, most "
+                   f"{max(idle):.0f}")
+        out.append(f"  slowest: {'n':>4} {'idle ms':>8} {'first ms':>8} {'read ms':>8} {'crops':>5} {'cpu':>4} "
+                   f"{'cpu req':>7} {'ms':>7}")
+        for p, g in sorted(gaps, key=lambda pg: -pg[1]["idle_ms"])[:slowest]:
+            last = max((u for u in p["read_units"] if int(u.get("unit", -1)) >= 0), key=lambda u: int(u["unit"]))
+            readers = (last.get("readers") or {}).values()
+            out.append(f"  {'':8} {int(p.get('n') or 0):4d} {g['idle_ms']:8.0f} {g['first_ms']:8.0f} "
+                       f"{float(last.get('read_ms') or 0):8.0f} {int(last.get('crops') or 0):5d} "
+                       f"{sum(int(r.get('cpu', 0)) for r in readers):4d} "
+                       f"{sum(int(r.get('cpu_translating', 0)) for r in readers):7d} {float(p.get('ms') or 0):7.0f}")
+    return out
+
+
+WATCH_KEYS = ("over.compare_ms", "over.looks", "over.frames", "over.compares", "over.same")
+
+
+def watch_lines(lines: Sequence[dict[str, Any]]) -> list[str]:
+    """The see-through window's watch over the session (the ``ui`` lines' counts since the line before: the first
+    line's left out, its start unknown): the ms its looks spent comparing the viewer's frame with the pages' signs
+    per second of the session (its duty on one thread), its looks and the viewer's new frames a second, and the ms a
+    compare (where the window counts its compares: ``over.compares``; else a frame), the frames found unchanged and not
+    compared (``over.same``). Empty without two ``ui`` lines."""
+    uis = sorted((ln for ln in lines if ln.get("type") == "ui" and isinstance(ln.get("t"), (int, float))),
+                 key=lambda ln: float(ln["t"]))
+    if len(uis) < 2:
+        return []
+    span_s = (float(uis[-1]["t"]) - float(uis[0]["t"])) / 1000
+    if span_s <= 0:
+        return []
+    sums: Counter[str] = Counter()
+    for u in uis[1:]:
+        counts = u.get("counts") or {}
+        for k in WATCH_KEYS:
+            v = counts.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                sums[k] += float(v)
+    compares = sums["over.compares"] or sums["over.frames"]
+    return [f"the see-through watch over {span_s:.0f} s ({len(uis) - 1} ui lines): compare "
+            f"{sums['over.compare_ms'] / span_s:.1f} ms a second ({sums['over.compare_ms'] / span_s / 10:.1f} % of a "
+            f"thread), looks {sums['over.looks'] / span_s:.1f} a second, frames {sums['over.frames'] / span_s:.1f} a "
+            f"second, {sums['over.compare_ms'] / max(1.0, compares):.1f} ms a compare "
+            f"({'compares' if sums['over.compares'] else 'a frame'}), unchanged frames not compared "
+            f"{int(sums['over.same'])}"]
 
 
 def risk_lines(lines: Sequence[dict[str, Any]]) -> list[str]:

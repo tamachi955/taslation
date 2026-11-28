@@ -1490,9 +1490,13 @@ class ReadBeside:
     with its own samples added (`_HeldSizes`): those join the book's in its turn (`take`), so that the drafts of the unit
     being translated letter at the sizes they had. What it would have told (the progress, the regions read) is held and
     told in its turn, in its order; an error of it is raised there. The OCR has one user at a time: the worker reads no
-    region while it translates. The thread runs at a lower priority (the window, the drafts and the model's requests
-    first); torch keeps its threads, for their number could change a reading. The page's cancel ends it, and so does
-    `drop` (the unit before it stopped or failed)."""
+    region while it translates. The thread runs at normal priority, as the page's worker does (`READ_BESIDE_PRIORITY`):
+    below normal, behind the page's other work at normal (the drafts' lettering, the window's look, the viewer's own
+    process), its reading on the processor crawled - CPT, on the processor always, 5.6 s a call against 0.96 s at
+    normal while the translator answered, 11.3 s against 2.2 s with the drafts and the window's look beside (measured
+    2026-11-28, a made-up unit of 44 crops; torch's own threads, at normal priority, wait at each step for the thread
+    that called them); torch keeps its threads, for their number could change a reading. The page's cancel ends it, and
+    so does `drop` (the unit before it stopped or failed)."""
 
     def __init__(self, pipeline: "Pipeline", rgb: np.ndarray, index: int, unit: fp.PageUnit,
                  regions: list[TextRegion], fill: PageFill | None, cancel: threading.Event):
@@ -1511,15 +1515,17 @@ class ReadBeside:
         return self
 
     def _run(self) -> None:
-        try:
-            from .threads import lower_priority
+        if READ_BESIDE_PRIORITY is not None:
+            try:
+                from .threads import set_priority
 
-            lower_priority()
-        except Exception:  # noqa: BLE001 - only a matter of speed
-            pass
+                set_priority(READ_BESIDE_PRIORITY)
+            except Exception:  # noqa: BLE001 - only a matter of speed
+                pass
         _SIZES.held = self.sizes
         try:
-            with analysis.adopt(self.analysed), budget.adopt(self.spending):
+            with analysis.adopt(self.analysed), budget.adopt(self.spending), \
+                    analysis.unit_span(self.index, beside=True):
                 self.pipeline._ocr_regions(self.rgb, self.regions, lambda m: self.held.append(("report", m)),
                                            self.fill, _Either(self.cancel, self.stop),  # type: ignore[arg-type]
                                            unit_box=self.unit.box)
@@ -2447,14 +2453,17 @@ class Pipeline:
                     stream: LineStream | None = None
                     if beside is not None and beside.index == n:
                         taken, beside = beside, None
-                        taken.take(report, fill)  # (read beside: what it told told now, in its order)
+                        with analysis.unit_span(n, "wait"):  # (the worker waits for the reading beside to end)
+                            taken.take(report, fill)  # (read beside: what it told told now, in its order)
                     else:
                         # (the window's page job: each line goes to the translator as soon as it is read)
                         stream = self._line_stream(unit, unit_regions, fill, cancel, on_slow, translate,
                                                    reuse if use_cache else None)
                         if stream is not None:
                             streams.append(stream)
-                        self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box, stream=stream)
+                        with analysis.unit_span(n):  # (the analysis log: this unit's reading, its readers' calls)
+                            self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box,
+                                              stream=stream)
                     self._take_corrections(unit, unit_regions)
                     self._order_read(rgb, unit.box, unit_regions)
                     self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (each translation's room: its part)
@@ -2468,8 +2477,10 @@ class Pipeline:
                             beside = self._read_beside(rgb, plans, n, fill, cancel)
                         try:
                             try:
-                                err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
-                                                              reuse=reuse if use_cache else None, stream=stream)
+                                with analysis.unit_span(n, "translate"):
+                                    err = self._translate_regions(unit_regions, report, fill, cancel, on_slow,
+                                                                  unit.box, reuse=reuse if use_cache else None,
+                                                                  stream=stream)
                             finally:
                                 if stream is not None:
                                     streams.remove(stream)
@@ -6090,6 +6101,8 @@ def _measure_key(region: TextRegion, held: list[Any]) -> tuple[Any, ...]:
 DRAFTS_BESIDE = True  # the drafts of a page are lettered on a thread of their own while the model writes (`PageFill`)
 DRAFT_SIZES_KEPT = True  # the sizes the drafts of a page measure are kept for its next drafts (`Pipeline.cap_sizes`)
 SPREAD_READ = True  # a spread's next page unit is read while the one before it is translated (`ReadBeside`)
+READ_BESIDE_PRIORITY: int | None = None  # its thread's Windows priority (`threads.set_priority`); None: normal, as any
+# new thread's (a tool's switch: `threads.BELOW_NORMAL` is how it ran before 2026-11-28)
 # each region of a page unit is judged (and settled by the other readers) as soon as it is read, the page's usual size
 # taken only when a gate needs it (`_UsualLater`); False: all its regions read for that size first (the same fates)
 JUDGE_AT_READ = True

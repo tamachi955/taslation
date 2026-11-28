@@ -481,7 +481,7 @@ class PlamoTranslator(OllamaTranslator):
 
         def send() -> tuple[dict[str, Any], str]:
             sent[0] = True
-            with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
+            with ocr_place.translating():  # (the OCR without graphs on the CPU while the model computes, to its end)
                 if cancel is not None or on_slow is not None:
                     data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow,
                                         first=self._no_answer_after(self._expected_s(prompt)),
@@ -733,7 +733,7 @@ class PlamoTranslator(OllamaTranslator):
                    "keep_alive": self.keep_alive}
         t0 = time.monotonic()
         try:
-            with ocr_place.translating():  # (as any request: the OCR reads on the CPU while the server computes)
+            with ocr_place.translating():  # (as any request: the OCR without graphs on the CPU meanwhile)
                 data = self._request_once("/api/generate", payload, WARM_TIMEOUT)
         except BaseException as e:
             self._held_now(None)

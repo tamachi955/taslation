@@ -316,6 +316,45 @@ defects S1 17, S2 12, S3 211, S4 129):
 The sample set has no colour pages and few tones; a helper that changes nothing there may still prevent its defect
 on a real book, which is why the candidates wait for the read-through.
 
+### A spread's next unit, the readers and the watch
+
+A page's line keeps each page unit's reading (``read_units``: read beside the unit before or not; its reading's, its
+wait's and its translation's start, end and ms from the page's start; the crops; each reader's calls, ms and longest
+call on the GPU and on the processor, those on the processor while a request to the translator ran apart; its passes
+with no CUDA graph; the ms it waited for the readers' graphs) and the translator's requests that began in the page's
+time (``requests``). `tools/analysis_summary.py` tables unit 0 against unit 1, the time from the first unit's last
+request to the next unit's first with the slowest spreads, and the see-through watch's duty from the window's counts
+(its compare ms a second, looks and frames a second, frames not compared). `tools/screens_read.py` reads screens kept
+on this computer (a measuring session's frames, or any folder of screen pictures) as the window reads them, at their
+own pixel size, with a translator of its own, and prints the same numbers, nothing else.
+
+Measured on a made-up spread at 1920 x 1032 (21 bubbles a page, 44 crops a unit; GTX 1660 Ti; PLaMo on an Ollama of
+the run's own answering requests of three lines back to back; the unit read on a thread of its own; the computer
+shared with other work then, so the processor's figures vary between runs - CPT 213 to 964 ms a call at normal
+priority):
+
+| A unit's reading | ms | charspot / nar ms a crop | CPT ms a call | a request |
+|---|---|---|---|---|
+| alone (GPU) | 2,137 | 15.1 / 24.5 | 214 | - |
+| beside the requests, on the processor during each (the rule before), normal priority | 20,995 | 182 / 487 | 790 | 296 ms |
+| beside the requests, on the GPU with the graphs, normal priority | 4,961 | 18.6 / 39 | 964 | 366 ms |
+| the same, below normal (as the reading beside ran) | 20,995 | 24.8 / 44 | 5,644 | 313 ms |
+| with the drafts' lettering and the watch's compare at 40 a second too, processor during requests, normal | 64,586 | 577 / 1,576 | 1,815 | - |
+| the same on the GPU with the graphs, normal | 8,879 | 20.6 / 39 | 2,152 | 348 ms |
+| the same on the GPU, below normal | 38,598 | 36 / 48 | 11,337 | 319 ms |
+| on the GPU without graphs (the plain pass), beside the requests, normal | 3,163 | 23.4 / 47 | 270 | 419 ms |
+| the translator alone | - | - | - | 296 ms |
+
+So: a reader whose copy has its CUDA graphs reads on the GPU through a request (`place.graphed`; a copy without them
+- the start short of room - still reads on the processor then), and the reading beside keeps the page's priority
+(`pipeline.READ_BESIDE_PRIORITY`). What it can cause: a request while a unit is read on the GPU beside it takes some
+24 % longer (366 ms against 296), for the seconds the reading lasts. The plain pass on the GPU beside the requests was
+measured fast too (the 687 ms a crop of before was not seen again), but it is the case of a card with too little room
+for the graphs, where the driver moves memory: left as it was. The watch decides a frame whose rows of the client
+area hold the very bytes of the frame compared last, with the same sets, box and DPI, as that frame was decided,
+by a memcmp (`seethrough.same_rows`, `SeeThrough._decide`): a change of any byte there is compared at the frame that
+shows it, as before.
+
 ## Developer measuring
 
 A switch on top of the analysis log, for the owner's own measurements on their own computer, and the one exception to

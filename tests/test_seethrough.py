@@ -763,3 +763,72 @@ def test_the_window_keeps_the_page_s_distance_and_the_bars_over_the_set_it_chose
     none = window.SeeThrough._facts_of(None, (), (), seen, [chosen], (W, H), 5.0)
     assert none["key"] is None and none["sets"] == (7,) and none["looked"][0][0] == 7
     assert none["looked"][0][1] > st.PAGE_TOL and none["at"] == 5.0
+
+
+def test_a_frame_with_the_very_bytes_of_the_one_compared_last_is_decided_as_it_was_and_any_change_is_compared():
+    """A viewer sends frames while its page stands still (some 40 a second): each full look compared every set's page
+    with the frame. Rows of the client area holding the very bytes of the frame compared last, with the same sets, box
+    and DPI - all `visible` decides from - are decided as that frame was, by a memcmp; a byte changed anywhere in
+    those rows (a column outside the box too), another set put, another box or DPI is compared at that frame."""
+    from taslation.capture import seethrough as window
+
+    over = window.SeeThrough()
+    over._dpi = 96
+    calls = []
+    real = st.visible
+
+    def counted(sets, frame, *args, **kw):
+        calls.append(frame.shape)
+        return real(sets, frame, *args, **kw)
+
+    frame = art()
+    store = st.SetStore()
+    put(store, 1, frame, [(120, 10, 170, 25)])
+    full = np.zeros((H + 40, W + 20, 4), np.uint8)  # (the window's frame: its border round the client area)
+    full[30:30 + H, 10:10 + W] = bgra(frame)
+    box = (10, 30, 10 + W, 30 + H)
+    import unittest.mock as mock
+
+    with mock.patch.object(st, "visible", counted):
+        first = over._decide(store.sets, full, box)
+        assert first[0] is store.sets[0] and first[1] == (0,) and len(calls) == 1 and calls[0] == (H, W, 4)
+        again = full.copy()  # (a new frame of the same bytes: the capture's own copy)
+        assert over._decide(store.sets, again, box) == first and len(calls) == 1
+        assert over._decide(list(store.sets), again, box) == first and len(calls) == 1  # (the same sets, a new list)
+        assert over.counts["same"] == 2 and over.counts["compares"] == 1
+        changed = again.copy()
+        changed[30 + H - 1, 10 + W - 1, 0] ^= 1  # (one byte, the client area's last)
+        assert over._decide(store.sets, changed, box)[0] is store.sets[0] and len(calls) == 2
+        beside = changed.copy()
+        beside[30 + 5, 2, 1] ^= 1  # (a byte in those rows beside the box: compared all the same)
+        over._decide(store.sets, beside, box)
+        assert len(calls) == 3
+        beside = beside.copy()
+        beside[30:30 + H, 10:10 + W] = bgra(art(seed=2))  # (another page)
+        assert over._decide(store.sets, beside, box)[0] is None and len(calls) == 4
+        put(store, 2, art(seed=2), [(220, 200, 280, 240)])  # (a set put: its page is the one on show)
+        assert over._decide(store.sets, beside.copy(), box)[0] is store.sets[0] and len(calls) == 5
+        store.put(2, (W, H), store.sets[0].patches, sign=store.sets[0].sign)  # (put again: a new set, the same page)
+        assert over._decide(store.sets, beside.copy(), box)[0].serial == 3 and len(calls) == 6
+        over._dpi = 144  # (another DPI: the bars' reach and the margin scale with it)
+        over._decide(store.sets, beside.copy(), box)
+        assert len(calls) == 7
+        smaller = (10, 31, 10 + W, 30 + H)  # (another box)
+        over._decide(store.sets, beside.copy(), smaller)
+        assert len(calls) == 8 and over.counts["compares"] == 8 and over.counts["same"] == 2
+
+
+def test_same_rows_compares_every_byte_of_the_rows_and_only_those():
+    from taslation.capture import seethrough as window
+
+    a = np.random.default_rng(3).integers(0, 256, (50, 60, 4), dtype=np.uint8)
+    b = a.copy()
+    assert window.same_rows(a, b, 0, 50) and window.same_rows(a, a, 0, 50)
+    b[49, 59, 3] ^= 0x80
+    assert not window.same_rows(a, b, 0, 50) and window.same_rows(a, b, 0, 49)  # (the last row left out)
+    assert window.same_rows(a, b, 10, 10)  # (no rows)
+    assert not window.same_rows(a, a[:, :59].copy(), 0, 50)  # (another shape)
+    assert not window.same_rows(a, a.astype(np.uint16), 0, 50)  # (another type)
+    strided = np.ascontiguousarray(np.concatenate([a, a], axis=1))[:, :60]  # (not C-contiguous: numpy compares)
+    assert not strided.flags.c_contiguous and window.same_rows(a, strided, 0, 50)
+    assert not window.same_rows(b, strided, 0, 50)

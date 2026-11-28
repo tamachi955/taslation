@@ -159,6 +159,38 @@ def test_the_next_unit_is_read_while_the_first_is_translated_and_all_is_as_ever(
     assert _no_reading_beside()
 
 
+def test_the_analysis_log_times_each_unit_s_reading_its_wait_and_its_translation_from_the_page_s_start(
+        settings, sample_page, sample_page2, tmp_path):
+    """The page's line keeps each unit's reading (the second's read beside, on its own thread, while the first is
+    translated), the wait for it and each unit's translation, in ms from the page's start; read in its turn, the
+    second's reading comes after the first's translation and is not beside."""
+    from taslation import analysis
+
+    page = _spread(sample_page, sample_page2)
+    analysis.start(tmp_path / "beside", "on")
+    try:
+        _run(settings, page, "Timed beside", ocr=SlowOcr(seconds=0.03))
+        (line,) = [ln for ln in analysis.records() if ln.get("type") == "page"]
+    finally:
+        analysis.stop()
+    units = {u["unit"]: u for u in line["read_units"]}
+    assert sorted(units) == [0, 1] and not units[0]["beside"] and units[1]["beside"]
+    zero, one = units[0], units[1]
+    assert zero["read_end_ms"] <= zero["translate_start_ms"]
+    assert one["read_start_ms"] < zero["translate_end_ms"]  # (read while the first was translated)
+    assert zero["translate_end_ms"] <= one["wait_start_ms"] <= one["wait_end_ms"] <= one["translate_start_ms"]
+    assert one["read_ms"] > 0 and zero["read_ms"] > 0
+    analysis.start(tmp_path / "in turn", "on")
+    try:
+        _run(settings, page, "Timed in turn", spread_read=False, ocr=SlowOcr(seconds=0.03))
+        (line,) = [ln for ln in analysis.records() if ln.get("type") == "page"]
+    finally:
+        analysis.stop()
+    units = {u["unit"]: u for u in line["read_units"]}
+    assert not units[1]["beside"]
+    assert units[1]["read_start_ms"] >= units[0]["translate_end_ms"] and "wait_start_ms" not in units[1]
+
+
 def test_a_page_of_one_unit_and_a_page_outside_the_window_read_nothing_beside(settings, sample_page, sample_page2):
     one = _run(settings, sample_page, "One")
     assert not any(name == BESIDE for name, _t in one[2].ocr.reads)

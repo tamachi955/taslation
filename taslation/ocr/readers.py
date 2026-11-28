@@ -27,6 +27,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import threading
+import time
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
@@ -237,7 +238,7 @@ class Readers:
         nar, third = written(self._nar.read(image)), []
 
         def cpt() -> str:
-            third.append(written(self._cpt.read(image)))
+            third.append(written(self._cpt_read(image)))
             return third[0]
 
         text, parted = agree(reading.text, nar, cpt)
@@ -250,4 +251,15 @@ class Readers:
             return False
         self._check()
         want = normal(text)
-        return normal(written(self._nar.read(image))) == want and normal(written(self._cpt.read(image))) == want
+        return normal(written(self._nar.read(image))) == want and normal(written(self._cpt_read(image))) == want
+
+    def _cpt_read(self, image: Image.Image) -> str:
+        """CPT's reading of *image* (on the processor, always), its call counted in the analysis log
+        (`analysis.reader`)."""
+        from .. import analysis
+
+        began = time.perf_counter()
+        try:
+            return self._cpt.read(image)
+        finally:
+            analysis.reader("cpt", time.perf_counter() - began, "cpu")

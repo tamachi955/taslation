@@ -55,10 +55,14 @@ System page says so. A check of reads that crawl on the GPU is not kept: on a ca
 computing on it, the readers' reads took 1.5 to 1.9 times the CPU's - below any factor that a wait behind this process's
 own page models does not also reach - so it never took them off such a card.
 
-While a request to the translation model is under way (`translating`, for the translator to wrap its requests in) the
-readers read with their CPU copy, then with the GPU's again: both stay loaded, only the device of a read changes - the
-two processes share the GPU in time slices, and the OCR's many small steps would wait (a crop on the GPU while PLaMo
-generated 687 ms, both readers, on the CPU 127, about 40 on an idle GPU).
+While a request to the translation model is under way (`translating`, for the translator to wrap its requests in) a
+reader whose GPU copy has no CUDA graphs reads with its CPU copy, then with the GPU's again: both stay loaded, only the
+device of a read changes - the two processes share the GPU in time slices, and the plain pass's many small steps would
+wait (a crop on the GPU while PLaMo generated 687 ms, both readers, on the CPU 127, about 40 on an idle GPU). A copy
+with its graphs (`graphed`) stays on the GPU: a replay is one launch. Measured 2026-11-28 (GTX 1660 Ti, PLaMo
+answering requests of three lines back to back, a made-up page unit of 44 crops): on the GPU through the requests
+charspot 18.6 ms a crop and nar 39 against 182 and 487 on the CPU, which the page's other work shares - the unit read
+in 5.0 s against 21.0 -, the requests 366 ms each against 296 with the reads on the CPU and 296 alone.
 
 What the judgement measures (`GpuFacts`, `gather`):
 
@@ -771,18 +775,32 @@ _translating_lock = threading.Lock()
 
 @contextlib.contextmanager
 def translating() -> Iterator[None]:
-    """While a request to the translation model is under way: the readers read on the CPU meanwhile, their GPU copies
-    kept. Windows shares the GPU between Ollama's process and this one in time slices: a crop read on the GPU while
-    PLaMo generated took 687 ms (both readers), on the CPU 127 ms, against about 40 ms on an idle GPU; the translator's
-    speed was about the same either way (measured 124 and 121 tokens/s, 126 alone). The readings are the same."""
+    """While a request to the translation model is under way: a reader whose GPU copy has no CUDA graphs reads on the
+    CPU meanwhile, its copy kept; one with its graphs (`graphed`) stays on the GPU. Windows shares the GPU between
+    Ollama's process and this one in time slices: a crop read by the plain pass, a few hundred kernels launched one by
+    one, waits for the translator's slice at many of them (687 ms on the GPU while PLaMo generated, both readers,
+    against 127 on the CPU and about 40 on an idle GPU; the translator about as fast either way, 124 and 121 tokens/s,
+    126 alone), where a graph's replay is one launch. The readings are the same on either device."""
     global _translating
+    from .. import analysis
+
     with _translating_lock:
         _translating += 1
+    began = time.perf_counter()
     try:
         yield
     finally:
         with _translating_lock:
             _translating -= 1
+        analysis.requested(began, time.perf_counter())  # (the analysis log: when the translator computed)
+
+
+def graphed(networks: tuple[Any, ...]) -> bool:
+    """Whether a reader's GPU copy *networks* holds its CUDA graphs (`taslation.ocr.graphs.Graphs`, any kept: none
+    where the plan left them off or a replay failed and dropped them)."""
+    from . import graphs
+
+    return any(isinstance(m, graphs.Graphs) and len(m) > 0 for m in networks)
 
 
 def out_of_memory(error: BaseException) -> bool:
@@ -862,20 +880,31 @@ class DeviceModels:
 
     def run(self, read: Callable[[str, tuple[Any, ...]], T]) -> T:
         """*read*(device, networks) with the copy in force - on the CPU while the translation model computes
-        (`translating`) - and on the CPU from a failure on the GPU on (see the class)."""
+        (`translating`) unless the copy has its CUDA graphs (`graphed`) - and on the CPU from a failure on the GPU on
+        (see the class)."""
+        from .. import analysis
+
         with self._lock:
-            held = self._gpu if not _translating else None
+            copy = self._gpu
+            held = copy if copy is not None and (not _translating or graphed(copy[1])) else None
+            waiting = copy is not None and held is None  # (its GPU copy waits for the translator)
             if held is not None:
                 self._reading += 1
+        began = time.perf_counter()
         if held is None:
-            return read("cpu", self._cpu_models)
+            try:
+                return read("cpu", self._cpu_models)
+            finally:
+                analysis.reader(self.name, time.perf_counter() - began, "cpu", waiting)
         why = ""
+        device = held[0]
         try:
             return read(*held)
         except RuntimeError as e:
             why = type(e).__name__
         finally:
             held = None
+            analysis.reader(self.name, time.perf_counter() - began, device)
             with self._lock:
                 self._reading -= 1
                 late = self._give_back and not self._reading
@@ -884,7 +913,11 @@ class DeviceModels:
             if late:
                 give_back()
         self._failed(why)
-        return read("cpu", self._cpu_models)
+        began = time.perf_counter()
+        try:
+            return read("cpu", self._cpu_models)
+        finally:
+            analysis.reader(self.name, time.perf_counter() - began, "cpu")
 
     def _failed(self, why: str) -> None:
         """The GPU failed (*why*, the type name): its copy dropped, the reads on the CPU for the rest of the session,
